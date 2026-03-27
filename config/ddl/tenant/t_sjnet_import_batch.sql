@@ -1,0 +1,27 @@
+CREATE TABLE IF NOT EXISTS t_sjnet_import_batch (
+  id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'SJNET取込バッチID',
+  file_name           VARCHAR(255)    NOT NULL COMMENT 'ファイル名',
+  source_encoding     VARCHAR(30)     NULL COMMENT '元文字コード(UTF-8/CP932等)',
+  import_status       VARCHAR(20)     NOT NULL DEFAULT 'running' COMMENT '取込状態(running/success/partial/failed)',
+  total_row_count     INT             NOT NULL DEFAULT 0 COMMENT '総行数',
+  valid_row_count     INT             NOT NULL DEFAULT 0 COMMENT '有効行数',
+  duplicate_skip_count INT            NOT NULL DEFAULT 0 COMMENT '重複スキップ数',
+  insert_count        INT             NOT NULL DEFAULT 0 COMMENT '新規件数',
+  update_count        INT             NOT NULL DEFAULT 0 COMMENT '更新件数',
+  error_count         INT             NOT NULL DEFAULT 0 COMMENT 'エラー件数',
+  started_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '開始日時',
+  finished_at         DATETIME        NULL COMMENT '終了日時',
+  executed_by         BIGINT UNSIGNED NOT NULL COMMENT '実行者(common.users.id)',
+  created_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+
+  PRIMARY KEY (id),
+  KEY idx_t_sjnet_import_batch_01 (import_status),
+  KEY idx_t_sjnet_import_batch_02 (started_at),
+  CONSTRAINT chk_t_sjnet_import_batch_01 CHECK (import_status IN ('running', 'success', 'partial', 'failed')),
+  CONSTRAINT chk_t_sjnet_import_batch_02 CHECK (total_row_count >= 0),
+  CONSTRAINT chk_t_sjnet_import_batch_03 CHECK (valid_row_count >= 0),
+  CONSTRAINT chk_t_sjnet_import_batch_04 CHECK (duplicate_skip_count >= 0),
+  CONSTRAINT chk_t_sjnet_import_batch_05 CHECK (insert_count >= 0),
+  CONSTRAINT chk_t_sjnet_import_batch_06 CHECK (update_count >= 0),
+  CONSTRAINT chk_t_sjnet_import_batch_07 CHECK (error_count >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='SJNET取込バッチ';

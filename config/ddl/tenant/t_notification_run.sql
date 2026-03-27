@@ -1,0 +1,25 @@
+CREATE TABLE IF NOT EXISTS t_notification_run (
+  id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '通知実行ID',
+  notification_type   VARCHAR(20)     NOT NULL COMMENT '通知種別(renewal/accident)',
+  run_date            DATE            NOT NULL COMMENT '実行対象日',
+  started_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '開始日時',
+  finished_at         DATETIME        NULL COMMENT '終了日時',
+  result              VARCHAR(20)     NOT NULL DEFAULT 'running' COMMENT '結果(running/success/partial/failed)',
+  processed_count     INT             NOT NULL DEFAULT 0 COMMENT '処理件数',
+  success_count       INT             NOT NULL DEFAULT 0 COMMENT '成功件数',
+  skip_count          INT             NOT NULL DEFAULT 0 COMMENT 'スキップ件数',
+  fail_count          INT             NOT NULL DEFAULT 0 COMMENT '失敗件数',
+  error_message       VARCHAR(1000)   NULL COMMENT 'エラーメッセージ',
+  created_by          BIGINT UNSIGNED NOT NULL COMMENT '実行者(common.users.id)',
+  created_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
+
+  PRIMARY KEY (id),
+  KEY idx_t_notification_run_01 (notification_type, run_date),
+  KEY idx_t_notification_run_02 (result),
+  CONSTRAINT chk_t_notification_run_01 CHECK (notification_type IN ('renewal', 'accident')),
+  CONSTRAINT chk_t_notification_run_02 CHECK (result IN ('running', 'success', 'partial', 'failed')),
+  CONSTRAINT chk_t_notification_run_03 CHECK (processed_count >= 0),
+  CONSTRAINT chk_t_notification_run_04 CHECK (success_count >= 0),
+  CONSTRAINT chk_t_notification_run_05 CHECK (skip_count >= 0),
+  CONSTRAINT chk_t_notification_run_06 CHECK (fail_count >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='通知実行履歴';
