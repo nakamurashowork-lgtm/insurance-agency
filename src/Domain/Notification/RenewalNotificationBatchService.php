@@ -14,7 +14,7 @@ final class RenewalNotificationBatchService
     /**
      * @return array<string, mixed>
      */
-    public function run(string $runDate, int $executedBy, bool $routeEnabled): array
+    public function run(string $runDate, int $executedBy, bool $routeEnabled, ?int $retryFailedRunId = null): array
     {
         $runId = $this->repository->createRun($runDate, $executedBy);
 
@@ -25,6 +25,64 @@ final class RenewalNotificationBatchService
         $messages = [];
 
         try {
+            if ($retryFailedRunId !== null && $retryFailedRunId > 0) {
+                $failedTargets = $this->repository->findFailedDeliveriesByRunId($retryFailedRunId);
+                foreach ($failedTargets as $target) {
+                    $processedCount++;
+                    $deliveryId = (int) ($target['delivery_id'] ?? 0);
+                    if ($deliveryId <= 0) {
+                        $failCount++;
+                        $messages[] = 'INVALID_DELIVERY_ID';
+                        continue;
+                    }
+
+                    try {
+                        if (!$routeEnabled) {
+                            $this->repository->updateDeliveryForRetry(
+                                $deliveryId,
+                                $runId,
+                                'skipped',
+                                '通知先未設定または無効のためスキップ',
+                                false
+                            );
+                            $skipCount++;
+                            continue;
+                        }
+
+                        $this->repository->updateDeliveryForRetry($deliveryId, $runId, 'success', null, true);
+                        $successCount++;
+                    } catch (Throwable $e) {
+                        $this->repository->updateDeliveryForRetry($deliveryId, $runId, 'failed', $e->getMessage(), false);
+                        $failCount++;
+                        $messages[] = $e->getMessage();
+                    }
+                }
+
+                $result = $this->resolveResult($processedCount, $successCount, $skipCount, $failCount);
+                $errorMessage = $failCount > 0 ? implode(' | ', array_slice($messages, 0, 3)) : null;
+                $this->repository->finalizeRun(
+                    $runId,
+                    $result,
+                    $processedCount,
+                    $successCount,
+                    $skipCount,
+                    $failCount,
+                    $errorMessage
+                );
+
+                return [
+                    'notification_run_id' => $runId,
+                    'retry_failed_run_id' => $retryFailedRunId,
+                    'run_date' => $runDate,
+                    'result' => $result,
+                    'processed_count' => $processedCount,
+                    'success_count' => $successCount,
+                    'skip_count' => $skipCount,
+                    'fail_count' => $failCount,
+                    'error_message' => $errorMessage,
+                ];
+            }
+
             $phases = $this->repository->findEnabledPhases();
             foreach ($phases as $phase) {
                 $phaseId = (int) ($phase['id'] ?? 0);

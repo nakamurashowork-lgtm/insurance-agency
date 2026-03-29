@@ -5,7 +5,7 @@ namespace App\Domain\Notification;
 
 use PDO;
 
-final class RenewalNotificationBatchRepository
+final class AccidentNotificationBatchRepository
 {
     public function __construct(private PDO $pdo)
     {
@@ -20,7 +20,7 @@ final class RenewalNotificationBatchRepository
                 result,
                 created_by
              ) VALUES (
-                "renewal",
+                "accident",
                 :run_date,
                 "running",
                 :created_by
@@ -37,41 +37,30 @@ final class RenewalNotificationBatchRepository
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function findEnabledPhases(): array
+    public function findEnabledRulesWithWeekdays(): array
     {
         $stmt = $this->pdo->query(
-            'SELECT id, phase_code, phase_name, from_days_before, to_days_before
-             FROM m_renewal_reminder_phase
-             WHERE is_enabled = 1
-               AND is_deleted = 0
-             ORDER BY display_order ASC, id ASC'
+            'SELECT r.id AS rule_id,
+                    r.accident_case_id,
+                    r.interval_weeks,
+                    r.base_date,
+                    r.start_date,
+                    r.end_date,
+                    r.last_notified_on,
+                    ac.status AS accident_status,
+                    GROUP_CONCAT(w.weekday_cd ORDER BY w.weekday_cd SEPARATOR ",") AS weekdays_csv
+             FROM t_accident_reminder_rule r
+             INNER JOIN t_accident_case ac
+                     ON ac.id = r.accident_case_id
+                    AND ac.is_deleted = 0
+             LEFT JOIN t_accident_reminder_rule_weekday w
+                    ON w.accident_reminder_rule_id = r.id
+             WHERE r.is_enabled = 1
+               AND r.is_deleted = 0
+               AND ac.status IN ("accepted", "linked", "in_progress", "waiting_docs")
+             GROUP BY r.id, r.accident_case_id, r.interval_weeks, r.base_date, r.start_date, r.end_date, r.last_notified_on, ac.status
+             ORDER BY r.id ASC'
         );
-        $rows = $stmt->fetchAll();
-
-        return is_array($rows) ? $rows : [];
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    public function findRenewalTargetsByPhase(string $runDate, int $fromDaysBefore, int $toDaysBefore): array
-    {
-        $stmt = $this->pdo->prepare(
-            'SELECT rc.id AS renewal_case_id,
-                    rc.contract_id,
-                    rc.maturity_date,
-                    rc.case_status,
-                    DATEDIFF(rc.maturity_date, :run_date) AS days_before
-             FROM t_renewal_case rc
-             WHERE rc.is_deleted = 0
-               AND rc.case_status IN ("open", "contacted", "quoted", "waiting")
-               AND DATEDIFF(rc.maturity_date, :run_date) BETWEEN :to_days_before AND :from_days_before
-             ORDER BY rc.maturity_date ASC, rc.id ASC'
-        );
-        $stmt->bindValue(':run_date', $runDate);
-        $stmt->bindValue(':to_days_before', $toDaysBefore, PDO::PARAM_INT);
-        $stmt->bindValue(':from_days_before', $fromDaysBefore, PDO::PARAM_INT);
-        $stmt->execute();
         $rows = $stmt->fetchAll();
 
         return is_array($rows) ? $rows : [];
@@ -84,15 +73,15 @@ final class RenewalNotificationBatchRepository
     {
         $stmt = $this->pdo->prepare(
             'SELECT d.id AS delivery_id,
-                    d.renewal_case_id,
-                    d.renewal_reminder_phase_id,
+                    d.accident_case_id,
+                    d.accident_reminder_rule_id,
                     d.scheduled_date
              FROM t_notification_delivery d
              INNER JOIN t_notification_run r
                      ON r.id = d.notification_run_id
              WHERE r.id = :run_id
-               AND r.notification_type = "renewal"
-               AND d.notification_type = "renewal"
+               AND r.notification_type = "accident"
+               AND d.notification_type = "accident"
                AND d.delivery_status = "failed"
              ORDER BY d.id ASC'
         );
@@ -102,10 +91,7 @@ final class RenewalNotificationBatchRepository
         return is_array($rows) ? $rows : [];
     }
 
-    /**
-     * Returns true when inserted, false when idempotent duplicate.
-     */
-    public function insertDeliverySuccess(int $runId, int $renewalCaseId, int $phaseId, string $runDate): bool
+    public function insertDeliverySuccess(int $runId, int $accidentCaseId, int $ruleId, string $runDate): bool
     {
         $stmt = $this->pdo->prepare(
             'INSERT IGNORE INTO t_notification_delivery (
@@ -121,11 +107,11 @@ final class RenewalNotificationBatchRepository
                 error_message
              ) VALUES (
                 :run_id,
-                "renewal",
-                :renewal_case_id,
+                "accident",
                 NULL,
-                :phase_id,
+                :accident_case_id,
                 NULL,
+                :rule_id,
                 :scheduled_date,
                 NOW(),
                 "success",
@@ -134,18 +120,15 @@ final class RenewalNotificationBatchRepository
         );
         $stmt->execute([
             'run_id' => $runId,
-            'renewal_case_id' => $renewalCaseId,
-            'phase_id' => $phaseId,
+            'accident_case_id' => $accidentCaseId,
+            'rule_id' => $ruleId,
             'scheduled_date' => $runDate,
         ]);
 
         return $stmt->rowCount() === 1;
     }
 
-    /**
-     * Returns true when inserted, false when idempotent duplicate.
-     */
-    public function insertDeliverySkipped(int $runId, int $renewalCaseId, int $phaseId, string $runDate, string $message): bool
+    public function insertDeliverySkipped(int $runId, int $accidentCaseId, int $ruleId, string $runDate, string $message): bool
     {
         $stmt = $this->pdo->prepare(
             'INSERT IGNORE INTO t_notification_delivery (
@@ -161,11 +144,11 @@ final class RenewalNotificationBatchRepository
                 error_message
              ) VALUES (
                 :run_id,
-                "renewal",
-                :renewal_case_id,
+                "accident",
                 NULL,
-                :phase_id,
+                :accident_case_id,
                 NULL,
+                :rule_id,
                 :scheduled_date,
                 NULL,
                 "skipped",
@@ -174,8 +157,8 @@ final class RenewalNotificationBatchRepository
         );
         $stmt->execute([
             'run_id' => $runId,
-            'renewal_case_id' => $renewalCaseId,
-            'phase_id' => $phaseId,
+            'accident_case_id' => $accidentCaseId,
+            'rule_id' => $ruleId,
             'scheduled_date' => $runDate,
             'error_message' => mb_substr($message, 0, 1000),
         ]);
@@ -183,10 +166,7 @@ final class RenewalNotificationBatchRepository
         return $stmt->rowCount() === 1;
     }
 
-    /**
-     * Returns true when inserted, false when idempotent duplicate.
-     */
-    public function insertDeliveryFailed(int $runId, int $renewalCaseId, int $phaseId, string $runDate, string $message): bool
+    public function insertDeliveryFailed(int $runId, int $accidentCaseId, int $ruleId, string $runDate, string $message): bool
     {
         $stmt = $this->pdo->prepare(
             'INSERT IGNORE INTO t_notification_delivery (
@@ -202,11 +182,11 @@ final class RenewalNotificationBatchRepository
                 error_message
              ) VALUES (
                 :run_id,
-                "renewal",
-                :renewal_case_id,
+                "accident",
                 NULL,
-                :phase_id,
+                :accident_case_id,
                 NULL,
+                :rule_id,
                 :scheduled_date,
                 NULL,
                 "failed",
@@ -215,8 +195,8 @@ final class RenewalNotificationBatchRepository
         );
         $stmt->execute([
             'run_id' => $runId,
-            'renewal_case_id' => $renewalCaseId,
-            'phase_id' => $phaseId,
+            'accident_case_id' => $accidentCaseId,
+            'rule_id' => $ruleId,
             'scheduled_date' => $runDate,
             'error_message' => mb_substr($message, 0, 1000),
         ]);
@@ -245,6 +225,19 @@ final class RenewalNotificationBatchRepository
             'delivery_status' => $deliveryStatus,
             'notified_at' => $markNotified ? date('Y-m-d H:i:s') : null,
             'error_message' => $errorMessage !== null ? mb_substr($errorMessage, 0, 1000) : null,
+        ]);
+    }
+
+    public function updateRuleLastNotifiedOn(int $ruleId, string $runDate): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE t_accident_reminder_rule
+             SET last_notified_on = :run_date
+             WHERE id = :id'
+        );
+        $stmt->execute([
+            'id' => $ruleId,
+            'run_date' => $runDate,
         ]);
     }
 

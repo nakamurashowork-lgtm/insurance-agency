@@ -6,6 +6,7 @@
     "suites/full/phase3_acceptance_check.php",
     "suites/full/phase4a_acceptance_check.php",
     "suites/full/phase4b_acceptance_check.php",
-    "suites/full/phase5_acceptance_check.php"
+    "suites/full/phase5_acceptance_check.php",
+    "suites/full/phase6_notification_acceptance_check.php"
   ]
 }

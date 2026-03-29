@@ -1749,3 +1749,59 @@ Phase 5 判定結論:
 
 - renewal/accident の 2 系統を同一運用で回せるランナーへ拡張
 - 失敗再実行フローと運用手順を docs に固定
+
+---
+
+## 23. Phase 6 拡張（accident追加 + retry方針） 2026-03-29
+
+実装内容（今回追加）:
+
+- 追加
+  - `src/Domain/Notification/AccidentNotificationBatchRepository.php`
+    - `t_notification_run`（accident）作成/完了更新
+    - `t_accident_reminder_rule` + `t_accident_reminder_rule_weekday` 対象抽出
+    - `t_notification_delivery` success/skipped/failed 記録
+    - failed delivery 取得 / retry 更新
+  - `src/Domain/Notification/AccidentNotificationBatchService.php`
+    - accident 通知実行本体
+    - 実行日・曜日・interval週・期間・last_notified_on による対象判定
+    - retry 実行（`retry_failed_run_id` 指定時）
+- 更新
+  - `src/Domain/Notification/RenewalNotificationBatchRepository.php`
+    - failed delivery 取得
+    - retry 更新
+  - `src/Domain/Notification/RenewalNotificationBatchService.php`
+    - `retry_failed_run_id` 指定時の再実行分岐
+  - `tools/batch/run_renewal_notification.php`
+    - `--type=renewal|accident|all`
+    - `--retry-failed-run-id=<runId>`
+    - summary 出力へ `notification_type` を統一追加
+  - `tools/batch/README.md`
+    - type/retry 実行例を追記
+  - `tools/acceptance/acceptance-suites.json`
+    - full suite に Phase 6 チェックを追加
+  - `tools/acceptance/suites/full/phase6_notification_acceptance_check.php`
+    - all 実行と renewal/accident retry 実行の受入チェック
+
+実動確認（実測）:
+
+- 単体スモーク
+  - `--type=all` 実行で renewal + accident の2結果が返る
+  - `--type=renewal --retry-failed-run-id=<runId>` 実行で retry 参照IDが保持される
+  - `--type=accident --retry-failed-run-id=<runId>` 実行で retry 参照IDが保持される
+- 受入スクリプト
+  - `tools/acceptance/suites/full/phase6_notification_acceptance_check.php` は `all_passed=true`
+- full suite 統合
+  - `php tools/acceptance/run-suite.php --suite=full` は `all_passed=true`
+
+確認できたこと:
+
+- renewal/accident を同一ランナーで運用できる
+- retry 指定時に失敗再処理フローへ切り替わる
+- retry 実行結果が `retry_failed_run_id` でトレースできる
+- full suite に Phase 6 通知系チェックを常設できた
+
+未実装（Phase 6 継続項目）:
+
+- backoff 間隔や最大再試行回数のポリシー固定
+- cron 運用時の通知失敗アラート設計

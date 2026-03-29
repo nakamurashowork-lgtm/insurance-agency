@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 use App\AppConfig;
+use App\Domain\Notification\AccidentNotificationBatchRepository;
+use App\Domain\Notification\AccidentNotificationBatchService;
 use App\Domain\Notification\RenewalNotificationBatchRepository;
 use App\Domain\Notification\RenewalNotificationBatchService;
 use App\EnvLoader;
@@ -30,6 +32,8 @@ array_shift($args);
 $runDate = date('Y-m-d');
 $tenantCodeFilter = null;
 $executedBy = 1;
+$notificationType = 'renewal';
+$retryFailedRunId = null;
 foreach ($args as $arg) {
     if (str_starts_with($arg, '--date=')) {
         $runDate = substr($arg, strlen('--date='));
@@ -37,6 +41,10 @@ foreach ($args as $arg) {
         $tenantCodeFilter = substr($arg, strlen('--tenant='));
     } elseif (str_starts_with($arg, '--executed-by=')) {
         $executedBy = (int) substr($arg, strlen('--executed-by='));
+    } elseif (str_starts_with($arg, '--type=')) {
+        $notificationType = strtolower(trim((string) substr($arg, strlen('--type='))));
+    } elseif (str_starts_with($arg, '--retry-failed-run-id=')) {
+        $retryFailedRunId = (int) substr($arg, strlen('--retry-failed-run-id='));
     }
 }
 
@@ -46,6 +54,14 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $runDate)) {
 }
 if ($executedBy <= 0) {
     fwrite(STDERR, "Invalid --executed-by. expected positive integer\n");
+    exit(2);
+}
+if (!in_array($notificationType, ['renewal', 'accident', 'all'], true)) {
+    fwrite(STDERR, "Invalid --type. expected renewal|accident|all\n");
+    exit(2);
+}
+if ($retryFailedRunId !== null && $retryFailedRunId <= 0) {
+    fwrite(STDERR, "Invalid --retry-failed-run-id. expected positive integer\n");
     exit(2);
 }
 
@@ -62,7 +78,7 @@ $routeCheckStmt = $commonPdo->prepare(
                          ON t.id = r.destination_id
                         AND t.is_deleted = 0
          WHERE r.tenant_code = :tenant_code
-             AND r.notification_type = "renewal"
+             AND r.notification_type = :notification_type
              AND r.is_deleted = 0
          LIMIT 1'
 );
@@ -97,29 +113,43 @@ foreach ($tenants as $tenant) {
     $dbName = (string) ($tenant['db_name'] ?? '');
     try {
         $tenantPdo = $tenantFactory->createByDbName($dbName);
-        $repository = new RenewalNotificationBatchRepository($tenantPdo);
-        $service = new RenewalNotificationBatchService($repository);
+        $types = $notificationType === 'all' ? ['renewal', 'accident'] : [$notificationType];
+        foreach ($types as $type) {
+            $routeCheckStmt->execute([
+                'tenant_code' => $tenantCode,
+                'notification_type' => $type,
+            ]);
+            $route = $routeCheckStmt->fetch();
+            $routeEnabled = is_array($route)
+                && (int) ($route['route_enabled'] ?? 0) === 1
+                && (int) ($route['target_enabled'] ?? 0) === 1
+                && trim((string) ($route['webhook_url'] ?? '')) !== '';
 
-        $routeCheckStmt->execute(['tenant_code' => $tenantCode]);
-        $route = $routeCheckStmt->fetch();
-        $routeEnabled = is_array($route)
-            && (int) ($route['route_enabled'] ?? 0) === 1
-            && (int) ($route['target_enabled'] ?? 0) === 1
-            && trim((string) ($route['webhook_url'] ?? '')) !== '';
+            if ($type === 'renewal') {
+                $repository = new RenewalNotificationBatchRepository($tenantPdo);
+                $service = new RenewalNotificationBatchService($repository);
+                $summary = $service->run($runDate, $executedBy, $routeEnabled, $retryFailedRunId);
+            } else {
+                $repository = new AccidentNotificationBatchRepository($tenantPdo);
+                $service = new AccidentNotificationBatchService($repository);
+                $summary = $service->run($runDate, $executedBy, $routeEnabled, $retryFailedRunId);
+            }
 
-        $summary = $service->run($runDate, $executedBy, $routeEnabled);
-        $summary['tenant_code'] = $tenantCode;
-        $summary['tenant_db_name'] = $dbName;
-        $summary['route_enabled'] = $routeEnabled;
-        $results[] = $summary;
+            $summary['notification_type'] = $type;
+            $summary['tenant_code'] = $tenantCode;
+            $summary['tenant_db_name'] = $dbName;
+            $summary['route_enabled'] = $routeEnabled;
+            $results[] = $summary;
 
-        if (!in_array((string) ($summary['result'] ?? ''), ['success', 'partial'], true)) {
-            $allSuccess = false;
+            if (!in_array((string) ($summary['result'] ?? ''), ['success', 'partial'], true)) {
+                $allSuccess = false;
+            }
         }
     } catch (Throwable $e) {
         $results[] = [
             'tenant_code' => $tenantCode,
             'tenant_db_name' => $dbName,
+            'notification_type' => $notificationType,
             'result' => 'failed',
             'error_message' => $e->getMessage(),
         ];
@@ -129,8 +159,9 @@ foreach ($tenants as $tenant) {
 
 $output = [
     'run_date' => $runDate,
-    'type' => 'renewal',
+    'type' => $notificationType,
     'executed_by' => $executedBy,
+    'retry_failed_run_id' => $retryFailedRunId,
     'tenant_filter' => $tenantCodeFilter,
     'all_success' => $allSuccess,
     'results' => $results,
