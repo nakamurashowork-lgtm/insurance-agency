@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Notification;
 
+use DateTimeImmutable;
 use Throwable;
 
 final class RenewalNotificationBatchService
@@ -14,9 +15,17 @@ final class RenewalNotificationBatchService
     /**
      * @return array<string, mixed>
      */
-    public function run(string $runDate, int $executedBy, bool $routeEnabled, ?int $retryFailedRunId = null): array
+    public function run(
+        string $runDate,
+        int $executedBy,
+        bool $routeEnabled,
+        ?int $retryFailedRunId = null,
+        ?NotificationRetryPolicy $retryPolicy = null
+    ): array
     {
         $runId = $this->repository->createRun($runDate, $executedBy);
+        $retryPolicy ??= new NotificationRetryPolicy();
+        $now = new DateTimeImmutable();
 
         $processedCount = 0;
         $successCount = 0;
@@ -36,6 +45,12 @@ final class RenewalNotificationBatchService
                         continue;
                     }
 
+                    $decision = $retryPolicy->evaluate($target, $now);
+                    if (($decision['allowed'] ?? false) !== true) {
+                        $skipCount++;
+                        continue;
+                    }
+
                     try {
                         if (!$routeEnabled) {
                             $this->repository->updateDeliveryForRetry(
@@ -52,7 +67,16 @@ final class RenewalNotificationBatchService
                         $this->repository->updateDeliveryForRetry($deliveryId, $runId, 'success', null, true);
                         $successCount++;
                     } catch (Throwable $e) {
-                        $this->repository->updateDeliveryForRetry($deliveryId, $runId, 'failed', $e->getMessage(), false);
+                        $this->repository->updateDeliveryForRetry(
+                            $deliveryId,
+                            $runId,
+                            'failed',
+                            $retryPolicy->buildFailureMessage(
+                                $e->getMessage(),
+                                (int) ($decision['next_attempt_count'] ?? 1)
+                            ),
+                            true
+                        );
                         $failCount++;
                         $messages[] = $e->getMessage();
                     }
@@ -80,6 +104,10 @@ final class RenewalNotificationBatchService
                     'skip_count' => $skipCount,
                     'fail_count' => $failCount,
                     'error_message' => $errorMessage,
+                    'retry_policy' => [
+                        'max_attempts' => $retryPolicy->maxAttempts(),
+                        'min_retry_minutes' => $retryPolicy->minRetryMinutes(),
+                    ],
                 ];
             }
 
@@ -128,7 +156,13 @@ final class RenewalNotificationBatchService
                             $skipCount++;
                         }
                     } catch (Throwable $e) {
-                        $this->repository->insertDeliveryFailed($runId, $renewalCaseId, $phaseId, $runDate, $e->getMessage());
+                        $this->repository->insertDeliveryFailed(
+                            $runId,
+                            $renewalCaseId,
+                            $phaseId,
+                            $runDate,
+                            $retryPolicy->buildFailureMessage($e->getMessage(), 1)
+                        );
                         $failCount++;
                         $messages[] = $e->getMessage();
                     }
@@ -156,6 +190,10 @@ final class RenewalNotificationBatchService
                 'skip_count' => $skipCount,
                 'fail_count' => $failCount,
                 'error_message' => $errorMessage,
+                'retry_policy' => [
+                    'max_attempts' => $retryPolicy->maxAttempts(),
+                    'min_retry_minutes' => $retryPolicy->minRetryMinutes(),
+                ],
             ];
         } catch (Throwable $e) {
             $this->repository->finalizeRun(
@@ -177,6 +215,10 @@ final class RenewalNotificationBatchService
                 'skip_count' => $skipCount,
                 'fail_count' => $failCount,
                 'error_message' => $e->getMessage(),
+                'retry_policy' => [
+                    'max_attempts' => $retryPolicy->maxAttempts(),
+                    'min_retry_minutes' => $retryPolicy->minRetryMinutes(),
+                ],
             ];
         }
     }

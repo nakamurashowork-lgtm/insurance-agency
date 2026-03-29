@@ -1805,3 +1805,60 @@ Phase 5 判定結論:
 
 - backoff 間隔や最大再試行回数のポリシー固定
 - cron 運用時の通知失敗アラート設計
+
+---
+
+## 24. Phase 6 継続（retry運用ポリシー固定） 2026-03-29
+
+実装内容（今回追加）:
+
+- 追加
+  - `src/Domain/Notification/NotificationRetryPolicy.php`
+    - retry 最大試行回数
+    - 最短再試行待機分
+    - failed `error_message` からの attempt 番号解釈
+    - backoff / max attempts 判定
+- 更新
+  - `src/Domain/Notification/RenewalNotificationBatchRepository.php`
+    - failed delivery 取得時に `notified_at`, `created_at`, `error_message` を返却
+    - failed 記録時に `notified_at=NOW()` を保持
+  - `src/Domain/Notification/AccidentNotificationBatchRepository.php`
+    - failed delivery 取得時に `notified_at`, `created_at`, `error_message` を返却
+    - failed 記録時に `notified_at=NOW()` を保持
+  - `src/Domain/Notification/RenewalNotificationBatchService.php`
+    - retry 時に backoff / max attempts 判定を適用
+    - failed `error_message` を `[attempt:n] ...` 形式で保持
+    - summary に `retry_policy` を返却
+  - `src/Domain/Notification/AccidentNotificationBatchService.php`
+    - renewal と同等の retry ポリシー適用
+    - summary に `retry_policy` を返却
+  - `tools/batch/run_renewal_notification.php`
+    - `--retry-max-attempts=<n>`
+    - `--retry-minutes=<n>`
+    - summary ルートに retry policy を返却
+  - `tools/batch/README.md`
+    - retry policy 実行例と運用メモ追記
+  - `tools/acceptance/suites/full/phase6_notification_acceptance_check.php`
+    - renewal: retry backoff による skip
+    - accident: max attempts 到達による skip
+    - 制約解除後の retry success
+
+実動確認（実測）:
+
+- `phase6_notification_acceptance_check.php`
+  - renewal で `--retry-minutes=60` 指定時、対象 failed delivery は retryされず `skip_count=1`
+  - renewal で `--retry-minutes=0` に戻すと retry success へ遷移
+  - accident で `--retry-max-attempts=3` 指定時、attempt:3 の failed delivery は retryされず `skip_count=1`
+  - accident で `--retry-max-attempts=4` に緩和すると retry success へ遷移
+
+確認できたこと:
+
+- retry 実行の上限回数を CLI で固定できる
+- retry 間隔の backoff を CLI で固定できる
+- delivery 側に「最後に試行した時刻」と attempt 情報を残して判定できる
+- 制約により retryしなかった対象は既存 failed 状態を維持し、run 集計上は `skip` として扱える
+
+未実装（Phase 6 継続項目）:
+
+- XServer cron 実運用でのジョブ定義固定
+- 通知失敗アラートと運用監視手順の明文化

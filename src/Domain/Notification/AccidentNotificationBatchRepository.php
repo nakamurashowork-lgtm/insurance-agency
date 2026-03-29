@@ -75,7 +75,10 @@ final class AccidentNotificationBatchRepository
             'SELECT d.id AS delivery_id,
                     d.accident_case_id,
                     d.accident_reminder_rule_id,
-                    d.scheduled_date
+                    d.scheduled_date,
+                    d.notified_at,
+                    d.created_at,
+                    d.error_message
              FROM t_notification_delivery d
              INNER JOIN t_notification_run r
                      ON r.id = d.notification_run_id
@@ -188,7 +191,7 @@ final class AccidentNotificationBatchRepository
                 NULL,
                 :rule_id,
                 :scheduled_date,
-                NULL,
+                     NOW(),
                 "failed",
                 :error_message
              )'

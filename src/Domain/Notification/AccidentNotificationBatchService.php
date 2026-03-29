@@ -15,9 +15,17 @@ final class AccidentNotificationBatchService
     /**
      * @return array<string, mixed>
      */
-    public function run(string $runDate, int $executedBy, bool $routeEnabled, ?int $retryFailedRunId = null): array
+    public function run(
+        string $runDate,
+        int $executedBy,
+        bool $routeEnabled,
+        ?int $retryFailedRunId = null,
+        ?NotificationRetryPolicy $retryPolicy = null
+    ): array
     {
         $runId = $this->repository->createRun($runDate, $executedBy);
+        $retryPolicy ??= new NotificationRetryPolicy();
+        $now = new DateTimeImmutable();
         $processedCount = 0;
         $successCount = 0;
         $skipCount = 0;
@@ -36,6 +44,12 @@ final class AccidentNotificationBatchService
                     $ruleId = (int) ($failedRow['accident_reminder_rule_id'] ?? 0);
 
                     if ($deliveryId <= 0 || $accidentCaseId <= 0 || $ruleId <= 0) {
+                        continue;
+                    }
+
+                    $decision = $retryPolicy->evaluate($failedRow, $now);
+                    if (($decision['allowed'] ?? false) !== true) {
+                        $skipCount++;
                         continue;
                     }
 
@@ -66,8 +80,11 @@ final class AccidentNotificationBatchService
                             $deliveryId,
                             $runId,
                             'failed',
-                            $deliveryException->getMessage(),
-                            false
+                            $retryPolicy->buildFailureMessage(
+                                $deliveryException->getMessage(),
+                                (int) ($decision['next_attempt_count'] ?? 1)
+                            ),
+                            true
                         );
                         $failCount++;
                     }
@@ -117,7 +134,7 @@ final class AccidentNotificationBatchService
                             $accidentCaseId,
                             $ruleId,
                             $runDate,
-                            $deliveryException->getMessage()
+                            $retryPolicy->buildFailureMessage($deliveryException->getMessage(), 1)
                         );
                         if ($inserted) {
                             $failCount++;
@@ -157,6 +174,10 @@ final class AccidentNotificationBatchService
             'fail_count' => $failCount,
             'error_message' => $errorMessage,
             'retry_failed_run_id' => $retryFailedRunId,
+            'retry_policy' => [
+                'max_attempts' => $retryPolicy->maxAttempts(),
+                'min_retry_minutes' => $retryPolicy->minRetryMinutes(),
+            ],
         ];
     }
 

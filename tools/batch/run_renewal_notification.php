@@ -4,6 +4,7 @@ declare(strict_types=1);
 use App\AppConfig;
 use App\Domain\Notification\AccidentNotificationBatchRepository;
 use App\Domain\Notification\AccidentNotificationBatchService;
+use App\Domain\Notification\NotificationRetryPolicy;
 use App\Domain\Notification\RenewalNotificationBatchRepository;
 use App\Domain\Notification\RenewalNotificationBatchService;
 use App\EnvLoader;
@@ -34,6 +35,8 @@ $tenantCodeFilter = null;
 $executedBy = 1;
 $notificationType = 'renewal';
 $retryFailedRunId = null;
+$retryMaxAttempts = 3;
+$retryMinutes = 0;
 foreach ($args as $arg) {
     if (str_starts_with($arg, '--date=')) {
         $runDate = substr($arg, strlen('--date='));
@@ -45,6 +48,10 @@ foreach ($args as $arg) {
         $notificationType = strtolower(trim((string) substr($arg, strlen('--type='))));
     } elseif (str_starts_with($arg, '--retry-failed-run-id=')) {
         $retryFailedRunId = (int) substr($arg, strlen('--retry-failed-run-id='));
+    } elseif (str_starts_with($arg, '--retry-max-attempts=')) {
+        $retryMaxAttempts = (int) substr($arg, strlen('--retry-max-attempts='));
+    } elseif (str_starts_with($arg, '--retry-minutes=')) {
+        $retryMinutes = (int) substr($arg, strlen('--retry-minutes='));
     }
 }
 
@@ -62,6 +69,14 @@ if (!in_array($notificationType, ['renewal', 'accident', 'all'], true)) {
 }
 if ($retryFailedRunId !== null && $retryFailedRunId <= 0) {
     fwrite(STDERR, "Invalid --retry-failed-run-id. expected positive integer\n");
+    exit(2);
+}
+if ($retryMaxAttempts <= 0) {
+    fwrite(STDERR, "Invalid --retry-max-attempts. expected positive integer\n");
+    exit(2);
+}
+if ($retryMinutes < 0) {
+    fwrite(STDERR, "Invalid --retry-minutes. expected zero or positive integer\n");
     exit(2);
 }
 
@@ -113,6 +128,7 @@ foreach ($tenants as $tenant) {
     $dbName = (string) ($tenant['db_name'] ?? '');
     try {
         $tenantPdo = $tenantFactory->createByDbName($dbName);
+        $retryPolicy = new NotificationRetryPolicy($retryMaxAttempts, $retryMinutes);
         $types = $notificationType === 'all' ? ['renewal', 'accident'] : [$notificationType];
         foreach ($types as $type) {
             $routeCheckStmt->execute([
@@ -128,11 +144,11 @@ foreach ($tenants as $tenant) {
             if ($type === 'renewal') {
                 $repository = new RenewalNotificationBatchRepository($tenantPdo);
                 $service = new RenewalNotificationBatchService($repository);
-                $summary = $service->run($runDate, $executedBy, $routeEnabled, $retryFailedRunId);
+                $summary = $service->run($runDate, $executedBy, $routeEnabled, $retryFailedRunId, $retryPolicy);
             } else {
                 $repository = new AccidentNotificationBatchRepository($tenantPdo);
                 $service = new AccidentNotificationBatchService($repository);
-                $summary = $service->run($runDate, $executedBy, $routeEnabled, $retryFailedRunId);
+                $summary = $service->run($runDate, $executedBy, $routeEnabled, $retryFailedRunId, $retryPolicy);
             }
 
             $summary['notification_type'] = $type;
@@ -162,6 +178,10 @@ $output = [
     'type' => $notificationType,
     'executed_by' => $executedBy,
     'retry_failed_run_id' => $retryFailedRunId,
+    'retry_policy' => [
+        'max_attempts' => $retryMaxAttempts,
+        'min_retry_minutes' => $retryMinutes,
+    ],
     'tenant_filter' => $tenantCodeFilter,
     'all_success' => $allSuccess,
     'results' => $results,
