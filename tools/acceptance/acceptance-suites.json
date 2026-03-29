@@ -1,0 +1,11 @@
+{
+  "minimal": [
+    "suites/minimal/phase5_acceptance_check.php"
+  ],
+  "full": [
+    "suites/full/phase3_acceptance_check.php",
+    "suites/full/phase4a_acceptance_check.php",
+    "suites/full/phase4b_acceptance_check.php",
+    "suites/full/phase5_acceptance_check.php"
+  ]
+}
