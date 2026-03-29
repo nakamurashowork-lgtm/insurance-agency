@@ -1686,3 +1686,66 @@ Phase 4B 判定結論:
 Phase 5 判定結論:
 
 - Phase 5（最小実装範囲）は受入完了としてクローズする。
+
+---
+
+## 22. Phase 6 着手（通知実行・運用強化） 2026-03-29
+
+参照した仕様/DDL:
+
+- `docs/05_implementation-plan.md`（Phase 6 方針）
+- `config/ddl/tenant/t_notification_run.sql`
+- `config/ddl/tenant/t_notification_delivery.sql`
+- `config/ddl/tenant/t_renewal_case.sql`
+- `config/ddl/tenant/m_renewal_reminder_phase.sql`
+- `config/ddl/common/tenant_notify_targets.sql`
+- `config/ddl/common/tenant_notify_routes.sql`
+
+実装内容（Phase 6 初手）:
+
+- 追加
+  - `src/Domain/Notification/RenewalNotificationBatchRepository.php`
+    - `t_notification_run` 作成/完了更新
+    - `m_renewal_reminder_phase` 取得
+    - `t_renewal_case` 対象抽出（残日数フェーズ一致）
+    - `t_notification_delivery` への success/skipped/failed 記録（INSERT IGNORE）
+  - `src/Domain/Notification/RenewalNotificationBatchService.php`
+    - renewal 通知実行本体
+    - 処理件数集計（processed/success/skip/fail）
+    - 冪等再実行時の skip 集計
+  - `tools/batch/run_renewal_notification.php`
+    - CLI 実行入口
+    - `--date`, `--tenant`, `--executed-by` を受け取り
+    - common DB から通知ルート有効判定を取得し tenant 実行へ反映
+  - `tools/batch/README.md`
+    - 実行方法と運用メモ
+
+実動確認（実測）:
+
+- 実行1:
+  - `php tools/batch/run_renewal_notification.php --date=2026-03-29 --tenant=TE001 --executed-by=1`
+  - 結果: `result=success`, `processed_count=10`, `success_count=10`, `skip_count=0`, `fail_count=0`
+- 実行2（同条件 再実行）:
+  - `php tools/batch/run_renewal_notification.php --date=2026-03-29 --tenant=TE001 --executed-by=1`
+  - 結果: `result=success`, `processed_count=10`, `success_count=0`, `skip_count=10`, `fail_count=0`
+  - 判定: delivery の一意制約を利用した冪等動作を確認
+
+確認できたこと:
+
+- `t_notification_run` に実行単位が記録される
+- `t_notification_delivery` に個別通知実績が記録される
+- 同日同対象の再実行は skip 集計になり、重複配信レコードを増やさない
+- common/tenant の責務分離
+  - ルート判定: common (`tenant_notify_routes`, `tenant_notify_targets`)
+  - 対象抽出/実績記録: tenant (`t_renewal_case`, `m_renewal_reminder_phase`, `t_notification_*`)
+
+未実装（Phase 6 継続項目）:
+
+- `accident` 通知タイプのバッチ実装
+- 配信失敗時の再試行ポリシー（backoff / 最大回数）
+- cron 定期実行と運用監視ログの定義
+
+次ステップ（Phase 6 本体）:
+
+- renewal/accident の 2 系統を同一運用で回せるランナーへ拡張
+- 失敗再実行フローと運用手順を docs に固定
