@@ -110,5 +110,6 @@
 
 ## 11. 参照
 
-* docs/06_common-ui-rules.md
-* docs/03_screen-map.md
+* docs/policies/06_common-ui-rules.md
+* docs/foundations/03_screen-map.md
+

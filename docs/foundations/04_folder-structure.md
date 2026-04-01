@@ -11,7 +11,7 @@
 - 仕様の正: `docs/`
 - スキーマの正: `config/ddl/common/`, `config/ddl/tenant/`
 
-`docs/` 配下では、上位方針（例: 画面マップ）と個別画面仕様に加え、全画面共通の UI 規約（`docs/06_common-ui-rules.md`）を正式仕様として扱う。
+`docs/` 配下では、上位方針（例: 画面マップ）と個別画面仕様に加え、全画面共通の UI 規約（`docs/policies/06_common-ui-rules.md`）を正式仕様として扱う。
 
 上記以外の説明文、コメント、補助SQLは参考情報であり、正本ではない。
 
@@ -25,9 +25,15 @@
 - `tmp/`: 一時生成物専用（コミット対象外を推奨）
 - `tools/`: 開発補助スクリプト（運用導線と分離）
 
+## 3-1. docs 直下の配置ルール
+
+- `docs/` 直下に置ける Markdown は `docs/README.md` と `docs/00_overview.md` のみ
+- 設計書、方針書、計画書、パッチ文書を `docs/` 直下に新規追加しない
+- 文書は内容に応じて `docs/foundations/`, `docs/plans/`, `docs/policies/`, `docs/migrations/`, `docs/reconciliation/`, `docs/patches/`, `docs/screens/` に配置する
+
 ## 4. public 配下の整理ルール
 
-- 通常導線の正式画面は、`docs/03_screen-map.md` と一致させる
+- 通常導線の正式画面は、`docs/foundations/03_screen-map.md` と一致させる
 - 非正規導線、旧画面、暫定機能は通常導線から分離する
 - 旧画面を残す場合は、少なくとも次を満たす
   - main nav に出さない
@@ -68,3 +74,4 @@
 3. 実装コード
 
 実装と仕様が衝突した場合は、実装を正とせず、差分として扱って是正する。
+

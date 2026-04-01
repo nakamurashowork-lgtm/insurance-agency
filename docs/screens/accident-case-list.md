@@ -61,7 +61,7 @@ SCR-ACCIDENT-CASE-LIST
 
 ## 5. 一覧画面共通UIルール
 
-本画面は docs/06_common-ui-rules.md の一覧ルールに準拠して実装する。
+本画面は docs/policies/06_common-ui-rules.md の一覧ルールに準拠して実装する。
 
 ### 5-1. 骨格
 
@@ -283,5 +283,6 @@ SCR-ACCIDENT-CASE-LIST
 
 ## 17. 共通UIルール参照
 
-本画面の一覧構成、文言、ボタン、追加ダイアログ作法は docs/06_common-ui-rules.md に準拠する。
-業務責務と導線は本書および docs/03_screen-map.md を優先する。
+本画面の一覧構成、文言、ボタン、追加ダイアログ作法は docs/policies/06_common-ui-rules.md に準拠する。
+業務責務と導線は本書および docs/foundations/03_screen-map.md を優先する。
+

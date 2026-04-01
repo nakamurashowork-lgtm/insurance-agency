@@ -288,5 +288,6 @@ SCR-SALES-PERFORMANCE-DETAIL
 
 ## 14. 共通UIルール参照
 
-本画面の見せ方、文言、ボタン、詳細画面の更新作法は `docs/06_common-ui-rules.md` に準拠する。
-業務責務と導線は本書および `docs/03_screen-map.md` を優先する。
+本画面の見せ方、文言、ボタン、詳細画面の更新作法は `docs/policies/06_common-ui-rules.md` に準拠する。
+業務責務と導線は本書および `docs/foundations/03_screen-map.md` を優先する。
+

@@ -63,7 +63,7 @@
 
 ## 6. 一覧共通UIルール
 
-本画面は docs/06_common-ui-rules.md の一覧規約に準拠する。
+本画面は docs/policies/06_common-ui-rules.md の一覧規約に準拠する。
 
 * 検索条件は折りたたみ可能
 * 表示件数は 10 / 50 / 100
@@ -129,8 +129,8 @@ m_customer_contact は顧客詳細から別途登録する。
 
 ## 12. 参照
 
-* docs/06_common-ui-rules.md
-* docs/03_screen-map.md
+* docs/policies/06_common-ui-rules.md
+* docs/foundations/03_screen-map.md
 
 
 ## 1. 画面概要
@@ -187,7 +187,7 @@ m_customer_contact は顧客詳細から別途登録する。
 
 ## 6. 一覧共通UIルール
 
-本画面は docs/06_common-ui-rules.md の一覧規約に準拠する。
+本画面は docs/policies/06_common-ui-rules.md の一覧規約に準拠する。
 
 * 検索条件は折りたたみ可能
 * 表示件数は 10 / 50 / 100
@@ -229,5 +229,6 @@ m_customer_contact は顧客詳細から別途登録する。
 
 ## 12. 参照
 
-* docs/06_common-ui-rules.md
-* docs/03_screen-map.md
+* docs/policies/06_common-ui-rules.md
+* docs/foundations/03_screen-map.md
+

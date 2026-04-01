@@ -239,7 +239,7 @@
 
 本ドキュメントは画面の役割と導線を定める上位方針である。
 各画面の項目、ボタン、タブ、入力仕様、権限制御の詳細は個別画面設計書に記載する。
-全画面の共通 UI 作法（一覧/詳細/ダイアログ、ボタン、文言、バッジ）は `docs/06_common-ui-rules.md` を参照する。
+全画面の共通 UI 作法（一覧/詳細/ダイアログ、ボタン、文言、バッジ）は `docs/policies/06_common-ui-rules.md` を参照する。
 
 ### 7-1. 画面設計書と画面 ID の対応について
 
@@ -252,3 +252,4 @@ SCR-ACTIVITY-NEW と SCR-ACTIVITY-DETAIL は、**1 つの画面設計書（`docs
 
 SCR-SALES-CASE-NEW と SCR-SALES-CASE-DETAIL も同様に、1 つの画面設計書にまとめて記述する。
 Phase C-Lite 着手時に `docs/screens/sales-case-detail.md` として作成する。
+

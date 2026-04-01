@@ -36,10 +36,10 @@
 ### 2-1. 参照した docs
 
 - `docs/00_overview.md`
-- `docs/03_screen-map.md`
-- `docs/04_folder-structure.md`
-- `docs/01_canonical-schema.md`
-- `docs/02_navigation-policy.md`
+- `docs/foundations/03_screen-map.md`
+- `docs/foundations/04_folder-structure.md`
+- `docs/foundations/01_canonical-schema.md`
+- `docs/foundations/02_navigation-policy.md`
 - `docs/screens/login.md`
 - `docs/screens/dashboard.md`
 - `docs/screens/customer-list.md`
@@ -92,7 +92,7 @@
 
 ## 3. 変更方針
 
-- 画面責務は `docs/03_screen-map.md` に固定する。
+- 画面責務は `docs/foundations/03_screen-map.md` に固定する。
 - 契約業務は満期画面系に統合し、契約独立画面を作らない。
 - ホームは入口に徹し、登録・更新・処理を持たせない。
 - 事故案件一覧/詳細は通常業務の主要入口として実装する。
@@ -373,7 +373,7 @@
 
 必須解消事項（解消済み）:
 
-- `docs/03_screen-map.md` のログイン記述を Google認証ベースへ修正済み。
+- `docs/foundations/03_screen-map.md` のログイン記述を Google認証ベースへ修正済み。
 - 初期実装の認証方式を Google認証として文書明記済み。
 
 初期実装方針（確定）:
@@ -815,7 +815,7 @@ Phase 1 A分類 実施結果（2026-03-28）:
 
 事故業務を通常主導線として提供する一方で、テナント設定などの管理・設定機能を権限付きで分離する。
 
-詳細方針については、`2. 変更方針` で確定しており、`docs/02_navigation-policy.md` で正式に定義されている。
+詳細方針については、`2. 変更方針` で確定しており、`docs/foundations/02_navigation-policy.md` で正式に定義されている。
 
 目的:
 
@@ -930,7 +930,7 @@ Phase 1 A分類 実施結果（2026-03-28）:
 ## 7. 仕様不足・競合・未確定点
 
 1. ログイン仕様差分
-- `docs/03_screen-map.md` と `docs/screens/login.md` の認証方式が不整合。
+- `docs/foundations/03_screen-map.md` と `docs/screens/login.md` の認証方式が不整合。
 - Gate 0 で必須解消。
 
 2. API仕様の未確定
@@ -972,8 +972,8 @@ Gate 0 完了後の次フェーズ:
 
 参照した仕様/DDL:
 
-- `docs/03_screen-map.md`
-- `docs/02_navigation-policy.md`
+- `docs/foundations/03_screen-map.md`
+- `docs/foundations/02_navigation-policy.md`
 - `docs/screens/renewal-case-list.md`
 - `docs/screens/renewal-case-detail.md`
 - `config/ddl/tenant/t_contract.sql`
@@ -1180,8 +1180,8 @@ Phase 2 判定結論:
 
 参照した仕様/DDL:
 
-- `docs/03_screen-map.md`
-- `docs/02_navigation-policy.md`
+- `docs/foundations/03_screen-map.md`
+- `docs/foundations/02_navigation-policy.md`
 - `docs/screens/customer-list.md`
 - `docs/screens/customer-detail.md`
 - `docs/screens/renewal-case-detail.md`
@@ -1312,8 +1312,8 @@ Phase 3 判定結論:
 参照した仕様/DDL:
 
 - `docs/screens/sales-performance-list.md`
-- `docs/03_screen-map.md`
-- `docs/02_navigation-policy.md`
+- `docs/foundations/03_screen-map.md`
+- `docs/foundations/02_navigation-policy.md`
 - `config/ddl/tenant/t_sales_performance.sql`
 
 変更方針:
@@ -1380,8 +1380,8 @@ Phase 3 判定結論:
 参照した仕様/DDL:
 
 - `docs/screens/sales-performance-list.md`
-- `docs/03_screen-map.md`
-- `docs/02_navigation-policy.md`
+- `docs/foundations/03_screen-map.md`
+- `docs/foundations/02_navigation-policy.md`
 - `config/ddl/tenant/t_sales_performance.sql`
 
 実施スクリプト:
@@ -1476,9 +1476,9 @@ Phase 4A 判定結論:
 参照した仕様/DDL:
 
 - `docs/screens/sales-performance-list.md`
-- `docs/03_screen-map.md`
-- `docs/02_navigation-policy.md`
-- `docs/01_canonical-schema.md`
+- `docs/foundations/03_screen-map.md`
+- `docs/foundations/02_navigation-policy.md`
+- `docs/foundations/01_canonical-schema.md`
 - `config/ddl/tenant/t_sjnet_import_batch.sql`
 - `config/ddl/tenant/t_sjnet_import_row.sql`
 - `config/ddl/tenant/t_sales_performance.sql`
@@ -1553,9 +1553,9 @@ Phase 4A 判定結論:
 参照した仕様/DDL:
 
 - `docs/screens/sales-performance-list.md`
-- `docs/03_screen-map.md`
-- `docs/02_navigation-policy.md`
-- `docs/01_canonical-schema.md`
+- `docs/foundations/03_screen-map.md`
+- `docs/foundations/02_navigation-policy.md`
+- `docs/foundations/01_canonical-schema.md`
 - `config/ddl/tenant/t_sjnet_import_batch.sql`
 - `config/ddl/tenant/t_sjnet_import_row.sql`
 - `config/ddl/tenant/t_sales_performance.sql`
@@ -1658,8 +1658,8 @@ Phase 4B 判定結論:
 
 参照した仕様/DDL:
 
-- `docs/02_navigation-policy.md`
-- `docs/03_screen-map.md`
+- `docs/foundations/02_navigation-policy.md`
+- `docs/foundations/03_screen-map.md`
 - `docs/screens/accident-case-list.md`
 - `docs/screens/accident-case-detail.md`
 - `docs/screens/tenant-settings.md`
@@ -1765,7 +1765,7 @@ Phase 5 判定結論:
 
 参照した仕様/DDL:
 
-- `docs/05_implementation-plan.md`（Phase 6 方針）
+- `docs/plans/05_implementation-plan.md`（Phase 6 方針）
 - `config/ddl/tenant/t_notification_run.sql`
 - `config/ddl/tenant/t_notification_delivery.sql`
 - `config/ddl/tenant/t_renewal_case.sql`
@@ -2330,3 +2330,4 @@ Phase 6 で受け入れない残課題は、後続の運用定着フェーズへ
 Phase A/B 完了後に別途着手予定。`t_sales_case` DDL は追加済みだが、Phase C まで UI実装は行わない。
 
 このフェーズは、通知機能の開発完了後に、実運用を安定して継続するための改善フェーズとして扱う。
+

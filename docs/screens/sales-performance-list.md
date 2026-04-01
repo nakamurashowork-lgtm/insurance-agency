@@ -382,8 +382,8 @@ SCR-SALES-PERFORMANCE-LIST
 
 ## 16. 共通UIルール参照
 
-本画面の一覧構成、文言、ボタン、登録/取込ダイアログ作法は `docs/06_common-ui-rules.md` に準拠する。
-業務責務と導線は本書および `docs/03_screen-map.md` を優先する。
+本画面の一覧構成、文言、ボタン、登録/取込ダイアログ作法は `docs/policies/06_common-ui-rules.md` に準拠する。
+業務責務と導線は本書および `docs/foundations/03_screen-map.md` を優先する。
 
 ---
 
@@ -611,3 +611,4 @@ CSVファイル選択
 * 顧客情報、契約情報への補助リンク
 * 実績データ出力（CSV/Excel）機能
 * CSV取込エラー行の画面上からの直接修正・再登録
+
