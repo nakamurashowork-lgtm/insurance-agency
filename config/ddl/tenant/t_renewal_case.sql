@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS t_renewal_case (
   assigned_user_id        BIGINT UNSIGNED NULL     COMMENT '営業担当者(common.users.id)',
   office_user_id          BIGINT UNSIGNED NULL     COMMENT '事務担当者(common.users.id)',
   remark                  TEXT            NULL     COMMENT '備考',
+  renewal_method          VARCHAR(50)     NULL     COMMENT '更改方法',
+  procedure_method        VARCHAR(50)     NULL     COMMENT '手続方法',
+  completed_date          DATE            NULL     COMMENT '対応完了日',
   is_deleted              TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '削除フラグ',
 
   created_by              BIGINT UNSIGNED NOT NULL COMMENT '作成者(common.users.id)',

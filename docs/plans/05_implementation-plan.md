@@ -512,9 +512,9 @@ Phase 1 現行実装ファイル（2026-03-28 整理後）:
 
 1. ログイン仕様差分 → Gate 0 で解消済み。
 2. API仕様の未確定 → URL、HTTPメソッド、入出力、エラー仕様が画面仕様で未確定。要確認。
-3. 通知先テーブル参照の整合 → `tenant_notify_routes`/`tenant_notify_targets` の参照先定義に不足がある可能性。DDL整合を要確認。
-4. 顧客詳細の編集範囲 → 一般利用者の編集可能範囲が未確定。要確認。
-5. 監査ログ記録方針 → どの更新を必須記録とするか未確定。要確認。
+3. 通知先テーブル参照の整合 → `tenant_notify_routes`/`tenant_notify_targets` の参照先定義に不足がある可能性。DDL整合を要確認。**【未解消】** `config/ddl/common/tenant_notify_routes.sql` の FK が `tenant_notification_destinations` を参照しているが、実在するテーブルは `tenant_notify_targets`。DDL修正が必要。
+4. 顧客詳細の編集範囲 → 一般利用者の編集可能範囲が未確定。要確認。**【未解消】** Phase 3 受入確認で「未実装: 顧客更新」として残存。画面仕様 `docs/screens/customer-detail.md` で編集可能範囲を明文化してから実装判断が必要。
+5. 監査ログ記録方針 → どの更新を必須記録とするか未確定。要確認。**【未解消】** `t_audit_event` / `t_audit_event_detail` の記録対象（どの画面・どの操作を必須とするか）が未定義。方針決定後に実装方針を文書化する。
 
 ---
 
