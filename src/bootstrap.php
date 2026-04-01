@@ -6,6 +6,7 @@ use App\AppConfig;
 use App\Auth\AuthService;
 use App\Auth\TenantResolver;
 use App\Controller\AccidentCaseController;
+use App\Controller\ActivityController;
 use App\Controller\AuthController;
 use App\Controller\CustomerController;
 use App\Controller\DashboardController;
@@ -55,10 +56,11 @@ $authGuard = new AuthGuard($session, $config);
 $loginController = new LoginController($session, $config);
 $authController = new AuthController($config, $session, $googleOAuthClient, $authService);
 $dashboardController = new DashboardController($authGuard, $tenantFactory, $config);
-$renewalCaseController = new RenewalCaseController($authGuard, $tenantFactory, $config);
-$customerController = new CustomerController($authGuard, $tenantFactory, $config);
-$salesPerformanceController = new SalesPerformanceController($authGuard, $tenantFactory, $config);
-$accidentCaseController = new AccidentCaseController($authGuard, $tenantFactory, $config);
+$renewalCaseController = new RenewalCaseController($authGuard, $tenantFactory, $commonFactory, $config);
+$customerController = new CustomerController($authGuard, $tenantFactory, $commonFactory, $config);
+$salesPerformanceController = new SalesPerformanceController($authGuard, $tenantFactory, $commonFactory, $config);
+$accidentCaseController = new AccidentCaseController($authGuard, $tenantFactory, $commonFactory, $config);
+$activityController = new ActivityController($authGuard, $tenantFactory, $commonFactory, $config);
 $tenantSettingsController = new TenantSettingsController($authGuard, $tenantFactory, $commonFactory, $config);
 
 $router = new Router($config->appUrl);
@@ -86,8 +88,14 @@ $router->get('customer/list', static function () use ($customerController): void
 $router->get('customer/detail', static function () use ($customerController): void {
     $customerController->detail();
 });
+$router->post('customer/create', static function () use ($customerController): void {
+    $customerController->create();
+});
 $router->get('sales/list', static function () use ($salesPerformanceController): void {
     $salesPerformanceController->list();
+});
+$router->get('sales/detail', static function () use ($salesPerformanceController): void {
+    $salesPerformanceController->detail();
 });
 $router->get('accident/list', static function () use ($accidentCaseController): void {
     $accidentCaseController->list();
@@ -104,6 +112,9 @@ $router->get('renewal/detail', static function () use ($renewalCaseController): 
 $router->post('renewal/update', static function () use ($renewalCaseController): void {
     $renewalCaseController->update();
 });
+$router->post('renewal/comment', static function () use ($renewalCaseController): void {
+    $renewalCaseController->comment();
+});
 $router->post('sales/create', static function () use ($salesPerformanceController): void {
     $salesPerformanceController->create();
 });
@@ -119,14 +130,44 @@ $router->post('sales/import', static function () use ($salesPerformanceControlle
 $router->post('accident/update', static function () use ($accidentCaseController): void {
     $accidentCaseController->update();
 });
+$router->post('accident/store', static function () use ($accidentCaseController): void {
+    $accidentCaseController->store();
+});
 $router->post('accident/comment', static function () use ($accidentCaseController): void {
     $accidentCaseController->comment();
+});
+$router->get('activity/list', static function () use ($activityController): void {
+    $activityController->list();
+});
+$router->get('activity/new', static function () use ($activityController): void {
+    $activityController->newForm();
+});
+$router->get('activity/detail', static function () use ($activityController): void {
+    $activityController->detail();
+});
+$router->post('activity/store', static function () use ($activityController): void {
+    $activityController->store();
+});
+$router->post('activity/update', static function () use ($activityController): void {
+    $activityController->update();
+});
+$router->post('activity/delete', static function () use ($activityController): void {
+    $activityController->delete();
+});
+$router->get('activity/daily', static function () use ($activityController): void {
+    $activityController->daily();
+});
+$router->post('activity/comment', static function () use ($activityController): void {
+    $activityController->saveComment();
 });
 $router->post('tenant/settings/notify', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->saveNotify();
 });
 $router->post('tenant/settings/phase', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->savePhase();
+});
+$router->post('tenant/settings/all', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->saveAll();
 });
 $router->get('auth/google/start', static function () use ($authController): void {
     $authController->startGoogle();

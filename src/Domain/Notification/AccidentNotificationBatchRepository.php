@@ -47,18 +47,26 @@ final class AccidentNotificationBatchRepository
                     r.start_date,
                     r.end_date,
                     r.last_notified_on,
+                          ac.accident_date,
                     ac.status AS accident_status,
+                          c.customer_name,
                     GROUP_CONCAT(w.weekday_cd ORDER BY w.weekday_cd SEPARATOR ",") AS weekdays_csv
              FROM t_accident_reminder_rule r
              INNER JOIN t_accident_case ac
                      ON ac.id = r.accident_case_id
                     AND ac.is_deleted = 0
+                      INNER JOIN t_contract ct
+                        ON ct.id = ac.contract_id
+                          AND ct.is_deleted = 0
+                      INNER JOIN m_customer c
+                        ON c.id = ct.customer_id
+                          AND c.is_deleted = 0
              LEFT JOIN t_accident_reminder_rule_weekday w
                     ON w.accident_reminder_rule_id = r.id
              WHERE r.is_enabled = 1
                AND r.is_deleted = 0
                AND ac.status IN ("accepted", "linked", "in_progress", "waiting_docs")
-             GROUP BY r.id, r.accident_case_id, r.interval_weeks, r.base_date, r.start_date, r.end_date, r.last_notified_on, ac.status
+                      GROUP BY r.id, r.accident_case_id, r.interval_weeks, r.base_date, r.start_date, r.end_date, r.last_notified_on, ac.accident_date, ac.status, c.customer_name
              ORDER BY r.id ASC'
         );
         $rows = $stmt->fetchAll();
@@ -78,10 +86,21 @@ final class AccidentNotificationBatchRepository
                     d.scheduled_date,
                     d.notified_at,
                     d.created_at,
-                    d.error_message
+                        d.error_message,
+                        ac.accident_date,
+                        c.customer_name
              FROM t_notification_delivery d
              INNER JOIN t_notification_run r
                      ON r.id = d.notification_run_id
+                     INNER JOIN t_accident_case ac
+                         ON ac.id = d.accident_case_id
+                        AND ac.is_deleted = 0
+                     INNER JOIN t_contract ct
+                         ON ct.id = ac.contract_id
+                        AND ct.is_deleted = 0
+                     INNER JOIN m_customer c
+                         ON c.id = ct.customer_id
+                        AND c.is_deleted = 0
              WHERE r.id = :run_id
                AND r.notification_type = "accident"
                AND d.notification_type = "accident"
@@ -129,6 +148,26 @@ final class AccidentNotificationBatchRepository
         ]);
 
         return $stmt->rowCount() === 1;
+    }
+
+    public function hasDeliveryForSchedule(int $accidentCaseId, int $ruleId, string $runDate): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT 1
+             FROM t_notification_delivery
+             WHERE notification_type = "accident"
+               AND accident_case_id = :accident_case_id
+               AND accident_reminder_rule_id = :rule_id
+               AND scheduled_date = :scheduled_date
+             LIMIT 1'
+        );
+        $stmt->execute([
+            'accident_case_id' => $accidentCaseId,
+            'rule_id' => $ruleId,
+            'scheduled_date' => $runDate,
+        ]);
+
+        return $stmt->fetchColumn() !== false;
     }
 
     public function insertDeliverySkipped(int $runId, int $accidentCaseId, int $ruleId, string $runDate, string $message): bool

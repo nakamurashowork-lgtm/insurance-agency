@@ -7,6 +7,7 @@ final class AppConfig
 {
     public string $appEnv;
     public string $appUrl;
+    public string $appPublicUrl;
     public string $commonDbHost;
     public int $commonDbPort;
     public string $commonDbName;
@@ -28,6 +29,7 @@ final class AppConfig
 
         $config->appEnv = self::env('APP_ENV', 'production');
         $config->appUrl = rtrim(self::envWithFallback(['APP_URL', 'APP_BASE_URL'], ''), '/');
+        $config->appPublicUrl = rtrim(self::envWithFallback(['APP_PUBLIC_URL'], $config->appUrl), '/');
 
         $config->commonDbHost = self::env('COMMON_DB_HOST', '127.0.0.1');
         $config->commonDbPort = (int) self::env('COMMON_DB_PORT', '3306');

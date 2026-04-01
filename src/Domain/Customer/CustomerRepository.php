@@ -7,6 +7,11 @@ use PDO;
 
 final class CustomerRepository
 {
+    /**
+     * @var array<int, string>
+     */
+    public const SORTABLE_FIELDS = ['customer_name', 'phone', 'assigned_user_id', 'contract_count'];
+
     public function __construct(private PDO $pdo)
     {
     }
@@ -17,6 +22,30 @@ final class CustomerRepository
      */
     public function search(array $criteria, int $limit = 200): array
     {
+        $result = $this->searchPage($criteria, 1, $limit);
+        return $result['rows'];
+    }
+
+    /**
+     * @param array<string, string> $criteria
+     * @return array{rows: array<int, array<string, mixed>>, total: int, page: int}
+     */
+    public function searchPage(array $criteria, int $page = 1, int $perPage = 10, string $sort = '', string $direction = 'asc'): array
+    {
+        $total = $this->countSearch($criteria);
+        if ($perPage <= 0) {
+            $perPage = 10;
+        }
+
+        $currentPage = 1;
+        if ($total > 0) {
+            $totalPages = (int) ceil($total / $perPage);
+            $currentPage = max(1, min($page, $totalPages));
+        }
+
+        $offset = $total > 0 ? ($currentPage - 1) * $perPage : 0;
+        $query = $this->buildSearchQuery($criteria);
+
         $sql =
             'SELECT mc.id,
                     mc.customer_name,
@@ -24,10 +53,38 @@ final class CustomerRepository
                     mc.email,
                     mc.address1,
                     mc.address2,
+                    mc.assigned_user_id,
                     mc.status,
                     mc.updated_at,
-                    COALESCE(cnt.contract_count, 0) AS contract_count
-             FROM m_customer mc
+                    COALESCE(cnt.contract_count, 0) AS contract_count'
+            . $query['sql']
+            . ' ORDER BY ' . $this->buildOrderBy($sort, $direction)
+            . ' LIMIT :limit OFFSET :offset';
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($query['params'] as $key => $value) {
+            $stmt->bindValue(':' . $key, $value);
+        }
+        $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll();
+        return [
+            'rows' => is_array($rows) ? $rows : [],
+            'total' => $total,
+            'page' => $currentPage,
+        ];
+    }
+
+    /**
+     * @param array<string, string> $criteria
+     * @return array{sql: string, params: array<string, string|int>}
+     */
+    private function buildSearchQuery(array $criteria): array
+    {
+        $sql =
+            ' FROM m_customer mc
              LEFT JOIN (
                 SELECT customer_id, COUNT(*) AS contract_count
                 FROM t_contract
@@ -56,23 +113,36 @@ final class CustomerRepository
             $params['email'] = '%' . $email . '%';
         }
 
-        $status = trim((string) ($criteria['status'] ?? ''));
-        if ($status !== '') {
-            $sql .= ' AND mc.status = :status';
-            $params['status'] = $status;
-        }
+        return ['sql' => $sql, 'params' => $params];
+    }
 
-        $sql .= ' ORDER BY mc.updated_at DESC, mc.id DESC LIMIT :limit';
-
-        $stmt = $this->pdo->prepare($sql);
-        foreach ($params as $key => $value) {
-            $stmt->bindValue(':' . $key, $value);
+    /**
+     * @param array<string, string> $criteria
+     */
+    private function countSearch(array $criteria): int
+    {
+        $query = $this->buildSearchQuery($criteria);
+        $stmt = $this->pdo->prepare('SELECT COUNT(*)' . $query['sql']);
+        foreach ($query['params'] as $key => $value) {
+            $stmt->bindValue(':' . $key, (string) $value);
         }
-        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
 
-        $rows = $stmt->fetchAll();
-        return is_array($rows) ? $rows : [];
+        $count = $stmt->fetchColumn();
+        return is_numeric($count) ? (int) $count : 0;
+    }
+
+    private function buildOrderBy(string $sort, string $direction): string
+    {
+        $directionSql = strtoupper($direction) === 'DESC' ? 'DESC' : 'ASC';
+
+        return match ($sort) {
+            'customer_name' => 'mc.customer_name ' . $directionSql . ', mc.id ASC',
+            'phone' => 'mc.phone ' . $directionSql . ', mc.id ASC',
+            'assigned_user_id' => 'mc.assigned_user_id ' . $directionSql . ', mc.id ASC',
+            'contract_count' => 'COALESCE(cnt.contract_count, 0) ' . $directionSql . ', mc.id ASC',
+            default => 'mc.updated_at DESC, mc.id DESC',
+        };
     }
 
     /**
@@ -159,16 +229,79 @@ final class CustomerRepository
     }
 
     /**
+     * @param array<string, mixed> $input
+     */
+    public function create(array $input, int $userId): int
+    {
+        $this->pdo->beginTransaction();
+        try {
+            $stmt = $this->pdo->prepare(
+                'INSERT INTO m_customer
+                    (customer_type, customer_name, customer_name_kana, phone, email,
+                     postal_code, address1, address2, assigned_user_id, status, note,
+                     created_by, updated_by)
+                 VALUES
+                    (:customer_type, :customer_name, :customer_name_kana, :phone, :email,
+                     :postal_code, :address1, :address2, :assigned_user_id, :status, :note,
+                     :created_by, :updated_by)'
+            );
+            $stmt->execute([
+                'customer_type'      => (string) ($input['customer_type'] ?? 'individual'),
+                'customer_name'      => (string) ($input['customer_name'] ?? ''),
+                'customer_name_kana' => $input['customer_name_kana'] ?? null,
+                'phone'              => $input['phone'] ?? null,
+                'email'              => $input['email'] ?? null,
+                'postal_code'        => $input['postal_code'] ?? null,
+                'address1'           => $input['address1'] ?? null,
+                'address2'           => $input['address2'] ?? null,
+                'assigned_user_id'   => $input['assigned_user_id'] ?? null,
+                'status'             => 'active',
+                'note'               => $input['note'] ?? null,
+                'created_by'         => $userId,
+                'updated_by'         => $userId,
+            ]);
+
+            $customerId = (int) $this->pdo->lastInsertId();
+
+            // 初期代表連絡先を同一トランザクション内で作成
+            $contactName = (string) ($input['customer_name'] ?? '');
+            $stmt2 = $this->pdo->prepare(
+                'INSERT INTO m_customer_contact
+                    (customer_id, contact_name, phone, email, is_primary, sort_order,
+                     created_by, updated_by)
+                 VALUES
+                    (:customer_id, :contact_name, :phone, :email, 1, 1,
+                     :created_by, :updated_by)'
+            );
+            $stmt2->execute([
+                'customer_id'  => $customerId,
+                'contact_name' => $contactName,
+                'phone'        => $input['phone'] ?? null,
+                'email'        => $input['email'] ?? null,
+                'created_by'   => $userId,
+                'updated_by'   => $userId,
+            ]);
+
+            $this->pdo->commit();
+            return $customerId;
+        } catch (\Throwable $e) {
+            $this->pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public function findActivities(int $customerId, int $limit = 30): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT activity_at, activity_type, subject, detail, outcome
+            'SELECT id, activity_date, activity_type, subject, content_summary, detail_text, result_type,
+                    next_action_date, next_action_note, staff_user_id
              FROM t_activity
              WHERE customer_id = :customer_id
                AND is_deleted = 0
-             ORDER BY activity_at DESC
+             ORDER BY activity_date DESC, id DESC
              LIMIT :limit'
         );
         $stmt->bindValue(':customer_id', $customerId, PDO::PARAM_INT);

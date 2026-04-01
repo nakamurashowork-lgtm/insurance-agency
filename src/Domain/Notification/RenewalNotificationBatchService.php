@@ -3,11 +3,17 @@ declare(strict_types=1);
 
 namespace App\Domain\Notification;
 
+require_once __DIR__ . DIRECTORY_SEPARATOR . 'lineworks_payload_helpers.php';
+
 use DateTimeImmutable;
 use Throwable;
+use function App\Domain\Notification\build_lineworks_renewal_alert_payload;
 
 final class RenewalNotificationBatchService
 {
+    private const EARLY_DAYS_BEFORE = 28;
+    private const DIRECT_DAYS_BEFORE = 14;
+
     public function __construct(private RenewalNotificationBatchRepository $repository)
     {
     }
@@ -20,11 +26,15 @@ final class RenewalNotificationBatchService
         int $executedBy,
         bool $routeEnabled,
         ?int $retryFailedRunId = null,
-        ?NotificationRetryPolicy $retryPolicy = null
+        ?NotificationRetryPolicy $retryPolicy = null,
+        ?WebhookNotificationSender $sender = null,
+        ?array $endpoint = null,
+        string $tenantCode = ''
     ): array
     {
         $runId = $this->repository->createRun($runDate, $executedBy);
         $retryPolicy ??= new NotificationRetryPolicy();
+        $sender ??= new WebhookNotificationSender();
         $now = new DateTimeImmutable();
 
         $processedCount = 0;
@@ -32,13 +42,18 @@ final class RenewalNotificationBatchService
         $skipCount = 0;
         $failCount = 0;
         $messages = [];
+        $notificationDefinitions = $this->notificationDefinitions();
 
         try {
             if ($retryFailedRunId !== null && $retryFailedRunId > 0) {
                 $failedTargets = $this->repository->findFailedDeliveriesByRunId($retryFailedRunId);
+                $retryGroups = [];
+
                 foreach ($failedTargets as $target) {
                     $processedCount++;
                     $deliveryId = (int) ($target['delivery_id'] ?? 0);
+                    $renewalCaseId = (int) ($target['renewal_case_id'] ?? 0);
+                    $phaseId = (int) ($target['renewal_reminder_phase_id'] ?? 0);
                     if ($deliveryId <= 0) {
                         $failCount++;
                         $messages[] = 'INVALID_DELIVERY_ID';
@@ -64,8 +79,37 @@ final class RenewalNotificationBatchService
                             continue;
                         }
 
-                        $this->repository->updateDeliveryForRetry($deliveryId, $runId, 'success', null, true);
-                        $successCount++;
+                        if ($renewalCaseId <= 0 || $phaseId <= 0) {
+                            $this->repository->updateDeliveryForRetry(
+                                $deliveryId,
+                                $runId,
+                                'failed',
+                                $retryPolicy->buildFailureMessage('INVALID_RENEWAL_RETRY_TARGET', (int) ($decision['next_attempt_count'] ?? 1)),
+                                false
+                            );
+                            $failCount++;
+                            continue;
+                        }
+
+                        if ($this->repository->hasDeliveryForSchedule($renewalCaseId, $phaseId, $runDate)) {
+                            $skipCount++;
+                            continue;
+                        }
+
+                        $notificationKey = $this->resolveRetryNotificationKey((int) ($target['days_before'] ?? -1));
+                        if ($notificationKey === null) {
+                            $this->repository->updateDeliveryForRetry(
+                                $deliveryId,
+                                $runId,
+                                'failed',
+                                $retryPolicy->buildFailureMessage('UNSUPPORTED_RENEWAL_NOTIFICATION_DAY', (int) ($decision['next_attempt_count'] ?? 1)),
+                                false
+                            );
+                            $failCount++;
+                            continue;
+                        }
+
+                        $retryGroups[$notificationKey][] = $target;
                     } catch (Throwable $e) {
                         $this->repository->updateDeliveryForRetry(
                             $deliveryId,
@@ -78,6 +122,49 @@ final class RenewalNotificationBatchService
                             true
                         );
                         $failCount++;
+                        $messages[] = $e->getMessage();
+                    }
+                }
+
+                foreach ($notificationDefinitions as $definition) {
+                    $notificationKey = (string) $definition['key'];
+                    $targets = $retryGroups[$notificationKey] ?? [];
+                    if ($targets === []) {
+                        continue;
+                    }
+
+                    try {
+                        $this->sendRenewalNotification(
+                            $sender,
+                            $endpoint,
+                            $definition,
+                            $targets
+                        );
+
+                        foreach ($targets as $target) {
+                            $this->repository->updateDeliveryForRetry(
+                                (int) $target['delivery_id'],
+                                $runId,
+                                'success',
+                                null,
+                                true
+                            );
+                            $successCount++;
+                        }
+                    } catch (Throwable $e) {
+                        foreach ($targets as $target) {
+                            $this->repository->updateDeliveryForRetry(
+                                (int) $target['delivery_id'],
+                                $runId,
+                                'failed',
+                                $retryPolicy->buildFailureMessage(
+                                    $e->getMessage(),
+                                    1
+                                ),
+                                true
+                            );
+                            $failCount++;
+                        }
                         $messages[] = $e->getMessage();
                     }
                 }
@@ -111,16 +198,20 @@ final class RenewalNotificationBatchService
                 ];
             }
 
-            $phases = $this->repository->findEnabledPhases();
-            foreach ($phases as $phase) {
-                $phaseId = (int) ($phase['id'] ?? 0);
-                $fromDaysBefore = (int) ($phase['from_days_before'] ?? -1);
-                $toDaysBefore = (int) ($phase['to_days_before'] ?? -1);
-                if ($phaseId <= 0 || $fromDaysBefore < 0 || $toDaysBefore < 0) {
+            foreach ($notificationDefinitions as $definition) {
+                $phase = $this->repository->findPhaseForDaysBefore((int) $definition['days_before']);
+                if (!is_array($phase)) {
                     continue;
                 }
 
-                $targets = $this->repository->findRenewalTargetsByPhase($runDate, $fromDaysBefore, $toDaysBefore);
+                $phaseId = (int) ($phase['id'] ?? 0);
+                if ($phaseId <= 0) {
+                    continue;
+                }
+
+                $targets = $this->repository->findRenewalTargetsByExactDays($runDate, (int) $definition['days_before']);
+                $deliverableTargets = [];
+
                 foreach ($targets as $target) {
                     $processedCount++;
                     $renewalCaseId = (int) ($target['renewal_case_id'] ?? 0);
@@ -148,13 +239,13 @@ final class RenewalNotificationBatchService
                             continue;
                         }
 
-                        $inserted = $this->repository->insertDeliverySuccess($runId, $renewalCaseId, $phaseId, $runDate);
-                        if ($inserted) {
-                            $successCount++;
-                        } else {
-                            // Idempotent duplicate from rerun.
+                        if ($this->repository->hasDeliveryForSchedule($renewalCaseId, $phaseId, $runDate)) {
                             $skipCount++;
+                            continue;
                         }
+
+                        $target['renewal_reminder_phase_id'] = $phaseId;
+                        $deliverableTargets[] = $target;
                     } catch (Throwable $e) {
                         $this->repository->insertDeliveryFailed(
                             $runId,
@@ -166,6 +257,45 @@ final class RenewalNotificationBatchService
                         $failCount++;
                         $messages[] = $e->getMessage();
                     }
+                }
+
+                if ($deliverableTargets === []) {
+                    continue;
+                }
+
+                try {
+                    $this->sendRenewalNotification(
+                        $sender,
+                        $endpoint,
+                        $definition,
+                        $deliverableTargets
+                    );
+
+                    foreach ($deliverableTargets as $target) {
+                        $inserted = $this->repository->insertDeliverySuccess(
+                            $runId,
+                            (int) $target['renewal_case_id'],
+                            $phaseId,
+                            $runDate
+                        );
+                        if ($inserted) {
+                            $successCount++;
+                        } else {
+                            $skipCount++;
+                        }
+                    }
+                } catch (Throwable $e) {
+                    foreach ($deliverableTargets as $target) {
+                        $this->repository->insertDeliveryFailed(
+                            $runId,
+                            (int) $target['renewal_case_id'],
+                            $phaseId,
+                            $runDate,
+                            $retryPolicy->buildFailureMessage($e->getMessage(), 1)
+                        );
+                        $failCount++;
+                    }
+                    $messages[] = $e->getMessage();
                 }
             }
 
@@ -229,11 +359,67 @@ final class RenewalNotificationBatchService
             return 'partial';
         }
 
-        if ($failCount > 0 && $successCount === 0 && $skipCount === 0) {
+        if ($failCount > 0) {
             return 'failed';
         }
 
         // success also covers all-skipped and no-target runs for operational simplicity.
         return 'success';
+    }
+
+    /**
+     * @return array<int, array{key:string,label:string,days_before:int}>
+     */
+    private function notificationDefinitions(): array
+    {
+        return [
+            [
+                'key' => 'early',
+                'label' => '満期リマインド（早期）',
+                'days_before' => self::EARLY_DAYS_BEFORE,
+            ],
+            [
+                'key' => 'direct',
+                'label' => '満期リマインド（直前）',
+                'days_before' => self::DIRECT_DAYS_BEFORE,
+            ],
+        ];
+    }
+
+    private function resolveRetryNotificationKey(int $daysBefore): ?string
+    {
+        foreach ($this->notificationDefinitions() as $definition) {
+            if ((int) $definition['days_before'] === $daysBefore) {
+                return (string) $definition['key'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed>|null $endpoint
+     * @param array<string, mixed> $definition
+     * @param array<int, array<string, mixed>> $targets
+     */
+    private function sendRenewalNotification(
+        WebhookNotificationSender $sender,
+        ?array $endpoint,
+        array $definition,
+        array $targets
+    ): void {
+        $providerType = (string) ($endpoint['provider_type'] ?? '');
+        $webhookUrl = (string) ($endpoint['webhook_url'] ?? '');
+        $appPublicUrl = (string) ($endpoint['app_public_url'] ?? '');
+
+        if ($providerType === '' || $webhookUrl === '') {
+            throw new \RuntimeException('notification endpoint is incomplete');
+        }
+
+        $sender->send(
+            $providerType,
+            $webhookUrl,
+            build_lineworks_renewal_alert_payload((string) $definition['key'], $appPublicUrl, $targets)
+        );
     }
 }

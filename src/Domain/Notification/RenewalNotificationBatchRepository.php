@@ -52,6 +52,27 @@ final class RenewalNotificationBatchRepository
     }
 
     /**
+     * @return array<string, mixed>|null
+     */
+    public function findPhaseForDaysBefore(int $daysBefore): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, phase_code, phase_name, from_days_before, to_days_before
+             FROM m_renewal_reminder_phase
+             WHERE is_enabled = 1
+               AND is_deleted = 0
+               AND :days_before BETWEEN to_days_before AND from_days_before
+             ORDER BY display_order ASC, id ASC
+             LIMIT 1'
+        );
+        $stmt->bindValue(':days_before', $daysBefore, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch();
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public function findRenewalTargetsByPhase(string $runDate, int $fromDaysBefore, int $toDaysBefore): array
@@ -80,6 +101,39 @@ final class RenewalNotificationBatchRepository
     /**
      * @return array<int, array<string, mixed>>
      */
+    public function findRenewalTargetsByExactDays(string $runDate, int $daysBefore): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT rc.id AS renewal_case_id,
+                    rc.contract_id,
+                    rc.maturity_date,
+                    rc.case_status,
+                    ct.policy_no,
+                    c.customer_name,
+                    DATEDIFF(rc.maturity_date, :run_date) AS days_before
+             FROM t_renewal_case rc
+             INNER JOIN t_contract ct
+                     ON ct.id = rc.contract_id
+                    AND ct.is_deleted = 0
+             INNER JOIN m_customer c
+                     ON c.id = ct.customer_id
+                    AND c.is_deleted = 0
+             WHERE rc.is_deleted = 0
+               AND rc.case_status IN ("open", "contacted", "quoted", "waiting")
+               AND DATEDIFF(rc.maturity_date, :run_date) = :days_before
+             ORDER BY rc.maturity_date ASC, c.customer_name ASC, rc.id ASC'
+        );
+        $stmt->bindValue(':run_date', $runDate);
+        $stmt->bindValue(':days_before', $daysBefore, PDO::PARAM_INT);
+        $stmt->execute();
+        $rows = $stmt->fetchAll();
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
     public function findFailedDeliveriesByRunId(int $runId): array
     {
         $stmt = $this->pdo->prepare(
@@ -89,10 +143,24 @@ final class RenewalNotificationBatchRepository
                     d.scheduled_date,
                     d.notified_at,
                     d.created_at,
-                    d.error_message
+                d.error_message,
+                rc.maturity_date,
+                rc.case_status,
+                    ct.policy_no,
+                c.customer_name,
+                DATEDIFF(rc.maturity_date, d.scheduled_date) AS days_before
              FROM t_notification_delivery d
              INNER JOIN t_notification_run r
                      ON r.id = d.notification_run_id
+             INNER JOIN t_renewal_case rc
+                 ON rc.id = d.renewal_case_id
+                AND rc.is_deleted = 0
+             INNER JOIN t_contract ct
+                 ON ct.id = rc.contract_id
+                AND ct.is_deleted = 0
+             INNER JOIN m_customer c
+                 ON c.id = ct.customer_id
+                AND c.is_deleted = 0
              WHERE r.id = :run_id
                AND r.notification_type = "renewal"
                AND d.notification_type = "renewal"
@@ -143,6 +211,26 @@ final class RenewalNotificationBatchRepository
         ]);
 
         return $stmt->rowCount() === 1;
+    }
+
+    public function hasDeliveryForSchedule(int $renewalCaseId, int $phaseId, string $runDate): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT 1
+             FROM t_notification_delivery
+             WHERE notification_type = "renewal"
+               AND renewal_case_id = :renewal_case_id
+               AND renewal_reminder_phase_id = :phase_id
+               AND scheduled_date = :scheduled_date
+             LIMIT 1'
+        );
+        $stmt->execute([
+            'renewal_case_id' => $renewalCaseId,
+            'phase_id' => $phaseId,
+            'scheduled_date' => $runDate,
+        ]);
+
+        return $stmt->fetchColumn() !== false;
     }
 
     /**

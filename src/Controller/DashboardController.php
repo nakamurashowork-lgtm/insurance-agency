@@ -4,10 +4,12 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\AppConfig;
+use App\Domain\Dashboard\DashboardRepository;
 use App\Http\Responses;
 use App\Infra\TenantConnectionFactory;
 use App\Presentation\DashboardView;
 use App\Security\AuthGuard;
+use Throwable;
 
 final class DashboardController
 {
@@ -21,22 +23,8 @@ final class DashboardController
     public function show(): void
     {
         $auth = $this->guard->requireAuthenticated();
-        $logoutCsrfToken = $this->guard->session()->issueCsrfToken('logout');
         $flashError = $this->guard->session()->consumeFlash('error');
-
-        $tenantDbName = null;
-        $warning = null;
-
-        try {
-            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $stmt = $pdo->query('SELECT DATABASE() AS db_name');
-            $row = $stmt->fetch();
-            $tenantDbName = is_array($row) && isset($row['db_name'])
-                ? (string) $row['db_name']
-                : null;
-        } catch (\Throwable) {
-            $warning = 'tenant DBの接続確認に失敗しました。接続設定を確認してください。';
-        }
+        $dashboardSummary = $this->loadDashboardSummary($auth);
 
         $permissions = $auth['permissions'] ?? [];
         $isSystemAdmin = is_array($permissions) && !empty($permissions['is_system_admin']);
@@ -46,16 +34,41 @@ final class DashboardController
         Responses::html(DashboardView::render(
             $auth,
             $showAdminHelpers,
-            $tenantDbName,
-            $warning,
-            $logoutCsrfToken,
             $flashError,
             $this->config->routeUrl('renewal/list'),
             $this->config->routeUrl('customer/list'),
             $this->config->routeUrl('sales/list'),
             $this->config->routeUrl('accident/list'),
             $this->config->routeUrl('tenant/settings'),
-            $this->config->routeUrl('logout')
+            array_merge(
+                ControllerLayoutHelper::build($this->guard, $this->config, 'dashboard'),
+                ['dashboardSummary' => $dashboardSummary]
+            )
         ));
+    }
+
+    /**
+     * @param array<string, mixed> $auth
+     * @return array<string, array<string, int>|int|null>
+     */
+    private function loadDashboardSummary(array $auth): array
+    {
+        $summary = [
+            'renewal' => null,
+            'accident' => null,
+            'salesMonthlyInputCount' => null,
+        ];
+
+        try {
+            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $repository = new DashboardRepository($pdo);
+            $summary['renewal'] = $repository->getRenewalSummary();
+            $summary['accident'] = $repository->getAccidentSummary();
+            $summary['salesMonthlyInputCount'] = $repository->getSalesMonthlyInputCount(date('Y-m'));
+        } catch (Throwable) {
+            // Home should remain available even when summary retrieval fails.
+        }
+
+        return $summary;
     }
 }

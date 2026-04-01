@@ -46,6 +46,18 @@ php tools/batch/run_renewal_notification.php --date=2026-03-29 --tenant=TE001 --
 - `--retry-failed-run-id` reprocesses only failed deliveries from the specified run id.
 - `--retry-max-attempts` limits how many failed attempts are retried before the item is left as-is and counted as `skip`.
 - `--retry-minutes` enforces a minimum wait window between the last failed attempt and the next retry run.
+- For enabled routes with provider `lineworks`, the batch actually performs HTTP POST to `webhook_url`.
+- LINE WORKS payload uses `title`, `body.text`, `button.label`, and `button.url`.
+- `body.text` is required and contains Japanese business text with target count and target list.
+- Renewal notifications are split into two fixed messages: `【満期案件通知（早期）】` at 28 days before maturity and `【満期案件通知（直前）】` at 14 days before maturity.
+- Accident notifications are sent as `【事故対応リマインド】` when existing reminder rules match.
+- The message body starts with a one-line action prompt, then shows `対象件数` and a titled bullet list.
+- When the list exceeds 10 items, the message omits the overflow and appends `ほかN件`.
+- Internal IDs such as case id, phase id, and rule id are not included in the LINE WORKS message body.
+- Button URLs are built from `APP_PUBLIC_URL`; `localhost`, `127.0.0.1`, and `::1` are rejected and result in `failed`.
+- Renewal buttons open `?route=renewal/list`; accident buttons open `?route=accident/list`.
+- Delivery is recorded as `success` only when webhook returns HTTP 2xx.
+- Non-2xx responses and transport exceptions are recorded as `failed` with error details.
 - It writes run summaries to `t_notification_run`.
 - It writes per-case records to `t_notification_delivery`.
 - Idempotency is handled by unique keys on delivery records; reruns become `skip`.

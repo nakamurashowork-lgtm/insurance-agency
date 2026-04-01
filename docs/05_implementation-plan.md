@@ -24,9 +24,9 @@
 - 満期詳細 = 契約詳細
 - 契約一覧の独立画面は作らない
 - 契約詳細の独立画面は作らない
-- ダッシュボードは入口画面に徹し、処理画面化しない
+- ホームは入口画面に徹し、処理画面化しない
 - 顧客一覧、顧客詳細は独立画面として維持する
-- ログイン成功時はセッションを作成し、ダッシュボードへ遷移する
+- ログイン成功時はセッションを作成し、ホームへ遷移する
 - セッションにはユーザーID、表示名、テナントID、権限情報を保持する
 
 ---
@@ -49,7 +49,11 @@
 - `docs/screens/accident-case-list.md`
 - `docs/screens/accident-case-detail.md`
 - `docs/screens/sales-performance-list.md`
+- `docs/screens/sales-performance-detail.md`
 - `docs/screens/tenant-settings.md`
+- `docs/screens/activity-list.md`
+- `docs/screens/activity-detail.md`
+- `docs/screens/activity-daily.md`
 
 ### 2-2. 参照した DDL
 
@@ -67,6 +71,8 @@
 - `config/ddl/tenant/t_accident_reminder_rule.sql`
 - `config/ddl/tenant/t_accident_reminder_rule_weekday.sql`
 - `config/ddl/tenant/t_activity.sql`
+- `config/ddl/tenant/t_daily_report.sql`
+- `config/ddl/tenant/t_sales_case.sql`
 - `config/ddl/tenant/t_case_comment.sql`
 - `config/ddl/tenant/t_sales_performance.sql`
 - `config/ddl/tenant/t_audit_event.sql`
@@ -88,11 +94,11 @@
 
 - 画面責務は `docs/03_screen-map.md` に固定する。
 - 契約業務は満期画面系に統合し、契約独立画面を作らない。
-- ダッシュボードは入口に徹し、登録・更新・処理を持たせない。
-- 事故案件一覧/詳細、テナント設定は「管理者向け補助導線」として実装する。
-- 事故案件一覧/詳細、テナント設定は通常業務の主要入口へ昇格させない。
-- 事故案件一覧/詳細、テナント設定は一般利用者に標準表示しない。
-- 事故案件一覧/詳細、テナント設定は main nav とダッシュボード主要導線に含めない。
+- ホームは入口に徹し、登録・更新・処理を持たせない。
+- 事故案件一覧/詳細は通常業務の主要入口として実装する。
+- 事故案件一覧/詳細は一般利用者の標準業務導線に含める。
+- 事故案件一覧/詳細は main nav とホームの日常業務に含める。
+- テナント設定は管理・設定として分離し、権限者のみ表示する。
 - `public/` には入口とエンドポイントだけを置き、業務実装は `src/` に集約する。
 
 ---
@@ -118,7 +124,7 @@
 - 未認証ユーザー入口
 - 認証成功時のセッション作成
 - 主所属テナントでログイン確立
-- ダッシュボード遷移
+- ホーム遷移
 
 依存:
 
@@ -126,18 +132,18 @@
 - `common.user_tenants`
 - `common.tenants`
 
-### 4-2. SCR-DASHBOARD
+### 4-2. SCR-DASHBOARD（表示名: ホーム）
 
 必要PHPファイル:
 
-- ダッシュボード画面表示
+- ホーム画面表示
 - サマリ取得
 
 責務:
 
 - 入口表示のみ
-- 主要業務への導線提示
-- 管理者補助導線の表示制御
+- 日常業務への導線提示
+- 管理・設定導線の表示制御
 
 依存:
 
@@ -170,16 +176,15 @@
 - 詳細画面表示
 - 詳細取得
 - 満期対応更新
-- 活動履歴取得
 - コメント取得/登録
-- 監査ログ取得
+- 変更履歴取得
 
 責務:
 
 - 契約内容確認
 - 満期対応更新
 - 顧客情報サマリ表示
-- 活動履歴表示、コメント運用、監査ログ確認
+- コメント運用、変更履歴確認
 
 依存:
 
@@ -187,7 +192,6 @@
 - `t_renewal_case`
 - `m_customer`
 - `m_customer_contact`
-- `t_activity`
 - `t_case_comment`
 - `t_audit_event`
 - `t_audit_event_detail`
@@ -198,16 +202,20 @@
 
 - 一覧画面表示
 - 検索取得
+- 新規登録処理（POST customer/create）
 
 責務:
 
 - 顧客軸の探索
 - 一覧から顧客詳細へ遷移
+- 新規顧客の登録（補助操作）
+- 登録成功後に顧客詳細へ遷移
 
 依存:
 
 - `m_customer`
 - `m_customer_contact`
+- `common.users`（担当者選択のため）
 
 ### 4-6. SCR-CUSTOMER-DETAIL
 
@@ -221,7 +229,9 @@
 
 責務:
 
-- 顧客全体像表示
+- 顧客全体像表示（既存顧客の確認・更新が中心）
+- 顧客一覧の新規登録後の到達先としても利用される
+- 顧客活動履歴の時系列確認
 - 保有契約から満期詳細へ遷移
 - 契約処理画面化しない
 
@@ -239,15 +249,14 @@
 - 一覧画面表示
 - 検索取得
 - 登録
-- 編集
-- 削除
 - CSV取込
 - 取込結果表示
 
 責務:
 
-- 実績の検索とCRUD
-- CSV取込とエラー集約
+- 実績の検索と対象特定
+- 一覧から実績詳細への遷移
+- 登録とCSV取込の補助操作
 
 依存:
 
@@ -256,7 +265,28 @@
 - `t_contract`
 - `t_renewal_case`
 
-### 4-8. SCR-ACCIDENT-LIST / SCR-ACCIDENT-DETAIL（管理者向け補助導線）
+### 4-8. SCR-SALES-DETAIL
+
+必要PHPファイル:
+
+- 詳細画面表示
+- 詳細取得
+- 編集
+- 削除
+
+責務:
+
+- 実績1件の詳細確認
+- 編集と削除
+
+依存:
+
+- `t_sales_performance`
+- `m_customer`
+- `t_contract`
+- `t_renewal_case`
+
+### 4-9. SCR-ACCIDENT-LIST / SCR-ACCIDENT-DETAIL
 
 必要PHPファイル:
 
@@ -268,7 +298,7 @@
 
 責務:
 
-- 管理者向け補助導線として限定運用
+- 日常業務の事故対応導線として運用
 - 事故案件の一覧確認と詳細更新
 
 依存:
@@ -280,7 +310,7 @@
 - `t_audit_event`
 - `t_audit_event_detail`
 
-### 4-9. SCR-TENANT-SETTINGS（管理者向け補助導線）
+### 4-10. SCR-TENANT-SETTINGS（管理・設定）
 
 必要PHPファイル:
 
@@ -306,19 +336,30 @@
 | 画面 | 画面系PHP | API系PHP | 主DBテーブル | バッチ関連 | 権限 |
 |---|---|---|---|---|---|
 | SCR-LOGIN | ログイン表示 | 認証開始/戻り/ログアウト | users, user_tenants, tenants | なし | 未認証可、利用可否判定必須 |
-| SCR-DASHBOARD | ダッシュボード表示 | サマリ取得 | t_renewal_case, t_accident_case, t_sales_performance | なし | ログイン必須、管理導線は権限限定 |
+| SCR-DASHBOARD | ホーム表示 | サマリ取得 | t_renewal_case, t_accident_case, t_sales_performance | なし | ログイン必須、管理・設定導線のみ権限限定 |
 | SCR-RENEWAL-LIST | 一覧表示 | 検索 | t_contract, t_renewal_case, m_customer | なし | ログイン必須、表示範囲制御 |
-| SCR-RENEWAL-DETAIL | 詳細表示 | 詳細/更新/履歴 | t_contract, t_renewal_case, t_activity, t_case_comment, t_audit_event, t_audit_event_detail | なし | ログイン必須、更新範囲制御 |
+| SCR-RENEWAL-DETAIL | 詳細表示 | 詳細/更新/履歴 | t_contract, t_renewal_case, t_case_comment, t_audit_event, t_audit_event_detail | なし | ログイン必須、更新範囲制御 |
 | SCR-CUSTOMER-LIST | 一覧表示 | 検索 | m_customer, m_customer_contact | なし | ログイン必須、表示範囲制御 |
-| SCR-CUSTOMER-DETAIL | 詳細表示 | 取得/更新/保有契約 | m_customer, m_customer_contact, t_contract, t_activity | なし | ログイン必須、編集可否制御 |
-| SCR-SALES-LIST | 一覧表示 | 検索/登録/編集/削除/CSV | t_sales_performance, m_customer, t_contract, t_renewal_case | CSV取込（画面起点） | ログイン必須、更新権限制御 |
-| SCR-ACCIDENT-LIST | 一覧表示（管理者補助） | 検索/更新 | t_accident_case | 事故通知条件参照 | 管理者のみ標準表示 |
-| SCR-ACCIDENT-DETAIL | 詳細表示（管理者補助） | 更新/コメント/監査 | t_accident_case, t_case_comment, t_audit_event, t_audit_event_detail | 事故通知条件参照 | 管理者のみ標準表示 |
+| SCR-CUSTOMER-DETAIL | 詳細表示 | 取得/更新/保有契約/活動履歴 | m_customer, m_customer_contact, t_contract, t_activity | なし | ログイン必須、編集可否制御 |
+| SCR-SALES-LIST | 一覧表示 | 検索/登録/CSV | t_sales_performance, m_customer, t_contract, t_renewal_case | CSV取込（画面起点） | ログイン必須、更新権限制御 |
+| SCR-SALES-DETAIL | 詳細表示 | 取得/編集/削除 | t_sales_performance, m_customer, t_contract, t_renewal_case | なし | ログイン必須、更新権限制御 |
+| SCR-ACCIDENT-LIST | 一覧表示 | 検索/更新 | t_accident_case | 事故通知条件参照 | ログイン必須、表示範囲制御 |
+| SCR-ACCIDENT-DETAIL | 詳細表示 | 更新/コメント/監査 | t_accident_case, t_case_comment, t_audit_event, t_audit_event_detail | 事故通知条件参照 | ログイン必須、更新範囲制御 |
+| SCR-ACTIVITY-LIST | 一覧表示 | 検索（日付・担当者・種別） | t_activity, m_customer, common.users | なし | ログイン必須、全ユーザー |
+| SCR-ACTIVITY-NEW | 登録フォーム | 新規登録 | t_activity, m_customer | なし | ログイン必須、全ユーザー |
+| SCR-ACTIVITY-DETAIL | 詳細表示 | 取得/更新/削除 | t_activity, m_customer | なし | ログイン必須、全ユーザー |
+| SCR-ACTIVITY-DAILY | 日報ビュー | 当日活動取得/コメントupsert | t_activity, t_daily_report, common.users | なし | ログイン必須、全ユーザー |
 | SCR-TENANT-SETTINGS | 設定表示（管理者補助） | 通知設定/マスタ設定更新 | tenant_notify_targets, tenant_notify_routes, m_renewal_reminder_phase | 通知実行前提設定 | 管理権限者のみ標準表示・更新 |
 
 ---
 
 ## 6. 実装フェーズ（XServer + MySQL + PHP）
+
+現在の到達点（2026-03-29）:
+
+- Phase 1-6 は受入完了。
+- 以降は運用定着フェーズとして扱う。
+- Phase 6 の最終受入範囲と判定は `27` から `30` を正とする。
 
 ## Gate 0（Phase 1 着手前の必須解消事項）
 
@@ -347,7 +388,7 @@
 
 目的:
 
-- ログイン成功時のセッション確立とダッシュボード遷移を成立させる。
+- ログイン成功時のセッション確立とホーム遷移を成立させる。
 
 対象画面:
 
@@ -377,12 +418,12 @@
 認証/権限の考慮:
 
 - 複数テナント所属時は主所属テナントで自動ログイン
-- 一般利用者には管理者補助導線を標準表示しない
+- 一般利用者には管理・設定導線のみ非表示とする
 
 完了条件:
 
 - 未認証アクセスはログインへ遷移
-- 認証成功でセッション作成しダッシュボード遷移
+- 認証成功でセッション作成しホーム遷移
 - ログアウトでセッション破棄
 
 実装起点（現行）:
@@ -522,8 +563,8 @@ Phase 1 A分類 実施結果（2026-03-28）:
   - 単一所属ユーザーは `src/Auth/TenantResolver.php` で `TE001` を返却
   - 複数所属ユーザーは `src/Auth/TenantResolver.php` で拒否
   - 所属 0 件ユーザーは `src/Auth/TenantResolver.php` で拒否
-  - 認証済み admin セッションでは `dashboard` に管理者向け補助導線の HTML 断片 `card helper` が出現
-  - 認証済み member セッションでは管理者向け補助導線が出現しない
+  - 認証済み admin セッションでは `dashboard` に管理者向け設定導線（`tenant/settings`）の HTML 断片 `card helper` が出現
+  - 認証済み member セッションでは管理者向け設定導線（`tenant/settings`）が出現しない
   - admin / member いずれの認証済みセッションでも `xs000001_te001` への tenant DB 接続確認表示が成功
 - 静的確認のみ
   - なし
@@ -590,9 +631,8 @@ Phase 1 A分類 実施結果（2026-03-28）:
 
 - 一覧表示/検索
 - 詳細表示/更新
-- 活動履歴取得
 - コメント取得/登録
-- 監査ログ取得
+- 変更履歴取得
 
 必要な共通部品:
 
@@ -606,7 +646,6 @@ Phase 1 A分類 実施結果（2026-03-28）:
 - `t_renewal_case`
 - `m_customer`
 - `m_customer_contact`
-- `t_activity`
 - `t_case_comment`
 - `t_audit_event`
 - `t_audit_event_detail`
@@ -618,9 +657,9 @@ Phase 1 A分類 実施結果（2026-03-28）:
 
 対象処理の責務分離:
 
-- 活動履歴表示: `t_activity` の時系列表示
+- 顧客活動履歴表示: 顧客詳細側で `t_activity` の時系列表示
 - コメント表示/登録: `t_case_comment` の取得と登録
-- 監査ログ表示: `t_audit_event`, `t_audit_event_detail` の参照表示
+- 変更履歴表示: `t_audit_event`, `t_audit_event_detail` の参照表示
 
 完了条件:
 
@@ -685,12 +724,14 @@ Phase 1 A分類 実施結果（2026-03-28）:
 対象画面:
 
 - SCR-SALES-LIST
+- SCR-SALES-DETAIL
 
 対象PHPファイル:
 
 - 一覧表示
 - 検索
 - 登録
+- 詳細表示
 - 編集
 - 削除
 
@@ -720,6 +761,8 @@ Phase 1 A分類 実施結果（2026-03-28）:
 完了条件:
 
 - 一覧、検索、登録、編集、削除が成立
+- 実績一覧から実績詳細へ遷移できる
+- 編集、削除は実績詳細画面起点で成立
 
 ### Phase 4B: 実績管理（CSV取込/エラー集約/取込結果表示）
 
@@ -764,17 +807,26 @@ Phase 1 A分類 実施結果（2026-03-28）:
 
 - CSV取込、エラー集約、取込結果表示が成立
 
-### Phase 5: 管理者補助導線（事故案件一覧/詳細、テナント設定）
+### Phase 5: 事故業務導線と管理・設定（**実装完了・標準業務**）
+
+位置づけ:
+
+本フェーズは実装完了済みであり、事故業務は満期・顧客・実績と並ぶ標準業務導線として正式に昇格している。
+
+事故業務を通常主導線として提供する一方で、テナント設定などの管理・設定機能を権限付きで分離する。
+
+詳細方針については、`2. 変更方針` で確定しており、`docs/02_navigation-policy.md` で正式に定義されている。
 
 目的:
 
-- 管理者向け補助機能を通常主導線と分離して提供する。
+- 事故案件一覧/詳細を一般利用者の標準業務導線として安定運用する
+- 管理・設定機能を権限者側に適切に分離する
 
 対象画面:
 
-- SCR-ACCIDENT-LIST（管理者向け補助導線）
-- SCR-ACCIDENT-DETAIL（管理者向け補助導線）
-- SCR-TENANT-SETTINGS（管理者向け補助導線）
+- SCR-ACCIDENT-LIST
+- SCR-ACCIDENT-DETAIL
+- SCR-TENANT-SETTINGS（管理・設定）
 
 対象PHPファイル:
 
@@ -786,8 +838,8 @@ Phase 1 A分類 実施結果（2026-03-28）:
 
 必要な共通部品:
 
-- 管理者認可ガード
-- 管理者向け導線表示制御
+- 一般ログインユーザー向けの事故案件認可
+- 管理・設定導線表示制御
 
 必要なDBテーブル:
 
@@ -801,11 +853,19 @@ Phase 1 A分類 実施結果（2026-03-28）:
 - `common.tenant_notify_routes`
 - `m_renewal_reminder_phase`
 
+実装状況（2026-03-30 確定）:
+
+- 事故案件一覧/詳細: 実装完了、標準業務導線に昇格
+- main nav に「事故管理」として掲載される
+- ホームの日常業務カードに含まれている
+- 一般利用者アクセス可、権限による表示制御無し
+- テナント設定: 管理権限者に限定
+
 認証/権限の考慮:
 
-- 一般利用者には標準表示しない
-- main nav やダッシュボード主要導線として扱わない
-- 管理者に限定して表示/更新
+- 事故案件はログイン済み利用者の標準業務導線に含める ← **実装済み**
+- 事故案件は main nav とホームの日常業務に含める ← **実装済み**
+- テナント設定のみ管理権限者に限定して表示/更新する
 
 対象処理の責務分離:
 
@@ -815,8 +875,13 @@ Phase 1 A分類 実施結果（2026-03-28）:
 
 完了条件:
 
-- 管理者で事故/設定機能が利用可能
-- 一般利用者には導線を標準表示しない
+- ログイン済み利用者で事故案件の一覧/詳細/更新が利用可能
+- 管理権限者のみテナント設定を利用可能
+
+注記:
+
+- `20` と `21` の受入確認ログは 2026-03-29 時点の実測記録であり、当時の admin 限定実装を前提としている。
+- 2026-03-30 以降の正式方針は、本節および `3. 変更方針` を正とし、事故案件を通常業務導線へ昇格させる。
 
 ### Phase 6: バッチ・通知・運用強化
 
@@ -1061,8 +1126,11 @@ Gate 0 完了後の次フェーズ:
 
 【未実装】
 
-- `docs/screens/renewal-case-detail.md` にある「コメント登録」は未実装（現状はコメント取得表示のみ）
 - `t_audit_event_detail` は投入済みだが、画面表示は `t_audit_event` の一覧のみで詳細表示機能は未実装
+
+補足（2026-03-30 追記）:
+
+- 満期詳細のコメント登録（追記方式）は `renewal/comment` と詳細画面の「新規コメント」入力で実装済み
 
 【未確認】
 
@@ -1091,7 +1159,6 @@ Gate 0 完了後の次フェーズ:
   - detail直打ち遮断
   - update直接POST未更新
 - 未実装
-  - コメント登録
   - `t_audit_event_detail` の画面表示
 - 未確認
   - なし
@@ -1625,8 +1692,8 @@ Phase 4B 判定結論:
 
 【確認できたこと】
 
-- 管理者補助導線の表示制御
-  - admin セッションでは dashboard に「管理者向け補助導線」として `accident/list` と `tenant/settings` が表示される
+- 管理者向け設定導線の表示制御
+  - admin セッションでは dashboard に `tenant/settings` が表示される
   - member セッションでは同導線が表示されない
 - 一般ユーザー遮断
   - member で `accident/list` 直打ちは `dashboard` へ 302
@@ -1666,13 +1733,13 @@ Phase 4B 判定結論:
 
 受入範囲:
 
-- 本判定は Phase 5 最小実装範囲（管理者補助導線の表示制御、事故案件一覧/詳細、事故更新、コメント登録、監査表示、テナント設定更新）に限定する。
+- 本判定は Phase 5 最小実装範囲（管理者向け設定導線の表示制御、事故案件一覧/詳細、事故更新、コメント登録、監査表示、テナント設定更新）に限定する。
 
 判定:
 
 - 確認済み
-  - 一般ユーザーに管理者補助導線が表示されない
-  - 管理者にのみ事故案件/テナント設定導線が表示される
+  - 一般ユーザーに管理者向け設定導線（`tenant/settings`）が表示されない
+  - 事故案件導線は全ログインユーザーに表示され、テナント設定導線は管理者にのみ表示される
   - 一般ユーザーの `accident/*`, `tenant/settings*` 直打ち/直接POSTが遮断される
   - 事故案件は一覧→詳細の基本導線で動作する
   - 事故案件詳細でコメント登録と監査ログ表示が文脈付きで動作する
@@ -1688,6 +1755,11 @@ Phase 5 判定結論:
 - Phase 5（最小実装範囲）は受入完了としてクローズする。
 
 ---
+
+注記:
+
+- `22` から `26` は 2026-03-29 時点の実装進捗ログである。
+- Phase 6 の最終受入範囲と判定は `27` から `30` を正とする。
 
 ## 22. Phase 6 着手（通知実行・運用強化） 2026-03-29
 
@@ -1739,7 +1811,7 @@ Phase 5 判定結論:
   - ルート判定: common (`tenant_notify_routes`, `tenant_notify_targets`)
   - 対象抽出/実績記録: tenant (`t_renewal_case`, `m_renewal_reminder_phase`, `t_notification_*`)
 
-未実装（Phase 6 継続項目）:
+未実装（当時時点の Phase 6 継続項目）:
 
 - `accident` 通知タイプのバッチ実装
 - 配信失敗時の再試行ポリシー（backoff / 最大回数）
@@ -1801,7 +1873,7 @@ Phase 5 判定結論:
 - retry 実行結果が `retry_failed_run_id` でトレースできる
 - full suite に Phase 6 通知系チェックを常設できた
 
-未実装（Phase 6 継続項目）:
+未実装（当時時点の Phase 6 継続項目）:
 
 - backoff 間隔や最大再試行回数のポリシー固定
 - cron 運用時の通知失敗アラート設計
@@ -1858,7 +1930,403 @@ Phase 5 判定結論:
 - delivery 側に「最後に試行した時刻」と attempt 情報を残して判定できる
 - 制約により retryしなかった対象は既存 failed 状態を維持し、run 集計上は `skip` として扱える
 
-未実装（Phase 6 継続項目）:
+未実装（当時時点の Phase 6 継続項目）:
 
 - XServer cron 実運用でのジョブ定義固定
 - 通知失敗アラートと運用監視手順の明文化
+
+---
+
+## 25. Phase 6 継続（Webhook実送信反映） 2026-03-29
+
+実装内容（今回追加）:
+
+- 追加
+  - `src/Domain/Notification/WebhookNotificationSender.php`
+    - `provider_type=lineworks` の webhook 送信処理
+    - HTTP 2xx 判定
+    - 非2xx/例外を RuntimeException 化
+- 更新
+  - `src/Domain/Notification/RenewalNotificationBatchService.php`
+    - route 有効時に webhook 実送信を実行
+    - 送信成功時のみ `success` 記録
+    - 送信失敗時は `failed` 記録
+  - `src/Domain/Notification/AccidentNotificationBatchService.php`
+    - renewal と同様の webhook 実送信フローを適用
+  - `tools/batch/run_renewal_notification.php`
+    - route 取得で `provider_type`, `destination_name`, `webhook_url` をサービスへ受け渡し
+  - `tools/batch/README.md`
+    - webhook 実送信時の success/failed 判定を明記
+
+確認できたこと:
+
+- DB 記録のみで success 扱いする挙動を排除し、HTTP 2xx を success 条件に変更した
+- route 無効時は従来どおり skipped を維持
+- idempotency（再実行 skip）の制御は既存の delivery 一意制約ベースを維持
+
+## 26. Phase 6 継続（LINE WORKS本文業務化） 2026-03-29
+
+実装内容（今回追加）:
+
+- 更新
+  - `src/AppConfig.php`
+    - `APP_PUBLIC_URL` を追加し、LINE WORKS ボタンURLの基底値として利用
+    - `APP_PUBLIC_URL` 未設定時は従来の `APP_URL` をfallback するが、localhost系は通知送信時に reject
+  - `src/Domain/Notification/WebhookNotificationSender.php`
+    - LINE WORKS Incoming Webhook の payload を `title` / `body.text` / `button.label` / `button.url` で検証
+    - `body.text` 必須とボタンURL妥当性を sender 側で担保
+  - `src/Domain/Notification/lineworks_payload_helpers.php`
+    - `build_lineworks_absolute_url`
+    - `format_lineworks_short_date`
+    - `build_lineworks_renewal_alert_body_text`
+    - `build_lineworks_accident_reminder_body_text`
+    - `build_lineworks_renewal_alert_payload`
+    - `build_lineworks_accident_reminder_payload`
+  - `src/Domain/Notification/RenewalNotificationBatchRepository.php`
+    - 契約者名・証券番号付きで 28日前 / 14日前の対象抽出を取得
+    - retry 用に満期日・契約者名・証券番号・残日数を取得
+  - `src/Domain/Notification/RenewalNotificationBatchService.php`
+    - 満期通知を `【満期案件通知（早期）】` と `【満期案件通知（直前）】` の固定2種に整理
+    - 1案件1通ではなく、通知種別ごとに対象件数と一覧をまとめて送信
+    - 本文に action prompt / 対象件数 / 対象満期案件一覧 / 省略時 `ほかN件` を追加
+    - ボタンは `一覧` ラベルで満期一覧へ遷移
+    - 本文から internal id / phase番号 / 英語疎通文面を除去
+  - `src/Domain/Notification/AccidentNotificationBatchRepository.php`
+    - 事故日・契約者名を含む通知対象取得に変更
+  - `src/Domain/Notification/AccidentNotificationBatchService.php`
+    - 事故通知を `【事故対応リマインド】` 1通に集約し、対象件数と一覧を送信
+    - ボタンは `一覧` ラベルで事故案件一覧へ遷移
+  - `tools/batch/README.md`
+    - 新payload仕様、APP_PUBLIC_URL ルール、28日前/14日前固定通知を追記
+
+確認できたこと:
+
+- renewal は 28日前と14日前で別メッセージ送信になった
+- accident は既存ルール一致案件を 1メッセージに集約して送信できた
+- タイトル、本文、ボタンの payload 構造を helper と sender で分離できた
+- ボタンURLは `APP_PUBLIC_URL` ベースの絶対URLで生成される
+- run / delivery 記録方式と idempotency は維持された
+
+---
+
+## 27. Phase 6 受入範囲の固定
+
+Phase 6 の受入範囲は、通知バッチ機能の追加そのものではなく、定期実行、履歴確認、失敗時再実行の運用が再現可能な定義として固定されていることに限定する。
+
+確認対象は以下とする。
+
+- cron 実運用ジョブ定義
+- 失敗検知条件とアラート導線
+- 監視手順
+- 一次確認手順
+- 再実行手順
+- Phase 6 受入判定（短縮版）の明記
+
+本フェーズでは、監視ダッシュボード化、運用SOPの詳細化、障害一次切り分けの高度化までは受入範囲に含めない。これらは後続フェーズへ分離して扱う。
+
+---
+
+## 28. Phase 6 運用定義の固定
+
+### 28-1. cron 実運用ジョブ定義
+
+Phase 6 で本番運用に固定する cron ジョブは以下とする。
+
+- 満期通知バッチ
+  - 目的: 満期通知対象の抽出と配信
+  - 実行頻度: 毎営業日 1 回
+  - 実行時刻: 午前の業務開始前を基本とする
+- 事故通知バッチ
+  - 目的: 事故通知対象の抽出と配信
+  - 実行頻度: 毎営業日 1 回
+  - 実行時刻: 満期通知と分離した時刻を基本とする
+
+実運用で固定するコマンドは、通知バッチ本体 `tools/batch/run_renewal_notification.php` を使用する。
+
+例（パスは環境に合わせて置換）:
+
+- 満期通知
+  - `/usr/bin/php /home/your_account/insurance-agency/tools/batch/run_renewal_notification.php --date=$(date +\%F) --tenant=TE001 --executed-by=1 --type=renewal >> /home/your_account/logs/renewal_notification.log 2>&1`
+- 事故通知
+  - `/usr/bin/php /home/your_account/insurance-agency/tools/batch/run_renewal_notification.php --date=$(date +\%F) --tenant=TE001 --executed-by=1 --type=accident >> /home/your_account/logs/accident_notification.log 2>&1`
+
+補足:
+
+- 終了コード 0 を成功、0 以外を失敗として扱う
+- 標準出力・標準エラーの保存先を固定する
+- 多重実行を避ける前提（実行時刻分離、運用手順での二重起動防止）を明示する
+
+定義時の必須条件は以下とする。
+
+- 実行コマンドがリポジトリ内の正式バッチ実装を指していること
+- 標準出力、標準エラー出力の保存先が明示されていること
+- 多重実行を避ける前提が運用上説明できること
+- 失敗時に検知可能な終了状態を残すこと
+
+### 28-2. 通知失敗の検知条件
+
+通知失敗は、少なくとも以下のいずれかに該当する場合と定義する。
+
+- バッチプロセス自体が異常終了した場合
+- 通知対象の抽出に失敗した場合
+- 配信処理でエラーが返却された場合
+- 実行履歴が `failed` または `partial` となった場合
+- 送信対象件数に対して配信成功件数が不足した場合
+
+`partial` は一部失敗として扱い、運用上は成功扱いにしない。確認対象とする。
+
+### 28-3. アラート導線
+
+通知失敗時のアラート導線は以下を固定とする。
+
+- 誰に通知するか
+  - 管理者ユーザー
+  - 運用確認担当者
+- 何で通知するか
+  - 既定の運用連絡手段 1 系統
+  - 必要に応じて補助手段 1 系統
+- どの条件で通知するか
+  - バッチ異常終了
+  - 実行履歴 `failed`
+  - 実行履歴 `partial`
+  - 配信件数不整合
+
+アラート文面には最低限以下を含める。
+
+- バッチ種別
+- 実行日時
+- 実行結果
+- 失敗件数または不整合件数
+- 確認対象ログまたは履歴の参照先
+
+### 28-4. 監視手順
+
+毎日の監視手順は以下とする。
+
+1. 対象バッチが当日分として起動していることを確認する
+2. `t_notification_run` に当日実行履歴が記録されていることを確認する
+3. 実行結果が `success` であることを確認する
+4. `partial` または `failed` がある場合は対象 run を特定する
+5. `t_notification_delivery` で失敗対象の有無と件数を確認する
+6. 必要に応じてログ出力を確認する
+7. 再実行が必要かを判断する
+
+監視は「実行されたか」だけで終わらせず、「結果が正常か」まで確認することを前提とする。
+
+### 28-5. 一次確認手順
+
+失敗時の一次確認は以下の順で実施する。
+
+1. 対象バッチ種別を特定する
+2. 実行日時と対象 run を特定する
+3. `t_notification_run` の status、件数、エラーメッセージを確認する
+4. `t_notification_delivery` で失敗対象、対象案件、配信結果を確認する
+5. アプリケーションログまたは cron ログで異常終了有無を確認する
+6. 設定不備か、データ不備か、外部配信失敗かを切り分ける
+7. 再実行可否を判断する
+
+一次確認の目的は、その場で深掘りしすぎることではなく、再実行可能な障害か、設定修正が必要な障害かを切り分けることにある。
+
+### 28-6. 再実行手順
+
+再実行は、原因が解消済みであり、重複送信防止条件を満たせる場合に限って実施する。
+
+再実行手順は以下とする。
+
+1. 対象 run と対象通知種別を特定する
+2. 前回失敗原因が解消済みであることを確認する
+3. 対象バッチを手動実行する
+4. 実行後、新しい `t_notification_run` が記録されることを確認する
+5. 実行結果が `success` であることを確認する
+6. `partial` の場合は未解消として継続確認対象とする
+7. `t_notification_delivery` の失敗件数が解消していることを確認する
+8. 必要に応じて運用記録へ再実行結果を残す
+
+再実行コマンドは以下を正式コマンドとして固定する。
+
+- 満期通知の再実行
+  - `php tools/batch/run_renewal_notification.php --date=YYYY-MM-DD --tenant=TE001 --executed-by=1 --type=renewal --retry-failed-run-id=対象RunID`
+- 事故通知の再実行
+  - `php tools/batch/run_renewal_notification.php --date=YYYY-MM-DD --tenant=TE001 --executed-by=1 --type=accident --retry-failed-run-id=対象RunID`
+- 必要時の再試行ポリシー指定
+  - `--retry-max-attempts=回数`
+  - `--retry-minutes=待機分`
+
+引数の定義は `tools/batch/run_renewal_notification.php` と `tools/batch/README.md` の記載に一致させる。
+成功判定は、終了コードだけでなく、run / delivery の結果確認まで含める。
+
+---
+
+## 29. Phase 6 受入判定（短縮版）
+
+### 確認済み
+
+- 通知バッチの実装が存在し、定期実行を前提とした構成になっている
+- 通知実行履歴を確認する前提テーブルが存在する
+- 配信結果を確認する前提テーブルが存在する
+- cron 実運用ジョブ定義を固定対象として明記した
+- 失敗検知条件を明記した
+- アラート導線を明記した
+- 監視手順を明記した
+- 一次確認手順を明記した
+- 再実行手順を明記した
+
+### 未実装
+
+- 監視ダッシュボード化
+- 運用SOPの詳細テンプレート化
+- 障害一次切り分けの高度化
+- 自動エスカレーションや二次通知の仕組み
+
+### 未確認
+
+- 本番 cron 環境での長期連続運転実績
+- 実障害発生時の運用フロー一巡
+- 運用担当者交代時の手順引継ぎ妥当性
+
+### Phase 6 判定結論
+
+Phase 6 は、通知バッチ運用を再現可能な定義として固定する範囲において受入完了とする。
+
+本判定は、通知機能の拡張余地や運用改善余地が残ることを否定しない。
+ただし、定期実行、履歴確認、失敗時再実行の運用定義が明文化されたことで、Phase 6 の完了条件は満たしたものと判断する。
+
+---
+
+## 30. 次フェーズへの分離
+
+Phase 6 で受け入れない残課題は、後続の運用定着フェーズへ分離する。
+
+### 運用定着フェーズ
+
+対象は以下とする。
+
+- 監視ダッシュボード化
+- 運用SOP詳細化
+- 障害一次切り分け手順の高度化
+- 運用記録テンプレート整備
+- アラート経路の強化
+- 運用レビューサイクルの整備
+
+---
+
+## 31. 営業活動管理 Phase A — Activity CRUD（追加フェーズ）
+
+### 目的
+
+顧客起点の営業活動（訪問・電話・メール等）を記録し、一覧・詳細・編集・削除を可能にする。
+
+### 前提
+
+- `t_activity` DDL は追加済み。変更禁止。
+- `t_daily_report` / `t_sales_case` DDL も追加済み。フェーズA時点では `t_daily_report` は未使用、`t_sales_case` は紐づけフィールドのみ保持（UI非表示）。
+- テナント分離は既存パターン（TenantConnectionFactory）に完全準拠。
+
+### 対象画面
+
+- SCR-ACTIVITY-LIST（活動一覧）
+- SCR-ACTIVITY-NEW（活動登録）
+- SCR-ACTIVITY-DETAIL（活動詳細）
+
+### 対象PHPファイル（新規）
+
+- `src/Domain/Activity/ActivityRepository.php`
+- `src/Controller/ActivityController.php`
+- `src/Presentation/ActivityListView.php`
+- `src/Presentation/ActivityDetailView.php`
+
+### 対象PHPファイル（変更）
+
+- `src/bootstrap.php`：ActivityController DI登録、ルート追加（計6本）
+  - `GET  activity/list`
+  - `GET  activity/new`
+  - `GET  activity/detail`
+  - `POST activity/store`
+  - `POST activity/update`
+  - `POST activity/delete`
+- `src/Presentation/View/Layout.php`：navLinks に「営業活動」追加
+- `src/Domain/Customer/CustomerRepository.php`：`findActivities()` のカラム名不整合修正（activity_at→activity_date, detail→detail_text, outcome→result_type）、取得フィールド拡充
+- `src/Presentation/CustomerDetailView.php`：活動履歴セクションに活動詳細リンクと活動登録ボタン追加
+
+### 必要なDBテーブル
+
+- `t_activity`（主）
+- `m_customer`（顧客名表示）
+- `common.users`（担当者名表示）
+
+### 既存不整合（修正対象）
+
+`CustomerRepository::findActivities()` が存在しないカラムを参照している。
+
+| クエリ内カラム名 | DDL実際のカラム名 |
+|---|---|
+| `activity_at` | `activity_date` |
+| `detail` | `detail_text` |
+| `outcome` | `result_type` |
+
+このメソッドはフェーズA実装時に同時修正する。
+
+### 完了条件
+
+- 活動を新規登録できる（customer_id 必須）
+- 活動一覧で日付・担当者・活動種別でフィルタできる
+- 活動詳細で内容を確認・編集・削除できる
+- 顧客詳細の活動履歴セクションから活動詳細へ遷移できる
+- 顧客詳細から活動登録（customer_id 引き継ぎ）へ遷移できる
+- sales_case_id は DB保存可能だが UI は非表示
+- 他テナントのデータが参照されないこと
+
+---
+
+## 32. 営業活動管理 Phase B — Daily Report View（追加フェーズ）
+
+### 目的
+
+指定日の活動を集約表示し、日報コメントを入力・保存できる日報ビューを追加する。
+
+### 前提
+
+- Phase A 完了後に着手。
+- `t_daily_report` DDL は追加済み。UNIQUE KEY(report_date, staff_user_id)。変更禁止。
+- 日報コメントの upsert は INSERT ON DUPLICATE KEY UPDATE で実装。
+
+### 対象画面
+
+- SCR-ACTIVITY-DAILY（日報ビュー）
+
+### 対象PHPファイル（新規）
+
+- `src/Domain/Activity/DailyReportRepository.php`
+- `src/Presentation/ActivityDailyView.php`
+
+### 対象PHPファイル（変更）
+
+- `src/Controller/ActivityController.php`：`daily()` / `saveComment()` メソッド追加
+- `src/bootstrap.php`：ルート追加（計2本）
+  - `GET  activity/daily`
+  - `POST activity/comment`
+
+### 必要なDBテーブル
+
+- `t_daily_report`（日報コメント）
+- `t_activity`（その日の活動一覧）
+- `common.users`（担当者名表示）
+
+### 完了条件
+
+- 活動一覧の日付リンクから日報ビューへ遷移できる
+- 日報ビューで指定日の活動が一覧表示される（自分の活動のみ。管理者は担当者切替可能）
+- 日報コメントを入力・保存できる（1スタッフ1日1件。再保存で上書き）
+- is_submitted フラグは将来用途とし、現時点では常に 0 のまま保存
+
+---
+
+> **ルート追加の総計（Phase A + Phase B）**: 8 本（Phase A: 6本 + Phase B: 2本）
+
+---
+
+## 33. 営業活動管理 Phase C — Sales Case CRUD（予定フェーズ）
+
+Phase A/B 完了後に別途着手予定。`t_sales_case` DDL は追加済みだが、Phase C まで UI実装は行わない。
+
+このフェーズは、通知機能の開発完了後に、実運用を安定して継続するための改善フェーズとして扱う。

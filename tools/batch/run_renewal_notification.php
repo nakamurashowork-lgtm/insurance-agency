@@ -85,7 +85,9 @@ $tenantFactory = new TenantConnectionFactory($config);
 $commonPdo = $commonFactory->create();
 
 $routeCheckStmt = $commonPdo->prepare(
-        'SELECT r.is_enabled AS route_enabled,
+    'SELECT r.is_enabled AS route_enabled,
+            t.provider_type,
+            t.destination_name,
                         t.is_enabled AS target_enabled,
                         t.webhook_url
          FROM tenant_notify_routes r
@@ -141,14 +143,21 @@ foreach ($tenants as $tenant) {
                 && (int) ($route['target_enabled'] ?? 0) === 1
                 && trim((string) ($route['webhook_url'] ?? '')) !== '';
 
+            $endpoint = [
+                'provider_type' => is_array($route) ? (string) ($route['provider_type'] ?? '') : '',
+                'destination_name' => is_array($route) ? (string) ($route['destination_name'] ?? '') : '',
+                'webhook_url' => is_array($route) ? (string) ($route['webhook_url'] ?? '') : '',
+                'app_public_url' => $config->appPublicUrl,
+            ];
+
             if ($type === 'renewal') {
                 $repository = new RenewalNotificationBatchRepository($tenantPdo);
                 $service = new RenewalNotificationBatchService($repository);
-                $summary = $service->run($runDate, $executedBy, $routeEnabled, $retryFailedRunId, $retryPolicy);
+                $summary = $service->run($runDate, $executedBy, $routeEnabled, $retryFailedRunId, $retryPolicy, null, $endpoint, $tenantCode);
             } else {
                 $repository = new AccidentNotificationBatchRepository($tenantPdo);
                 $service = new AccidentNotificationBatchService($repository);
-                $summary = $service->run($runDate, $executedBy, $routeEnabled, $retryFailedRunId, $retryPolicy);
+                $summary = $service->run($runDate, $executedBy, $routeEnabled, $retryFailedRunId, $retryPolicy, null, $endpoint, $tenantCode);
             }
 
             $summary['notification_type'] = $type;

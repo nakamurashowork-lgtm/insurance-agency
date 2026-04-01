@@ -29,11 +29,6 @@ final class TenantSettingsController
         $auth = $this->guard->requireAuthenticated();
         $this->assertAdmin($auth);
 
-        $tab = (string) ($_GET['tab'] ?? 'notify');
-        if (!in_array($tab, ['notify', 'master'], true)) {
-            $tab = 'notify';
-        }
-
         $notifySettings = [
             'renewal' => [
                 'is_enabled' => 0,
@@ -58,7 +53,7 @@ final class TenantSettingsController
             $notifySettings = $repository->findNotificationSettings((string) ($auth['tenant_code'] ?? ''));
             $phases = $repository->findReminderPhases();
         } catch (Throwable) {
-            $error = 'テナント設定の取得に失敗しました。';
+            $error = '管理・設定の取得に失敗しました。';
         }
 
         $flashError = $this->guard->session()->consumeFlash('error');
@@ -68,16 +63,16 @@ final class TenantSettingsController
             $auth,
             $notifySettings,
             $phases,
-            $tab,
-            $this->config->routeUrl('tenant/settings'),
-            $this->config->routeUrl('tenant/settings/notify'),
-            $this->config->routeUrl('tenant/settings/phase'),
-            $this->config->routeUrl('dashboard'),
-            $this->guard->session()->issueCsrfToken('tenant_settings_notify'),
-            $this->guard->session()->issueCsrfToken('tenant_settings_phase'),
+            $this->config->routeUrl('tenant/settings/all'),
+            $this->guard->session()->issueCsrfToken('tenant_settings_all'),
             $error,
             $flashError,
-            $flashSuccess
+            $flashSuccess,
+            ControllerLayoutHelper::build(
+                $this->guard,
+                $this->config,
+                'settings'
+            )
         ));
     }
 
@@ -89,7 +84,7 @@ final class TenantSettingsController
         $token = (string) ($_POST['_csrf_token'] ?? '');
         if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_settings_notify', $token)) {
             $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
-            Responses::redirect($this->config->routeUrl('tenant/settings') . '&tab=notify');
+            Responses::redirect($this->config->routeUrl('tenant/settings'));
         }
 
         $tenantCode = (string) ($auth['tenant_code'] ?? '');
@@ -100,7 +95,7 @@ final class TenantSettingsController
 
         if ($renewal === null || $accident === null) {
             $this->guard->session()->setFlash('error', '通知設定の入力値が不正です。');
-            Responses::redirect($this->config->routeUrl('tenant/settings') . '&tab=notify');
+            Responses::redirect($this->config->routeUrl('tenant/settings'));
         }
 
         try {
@@ -131,7 +126,7 @@ final class TenantSettingsController
             $this->guard->session()->setFlash('error', '通知設定の保存に失敗しました。');
         }
 
-        Responses::redirect($this->config->routeUrl('tenant/settings') . '&tab=notify');
+        Responses::redirect($this->config->routeUrl('tenant/settings'));
     }
 
     public function savePhase(): void
@@ -142,7 +137,7 @@ final class TenantSettingsController
         $token = (string) ($_POST['_csrf_token'] ?? '');
         if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_settings_phase', $token)) {
             $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
-            Responses::redirect($this->config->routeUrl('tenant/settings') . '&tab=master');
+            Responses::redirect($this->config->routeUrl('tenant/settings'));
         }
 
         $id = (int) ($_POST['id'] ?? 0);
@@ -153,7 +148,7 @@ final class TenantSettingsController
 
         if ($id <= 0 || $fromDaysBefore < 0 || $toDaysBefore < 0 || $displayOrder < 0 || $fromDaysBefore < $toDaysBefore) {
             $this->guard->session()->setFlash('error', '満期通知フェーズの入力値が不正です。');
-            Responses::redirect($this->config->routeUrl('tenant/settings') . '&tab=master');
+            Responses::redirect($this->config->routeUrl('tenant/settings'));
         }
 
         try {
@@ -170,15 +165,81 @@ final class TenantSettingsController
             );
 
             if ($updated > 0) {
-                $this->guard->session()->setFlash('success', 'マスタ値を更新しました。');
+                $this->guard->session()->setFlash('success', '通知タイミングを更新しました。');
             } else {
                 $this->guard->session()->setFlash('error', '更新対象が見つからないか、変更がありません。');
             }
         } catch (Throwable) {
-            $this->guard->session()->setFlash('error', 'マスタ値の更新に失敗しました。');
+            $this->guard->session()->setFlash('error', '通知タイミングの更新に失敗しました。');
         }
 
-        Responses::redirect($this->config->routeUrl('tenant/settings') . '&tab=master');
+        Responses::redirect($this->config->routeUrl('tenant/settings'));
+    }
+
+    public function saveAll(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+        $this->assertAdmin($auth);
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_settings_all', $token)) {
+            $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
+            Responses::redirect($this->config->routeUrl('tenant/settings'));
+        }
+
+        $tenantCode = (string) ($auth['tenant_code'] ?? '');
+        $userId = (int) ($auth['user_id'] ?? 0);
+
+        $renewal = $this->normalizeNotifyInput('renewal');
+        $accident = $this->normalizeNotifyInput('accident');
+
+        if ($renewal === null || $accident === null) {
+            $this->guard->session()->setFlash('error', '通知設定の入力値が不正です。');
+            Responses::redirect($this->config->routeUrl('tenant/settings'));
+        }
+
+        $phaseInputs = is_array($_POST['phases'] ?? null) ? $_POST['phases'] : [];
+        $parsedPhases = [];
+        foreach ($phaseInputs as $idStr => $vals) {
+            if (!is_array($vals)) {
+                continue;
+            }
+            $id = (int) $idStr;
+            $from = $this->toInt($vals['from_days_before'] ?? null, -1);
+            $to = $this->toInt($vals['to_days_before'] ?? null, -1);
+            $displayOrder = $this->toInt($vals['display_order'] ?? null, -1);
+            if ($id <= 0 || $from < 0 || $to < 0 || $displayOrder < 0 || $from < $to) {
+                $this->guard->session()->setFlash('error', '通知タイミングの入力値が不正です。');
+                Responses::redirect($this->config->routeUrl('tenant/settings'));
+            }
+            $parsedPhases[] = ['id' => $id, 'from' => $from, 'to' => $to, 'display_order' => $displayOrder];
+        }
+
+        try {
+            $commonPdo = $this->commonConnectionFactory->create();
+            $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $repository = new TenantSettingsRepository($commonPdo, $tenantPdo);
+            $repository->saveNotificationSetting(
+                $tenantCode, 'renewal',
+                $renewal['provider_type'], $renewal['destination_name'],
+                $renewal['webhook_url'], $renewal['is_enabled'], $userId
+            );
+            $repository->saveNotificationSetting(
+                $tenantCode, 'accident',
+                $accident['provider_type'], $accident['destination_name'],
+                $accident['webhook_url'], $accident['is_enabled'], $userId
+            );
+            foreach ($parsedPhases as $p) {
+                $repository->updateReminderPhase(
+                    $p['id'], $p['from'], $p['to'], 1, $p['display_order'], $userId
+                );
+            }
+            $this->guard->session()->setFlash('success', '設定を保存しました。');
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '設定の保存に失敗しました。');
+        }
+
+        Responses::redirect($this->config->routeUrl('tenant/settings'));
     }
 
     /**

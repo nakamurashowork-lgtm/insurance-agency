@@ -9,21 +9,35 @@ final class LoginView
     {
         $errorHtml = '';
         if (is_string($errorMessage) && $errorMessage !== '') {
-            $errorHtml = '<div class="error">' . Layout::escape($errorMessage) . '</div>';
+            $errorHtml = '<div class="alert alert-error" role="alert">'
+                . '<div class="alert-icon">⚠</div>'
+                . '<div class="alert-content">'
+                . '<div class="alert-title">ログインできませんでした</div>'
+                . '<div class="alert-message">' . Layout::escape($errorMessage) . '</div>'
+                . '</div>'
+                . '</div>';
         }
 
         $googleLoginLink = Layout::escape($googleLoginUrl);
 
         $content = ''
-            . '<div class="card">'
-            . '<h1 class="title">ログイン</h1>'
-            . '<p class="muted">Google認証でログインしてください。ID / パスワードの直接入力は行いません。</p>'
+            . '<div class="card login-card">'
+            . '<div class="login-header">'
+            . '<h1 class="login-title">保険代理店業務システム</h1>'
+            . '<h2 class="login-subtitle">Google認証でログイン</h2>'
             . '</div>'
-            . '<div class="card">'
             . $errorHtml
-            . '<a class="btn" href="' . $googleLoginLink . '">Googleでログイン</a>'
-            . '</div>';
+            . '<div class="login-actions">'
+            . '<a id="login-btn" class="btn btn-primary btn-large" href="' . $googleLoginLink . '" data-loading="Googleへ移動中...">Googleでログイン</a>'
+            . '</div>'
+            . '<p class="login-helper-text">ログインできない場合は管理者へご連絡ください。</p>'
+            . '</div>'
+            . '<script>'
+            . '(function(){const btn=document.getElementById("login-btn");if(!btn)return;let isSubmitting=false;btn.addEventListener("click",function(e){if(isSubmitting){e.preventDefault();return;}isSubmitting=true;const loadingText=btn.getAttribute("data-loading")||"移動中...";const originalText=btn.textContent;btn.textContent=loadingText;btn.style.opacity="0.6";btn.style.pointerEvents="none";setTimeout(function(){window.location.href=btn.href;},300);});})();'
+            . '</script>';
 
-        return Layout::render('ログイン', $content);
+        return Layout::render('ログイン', $content, [
+            'showHeader' => false,
+        ]);
     }
 }

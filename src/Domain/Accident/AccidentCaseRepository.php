@@ -7,6 +7,16 @@ use PDO;
 
 final class AccidentCaseRepository
 {
+    public const SORTABLE_FIELDS = [
+        'accident_no',
+        'accepted_date',
+        'customer_name',
+        'policy_no',
+        'status',
+        'priority',
+        'resolved_date',
+    ];
+
     public function __construct(private PDO $pdo)
     {
     }
@@ -17,6 +27,31 @@ final class AccidentCaseRepository
      */
     public function search(array $criteria, int $limit = 200): array
     {
+        $result = $this->searchPage($criteria, 1, $limit, '', 'asc');
+        return $result['rows'];
+    }
+
+    /**
+     * @param array<string, string> $criteria
+     * @return array{rows: array<int, array<string, mixed>>, total: int, page: int, per_page: int}
+     */
+    public function searchPage(
+        array $criteria,
+        int $page,
+        int $perPage,
+        string $sort,
+        string $direction
+    ): array {
+        $page = max(1, $page);
+        $perPage = max(1, min($perPage, 500));
+
+        $params = [];
+        $whereSql = $this->buildWhereClause($criteria, $params);
+        $total = $this->countSearch($whereSql, $params);
+        $maxPage = max(1, (int) ceil($total / $perPage));
+        $page = min($page, $maxPage);
+        $offset = ($page - 1) * $perPage;
+
         $sql =
             'SELECT ac.id,
                     ac.accident_no,
@@ -27,6 +62,7 @@ final class AccidentCaseRepository
                     ac.priority,
                     ac.resolved_date,
                     ac.updated_at,
+                    ac.assigned_user_id,
                     mc.customer_name,
                     c.policy_no
              FROM t_accident_case ac
@@ -35,10 +71,36 @@ final class AccidentCaseRepository
                     AND mc.is_deleted = 0
              LEFT JOIN t_contract c
                     ON c.id = ac.contract_id
-                   AND c.is_deleted = 0
-             WHERE ac.is_deleted = 0';
+                   AND c.is_deleted = 0'
+            . $whereSql
+            . $this->buildOrderBy($sort, $direction)
+            . ' LIMIT :limit OFFSET :offset';
 
-        $params = [];
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue(':' . $key, $value);
+        }
+        $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll();
+
+        return [
+            'rows' => is_array($rows) ? $rows : [],
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+        ];
+    }
+
+    /**
+     * @param array<string, string> $criteria
+     * @param array<string, mixed> $params
+     */
+    private function buildWhereClause(array $criteria, array &$params): string
+    {
+        $sql = ' WHERE ac.is_deleted = 0';
 
         $acceptedFrom = trim((string) ($criteria['accepted_date_from'] ?? ''));
         if ($acceptedFrom !== '') {
@@ -76,17 +138,50 @@ final class AccidentCaseRepository
             $params['status'] = $status;
         }
 
-        $sql .= ' ORDER BY ac.accepted_date DESC, ac.id DESC LIMIT :limit';
+        return $sql;
+    }
 
-        $stmt = $this->pdo->prepare($sql);
+    /**
+     * @param array<string, mixed> $params
+     */
+    private function countSearch(string $whereSql, array $params): int
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*)
+             FROM t_accident_case ac
+             INNER JOIN m_customer mc
+                     ON mc.id = ac.customer_id
+                    AND mc.is_deleted = 0
+             LEFT JOIN t_contract c
+                    ON c.id = ac.contract_id
+                   AND c.is_deleted = 0'
+            . $whereSql
+        );
         foreach ($params as $key => $value) {
             $stmt->bindValue(':' . $key, $value);
         }
-        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
 
-        $rows = $stmt->fetchAll();
-        return is_array($rows) ? $rows : [];
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function buildOrderBy(string $sort, string $direction): string
+    {
+        $column = match ($sort) {
+            'accident_no' => 'ac.accident_no',
+            'accepted_date' => 'ac.accepted_date',
+            'customer_name' => 'mc.customer_name',
+            'policy_no' => 'c.policy_no',
+            'status' => 'ac.status',
+            'priority' => 'ac.priority',
+            'resolved_date' => 'ac.resolved_date',
+            default => 'ac.accepted_date',
+        };
+
+        $dir = strtolower($direction) === 'desc' ? 'DESC' : 'ASC';
+        $fallbackDir = $dir === 'DESC' ? 'DESC' : 'ASC';
+
+        return ' ORDER BY ' . $column . ' ' . $dir . ', ac.id ' . $fallbackDir;
     }
 
     /**
@@ -141,7 +236,7 @@ final class AccidentCaseRepository
     public function findComments(int $accidentCaseId, int $limit = 30): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT id, created_at, comment_body
+            'SELECT id, created_at, created_by, comment_body
              FROM t_case_comment
              WHERE target_type = "accident_case"
                AND accident_case_id = :accident_case_id
@@ -163,7 +258,7 @@ final class AccidentCaseRepository
     public function findAuditEvents(int $accidentCaseId, int $limit = 30): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT changed_at, action_type, change_source, note
+            'SELECT id, changed_at, changed_by, action_type, change_source, note
              FROM t_audit_event
              WHERE entity_type = "accident_case"
                AND entity_id = :entity_id
@@ -208,6 +303,74 @@ final class AccidentCaseRepository
         ]);
 
         return $stmt->rowCount();
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    public function createAccidentCase(array $input, int $createdBy): int
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO t_accident_case (
+                 customer_id,
+                 accepted_date,
+                 accident_date,
+                 insurance_category,
+                 accident_location,
+                 status,
+                 priority,
+                 assigned_user_id,
+                 remark,
+                 created_by,
+                 updated_by
+             ) VALUES (
+                 :customer_id,
+                 :accepted_date,
+                 :accident_date,
+                 :insurance_category,
+                 :accident_location,
+                 :status,
+                 :priority,
+                 :assigned_user_id,
+                 :remark,
+                 :created_by,
+                 :updated_by
+             )'
+        );
+        $stmt->execute([
+            'customer_id' => $input['customer_id'],
+            'accepted_date' => $input['accepted_date'],
+            'accident_date' => $input['accident_date'],
+            'insurance_category' => $input['insurance_category'],
+            'accident_location' => $input['accident_location'],
+            'status' => $input['status'],
+            'priority' => $input['priority'],
+            'assigned_user_id' => $input['assigned_user_id'],
+            'remark' => $input['remark'],
+            'created_by' => $createdBy,
+            'updated_by' => $createdBy,
+        ]);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchCustomers(int $limit = 500): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, customer_name
+             FROM m_customer
+             WHERE is_deleted = 0
+             ORDER BY customer_name ASC, id ASC
+             LIMIT :limit'
+        );
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        $rows = $stmt->fetchAll();
+
+        return is_array($rows) ? $rows : [];
     }
 
     public function createComment(int $accidentCaseId, string $commentBody, int $userId): void

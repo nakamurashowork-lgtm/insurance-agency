@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find c:xampphtdocsinsurance-agency -name *Layout* -o -name *layout*)",
+      "Bash(find c:xampphtdocsinsurance-agency/src -name *Tenant* -o -name *tenant*)",
+      "Bash(find c:xampphtdocsinsurance-agency/src/Domain -name *Repository*)",
+      "Bash(grep -r \"t_activity\\\\|t_daily_report\\\\|t_sales_case\" c:xampphtdocsinsurance-agency/src --include=*.php)",
+      "Bash(ls src/Domain/Activity/ src/Controller/ActivityController.php src/Presentation/Activity*.php)",
+      "Bash(php tools/seed_activity_test_data.php)",
+      "Bash(\"C:/xampp/php/php.exe\" tools/seed_activity_test_data.php)",
+      "Read(//c/xampp/**)",
+      "Bash(./xampp-control.exe status:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost/insurance-agency/)",
+      "Bash(curl -s \"http://localhost/insurance-agency/?route=activity/new\" -o /dev/null -w \"%{http_code}\")"
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(php -r \":*)",
+      "Bash(\"/c/xampp/php/php.exe\" -r \"echo phpversion\\(\\);\")",
+      "Bash(\"/c/xampp/php/php.exe\" -r \":*)",
+      "Bash(\"/c/xampp/mysql/bin/mysql.exe\" -u root -e \":*)",
+      "Bash(grep -h \"FOREIGN KEY\\\\|REFERENCES\" /c/xampp/htdocs/insurance-agency/config/ddl/common/*.sql)",
+      "Bash(find /c/xampp/htdocs/insurance-agency/config/ddl -name *.sql)",
+      "Bash(find /c/xampp/htdocs/insurance-agency -name seed*.sql -o -name seed*.php -o -name *seed*common* -o -name *init*.sql)",
+      "Bash(find /c/xampp/htdocs/insurance-agency/tools -name *.php -o -name *.sql)",
+      "Bash(find /c/xampp/htdocs/insurance-agency/tmp -name *.php)",
+      "Bash(grep -l \"INSERT.*users\\\\|INSERT.*tenants\\\\|user_tenants\" /c/xampp/htdocs/insurance-agency/tmp/*.php)",
+      "Bash(\"/c/xampp/mysql/bin/mysql.exe\" -u root xs000001_admin -e \":*)",
+      "Bash(\"/c/xampp/mysql/bin/mysql.exe\" -u root -e \"USE xs000001_te001; SELECT COUNT\\(*\\) FROM t_renewal_case;\")",
+      "Bash(\"/c/xampp/mysql/bin/mysql.exe\" -u root -e \"USE xs000001_te001; SHOW TABLES;\")",
+      "Bash(ls /c/xampp/mysql/data/xs000001_te001/*.ibd)"
+    ],
+    "additionalDirectories": [
+      "C:\\xampp\\mysql\\data\\xs000001_admin",
+      "C:\\xampp\\mysql\\data\\xs000001_te001"
+    ]
+  }
+}

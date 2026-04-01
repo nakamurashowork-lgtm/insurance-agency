@@ -3,8 +3,11 @@ declare(strict_types=1);
 
 namespace App\Domain\Notification;
 
+require_once __DIR__ . DIRECTORY_SEPARATOR . 'lineworks_payload_helpers.php';
+
 use DateTimeImmutable;
 use Throwable;
+use function App\Domain\Notification\build_lineworks_accident_reminder_payload;
 
 final class AccidentNotificationBatchService
 {
@@ -20,11 +23,15 @@ final class AccidentNotificationBatchService
         int $executedBy,
         bool $routeEnabled,
         ?int $retryFailedRunId = null,
-        ?NotificationRetryPolicy $retryPolicy = null
+        ?NotificationRetryPolicy $retryPolicy = null,
+        ?WebhookNotificationSender $sender = null,
+        ?array $endpoint = null,
+        string $tenantCode = ''
     ): array
     {
         $runId = $this->repository->createRun($runDate, $executedBy);
         $retryPolicy ??= new NotificationRetryPolicy();
+        $sender ??= new WebhookNotificationSender();
         $now = new DateTimeImmutable();
         $processedCount = 0;
         $successCount = 0;
@@ -32,10 +39,12 @@ final class AccidentNotificationBatchService
         $failCount = 0;
         $result = 'success';
         $errorMessage = null;
+        $messageErrors = [];
 
         try {
             if ($retryFailedRunId !== null) {
                 $failedRows = $this->repository->findFailedDeliveriesByRunId($retryFailedRunId);
+                $retryTargets = [];
 
                 foreach ($failedRows as $failedRow) {
                     $processedCount++;
@@ -66,15 +75,12 @@ final class AccidentNotificationBatchService
                             continue;
                         }
 
-                        $this->repository->updateDeliveryForRetry(
-                            $deliveryId,
-                            $runId,
-                            'success',
-                            null,
-                            true
-                        );
-                        $this->repository->updateRuleLastNotifiedOn($ruleId, $runDate);
-                        $successCount++;
+                        if ($this->repository->hasDeliveryForSchedule($accidentCaseId, $ruleId, $runDate)) {
+                            $skipCount++;
+                            continue;
+                        }
+
+                        $retryTargets[] = $failedRow;
                     } catch (Throwable $deliveryException) {
                         $this->repository->updateDeliveryForRetry(
                             $deliveryId,
@@ -87,10 +93,53 @@ final class AccidentNotificationBatchService
                             true
                         );
                         $failCount++;
+                        $messageErrors[] = $deliveryException->getMessage();
+                    }
+                }
+
+                if ($retryTargets !== []) {
+                    try {
+                        $this->sendAccidentNotification($sender, $endpoint, $retryTargets);
+
+                        foreach ($retryTargets as $retryTarget) {
+                            $deliveryId = (int) ($retryTarget['delivery_id'] ?? 0);
+                            $ruleId = (int) ($retryTarget['accident_reminder_rule_id'] ?? 0);
+                            if ($deliveryId <= 0 || $ruleId <= 0) {
+                                continue;
+                            }
+
+                            $this->repository->updateDeliveryForRetry(
+                                $deliveryId,
+                                $runId,
+                                'success',
+                                null,
+                                true
+                            );
+                            $this->repository->updateRuleLastNotifiedOn($ruleId, $runDate);
+                            $successCount++;
+                        }
+                    } catch (Throwable $deliveryException) {
+                        foreach ($retryTargets as $retryTarget) {
+                            $deliveryId = (int) ($retryTarget['delivery_id'] ?? 0);
+                            if ($deliveryId <= 0) {
+                                continue;
+                            }
+
+                            $this->repository->updateDeliveryForRetry(
+                                $deliveryId,
+                                $runId,
+                                'failed',
+                                $retryPolicy->buildFailureMessage($deliveryException->getMessage(), 1),
+                                true
+                            );
+                            $failCount++;
+                        }
+                        $messageErrors[] = $deliveryException->getMessage();
                     }
                 }
             } else {
                 $rules = $this->repository->findEnabledRulesWithWeekdays();
+                $deliverableTargets = [];
 
                 foreach ($rules as $rule) {
                     if (!$this->isDue($rule, $runDate)) {
@@ -116,18 +165,12 @@ final class AccidentNotificationBatchService
                             continue;
                         }
 
-                        $inserted = $this->repository->insertDeliverySuccess(
-                            $runId,
-                            $accidentCaseId,
-                            $ruleId,
-                            $runDate
-                        );
-                        if ($inserted) {
-                            $successCount++;
-                            $this->repository->updateRuleLastNotifiedOn($ruleId, $runDate);
-                        } else {
+                        if ($this->repository->hasDeliveryForSchedule($accidentCaseId, $ruleId, $runDate)) {
                             $skipCount++;
+                            continue;
                         }
+
+                        $deliverableTargets[] = $rule;
                     } catch (Throwable $deliveryException) {
                         $inserted = $this->repository->insertDeliveryFailed(
                             $runId,
@@ -139,6 +182,44 @@ final class AccidentNotificationBatchService
                         if ($inserted) {
                             $failCount++;
                         }
+                        $messageErrors[] = $deliveryException->getMessage();
+                    }
+                }
+
+                if ($deliverableTargets !== []) {
+                    try {
+                        $this->sendAccidentNotification($sender, $endpoint, $deliverableTargets);
+
+                        foreach ($deliverableTargets as $target) {
+                            $accidentCaseId = (int) ($target['accident_case_id'] ?? 0);
+                            $ruleId = (int) ($target['rule_id'] ?? 0);
+                            $inserted = $this->repository->insertDeliverySuccess(
+                                $runId,
+                                $accidentCaseId,
+                                $ruleId,
+                                $runDate
+                            );
+                            if ($inserted) {
+                                $successCount++;
+                                $this->repository->updateRuleLastNotifiedOn($ruleId, $runDate);
+                            } else {
+                                $skipCount++;
+                            }
+                        }
+                    } catch (Throwable $deliveryException) {
+                        foreach ($deliverableTargets as $target) {
+                            $inserted = $this->repository->insertDeliveryFailed(
+                                $runId,
+                                (int) ($target['accident_case_id'] ?? 0),
+                                (int) ($target['rule_id'] ?? 0),
+                                $runDate,
+                                $retryPolicy->buildFailureMessage($deliveryException->getMessage(), 1)
+                            );
+                            if ($inserted) {
+                                $failCount++;
+                            }
+                        }
+                        $messageErrors[] = $deliveryException->getMessage();
                     }
                 }
             }
@@ -147,6 +228,9 @@ final class AccidentNotificationBatchService
                 $result = 'partial';
             } elseif ($failCount > 0) {
                 $result = 'failed';
+            }
+            if ($failCount > 0 && $messageErrors !== []) {
+                $errorMessage = implode(' | ', array_slice($messageErrors, 0, 3));
             }
         } catch (Throwable $exception) {
             $result = 'failed';
@@ -237,5 +321,29 @@ final class AccidentNotificationBatchService
         }
 
         return true;
+    }
+
+    /**
+     * @param array<string, mixed>|null $endpoint
+     * @param array<int, array<string, mixed>> $targets
+     */
+    private function sendAccidentNotification(
+        WebhookNotificationSender $sender,
+        ?array $endpoint,
+        array $targets
+    ): void {
+        $providerType = (string) ($endpoint['provider_type'] ?? '');
+        $webhookUrl = (string) ($endpoint['webhook_url'] ?? '');
+        $appPublicUrl = (string) ($endpoint['app_public_url'] ?? '');
+
+        if ($providerType === '' || $webhookUrl === '') {
+            throw new \RuntimeException('notification endpoint is incomplete');
+        }
+
+        $sender->send(
+            $providerType,
+            $webhookUrl,
+            build_lineworks_accident_reminder_payload($appPublicUrl, $targets)
+        );
     }
 }

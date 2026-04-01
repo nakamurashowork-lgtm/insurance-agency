@@ -7,6 +7,19 @@ use PDO;
 
 final class SalesPerformanceRepository
 {
+    public const SORTABLE_FIELDS = [
+        'performance_date',
+        'performance_type',
+        'source_type',
+        'customer_name',
+        'staff_user_id',
+        'insurer_name',
+        'policy_no',
+        'product_type',
+        'premium_amount',
+        'settlement_month',
+    ];
+
     public function __construct(private PDO $pdo)
     {
     }
@@ -17,6 +30,31 @@ final class SalesPerformanceRepository
      */
     public function search(array $criteria, int $limit = 200): array
     {
+        $result = $this->searchPage($criteria, 1, $limit, '', 'asc');
+        return $result['rows'];
+    }
+
+    /**
+     * @param array<string, string> $criteria
+     * @return array{rows: array<int, array<string, mixed>>, total: int, page: int, per_page: int}
+     */
+    public function searchPage(
+        array $criteria,
+        int $page,
+        int $perPage,
+        string $sort,
+        string $direction
+    ): array {
+        $page = max(1, $page);
+        $perPage = max(1, min($perPage, 500));
+
+        $params = [];
+        $whereSql = $this->buildWhereClause($criteria, $params);
+        $total = $this->countSearch($whereSql, $params);
+        $maxPage = max(1, (int) ceil($total / $perPage));
+        $page = min($page, $maxPage);
+        $offset = ($page - 1) * $perPage;
+
         $sql =
             'SELECT sp.id,
                     sp.customer_id,
@@ -24,27 +62,63 @@ final class SalesPerformanceRepository
                     sp.renewal_case_id,
                     sp.performance_date,
                     sp.performance_type,
+                    sp.source_type,
+                    sp.insurer_name,
+                    sp.policy_no,
+                    sp.policy_start_date,
+                    sp.application_date,
                     sp.insurance_category,
                     sp.product_type,
                     sp.premium_amount,
+                    sp.installment_count,
                     sp.receipt_no,
                     sp.settlement_month,
                     sp.staff_user_id,
                     sp.remark,
                     sp.updated_at,
                     mc.customer_name,
-                    c.policy_no,
-                    c.policy_start_date
+                    c.policy_no AS contract_policy_no,
+                    c.policy_start_date AS contract_policy_start_date,
+                    c.insurer_name AS contract_insurer_name,
+                    c.insurance_category AS contract_insurance_category,
+                    c.product_type AS contract_product_type,
+                    COALESCE(NULLIF(sp.policy_no, ""), c.policy_no) AS policy_no_display
              FROM t_sales_performance sp
              INNER JOIN m_customer mc
                      ON mc.id = sp.customer_id
                     AND mc.is_deleted = 0
              LEFT JOIN t_contract c
                     ON c.id = sp.contract_id
-                   AND c.is_deleted = 0
-             WHERE sp.is_deleted = 0';
+                   AND c.is_deleted = 0'
+            . $whereSql
+            . $this->buildOrderBy($sort, $direction)
+            . ' LIMIT :limit OFFSET :offset';
 
-        $params = [];
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue(':' . $key, $value);
+        }
+        $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll();
+
+        return [
+            'rows' => is_array($rows) ? $rows : [],
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+        ];
+    }
+
+    /**
+     * @param array<string, string> $criteria
+     * @param array<string, mixed> $params
+     */
+    private function buildWhereClause(array $criteria, array &$params): string
+    {
+        $sql = ' WHERE sp.is_deleted = 0';
 
         $dateFrom = trim((string) ($criteria['performance_date_from'] ?? ''));
         if ($dateFrom !== '') {
@@ -64,9 +138,33 @@ final class SalesPerformanceRepository
             $params['customer_name'] = '%' . $customerName . '%';
         }
 
+        $staffUserId = trim((string) ($criteria['staff_user_id'] ?? ''));
+        if ($staffUserId !== '' && ctype_digit($staffUserId)) {
+            $sql .= ' AND sp.staff_user_id = :staff_user_id';
+            $params['staff_user_id'] = (int) $staffUserId;
+        }
+
+        $sourceType = trim((string) ($criteria['source_type'] ?? ''));
+        if ($sourceType !== '') {
+            $sql .= ' AND sp.source_type = :source_type';
+            $params['source_type'] = $sourceType;
+        }
+
+        $performanceType = trim((string) ($criteria['performance_type'] ?? ''));
+        if ($performanceType !== '') {
+            $sql .= ' AND sp.performance_type = :performance_type';
+            $params['performance_type'] = $performanceType;
+        }
+
+        $insurerName = trim((string) ($criteria['insurer_name'] ?? ''));
+        if ($insurerName !== '') {
+            $sql .= ' AND COALESCE(NULLIF(sp.insurer_name, ""), c.insurer_name) LIKE :insurer_name';
+            $params['insurer_name'] = '%' . $insurerName . '%';
+        }
+
         $policyNo = trim((string) ($criteria['policy_no'] ?? ''));
         if ($policyNo !== '') {
-            $sql .= ' AND c.policy_no LIKE :policy_no';
+            $sql .= ' AND COALESCE(NULLIF(sp.policy_no, ""), c.policy_no) LIKE :policy_no';
             $params['policy_no'] = '%' . $policyNo . '%';
         }
 
@@ -82,17 +180,53 @@ final class SalesPerformanceRepository
             $params['settlement_month'] = $settlementMonth;
         }
 
-        $sql .= ' ORDER BY sp.performance_date DESC, sp.id DESC LIMIT :limit';
+        return $sql;
+    }
 
-        $stmt = $this->pdo->prepare($sql);
+    /**
+     * @param array<string, mixed> $params
+     */
+    private function countSearch(string $whereSql, array $params): int
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*)
+             FROM t_sales_performance sp
+             INNER JOIN m_customer mc
+                     ON mc.id = sp.customer_id
+                    AND mc.is_deleted = 0
+             LEFT JOIN t_contract c
+                    ON c.id = sp.contract_id
+                   AND c.is_deleted = 0'
+            . $whereSql
+        );
         foreach ($params as $key => $value) {
             $stmt->bindValue(':' . $key, $value);
         }
-        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
 
-        $rows = $stmt->fetchAll();
-        return is_array($rows) ? $rows : [];
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function buildOrderBy(string $sort, string $direction): string
+    {
+        $column = match ($sort) {
+            'performance_type' => 'sp.performance_type',
+            'source_type' => 'sp.source_type',
+            'customer_name' => 'mc.customer_name',
+            'staff_user_id' => 'sp.staff_user_id',
+            'insurer_name' => 'COALESCE(NULLIF(sp.insurer_name, ""), c.insurer_name)',
+            'policy_no' => 'COALESCE(NULLIF(sp.policy_no, ""), c.policy_no)',
+            'product_type' => 'sp.product_type',
+            'premium_amount' => 'sp.premium_amount',
+            'settlement_month' => 'sp.settlement_month',
+            'performance_date' => 'sp.performance_date',
+            default => 'sp.performance_date',
+        };
+
+        $dir = strtolower($direction) === 'desc' ? 'DESC' : 'ASC';
+        $fallbackDir = $dir === 'DESC' ? 'DESC' : 'ASC';
+
+        return ' ORDER BY ' . $column . ' ' . $dir . ', sp.id ' . $fallbackDir;
     }
 
     /**
@@ -101,22 +235,41 @@ final class SalesPerformanceRepository
     public function findById(int $id): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT id,
-                    customer_id,
-                    contract_id,
-                    renewal_case_id,
-                    performance_date,
-                    performance_type,
-                    insurance_category,
-                    product_type,
-                    premium_amount,
-                    receipt_no,
-                    settlement_month,
-                    staff_user_id,
-                    remark
-             FROM t_sales_performance
-             WHERE id = :id
-               AND is_deleted = 0
+            'SELECT sp.id,
+                  sp.customer_id,
+                  sp.contract_id,
+                  sp.renewal_case_id,
+                  sp.performance_date,
+                  sp.performance_type,
+                sp.source_type,
+                sp.insurer_name,
+                sp.policy_no,
+                sp.policy_start_date,
+                sp.application_date,
+                  sp.insurance_category,
+                  sp.product_type,
+                  sp.premium_amount,
+                sp.installment_count,
+                  sp.receipt_no,
+                  sp.settlement_month,
+                  sp.staff_user_id,
+                  sp.remark,
+                  mc.customer_name,
+                c.policy_no AS contract_policy_no,
+                c.policy_start_date AS contract_policy_start_date,
+                c.insurer_name AS contract_insurer_name,
+                c.insurance_category AS contract_insurance_category,
+                c.product_type AS contract_product_type,
+                COALESCE(NULLIF(sp.policy_no, ""), c.policy_no) AS policy_no_display
+              FROM t_sales_performance sp
+              INNER JOIN m_customer mc
+                ON mc.id = sp.customer_id
+                  AND mc.is_deleted = 0
+              LEFT JOIN t_contract c
+                  ON c.id = sp.contract_id
+                 AND c.is_deleted = 0
+              WHERE sp.id = :id
+             AND sp.is_deleted = 0
              LIMIT 1'
         );
         $stmt->execute(['id' => $id]);
@@ -153,6 +306,10 @@ final class SalesPerformanceRepository
             'SELECT c.id,
                     c.customer_id,
                     c.policy_no,
+                    c.insurer_name,
+                    c.insurance_category,
+                    c.product_type,
+                    c.policy_start_date,
                     c.policy_end_date,
                     mc.customer_name
              FROM t_contract c
@@ -178,6 +335,7 @@ final class SalesPerformanceRepository
         $stmt = $this->pdo->prepare(
             'SELECT rc.id,
                     rc.contract_id,
+                    c.customer_id,
                     rc.maturity_date,
                     rc.case_status,
                     c.policy_no
@@ -208,9 +366,15 @@ final class SalesPerformanceRepository
                 renewal_case_id,
                 performance_date,
                 performance_type,
+                source_type,
+                insurer_name,
+                policy_no,
+                policy_start_date,
+                application_date,
                 insurance_category,
                 product_type,
                 premium_amount,
+                installment_count,
                 receipt_no,
                 settlement_month,
                 staff_user_id,
@@ -223,9 +387,15 @@ final class SalesPerformanceRepository
                 :renewal_case_id,
                 :performance_date,
                 :performance_type,
+                :source_type,
+                :insurer_name,
+                :policy_no,
+                :policy_start_date,
+                :application_date,
                 :insurance_category,
                 :product_type,
                 :premium_amount,
+                :installment_count,
                 :receipt_no,
                 :settlement_month,
                 :staff_user_id,
@@ -236,18 +406,24 @@ final class SalesPerformanceRepository
         );
 
         $stmt->execute([
-            'customer_id' => $input['customer_id'],
-            'contract_id' => $input['contract_id'],
-            'renewal_case_id' => $input['renewal_case_id'],
-            'performance_date' => $input['performance_date'],
-            'performance_type' => $input['performance_type'],
-            'insurance_category' => $input['insurance_category'],
-            'product_type' => $input['product_type'],
-            'premium_amount' => $input['premium_amount'],
-            'receipt_no' => $input['receipt_no'],
-            'settlement_month' => $input['settlement_month'],
-            'staff_user_id' => $input['staff_user_id'],
-            'remark' => $input['remark'],
+            'customer_id' => $input['customer_id'] ?? 0,
+            'contract_id' => $input['contract_id'] ?? null,
+            'renewal_case_id' => $input['renewal_case_id'] ?? null,
+            'performance_date' => $input['performance_date'] ?? null,
+            'performance_type' => $input['performance_type'] ?? null,
+            'source_type' => $input['source_type'] ?? null,
+            'insurer_name' => $input['insurer_name'] ?? null,
+            'policy_no' => $input['policy_no'] ?? null,
+            'policy_start_date' => $input['policy_start_date'] ?? null,
+            'application_date' => $input['application_date'] ?? null,
+            'insurance_category' => $input['insurance_category'] ?? null,
+            'product_type' => $input['product_type'] ?? null,
+            'premium_amount' => $input['premium_amount'] ?? 0,
+            'installment_count' => $input['installment_count'] ?? null,
+            'receipt_no' => $input['receipt_no'] ?? null,
+            'settlement_month' => $input['settlement_month'] ?? null,
+            'staff_user_id' => $input['staff_user_id'] ?? null,
+            'remark' => $input['remark'] ?? null,
             'created_by' => $userId,
             'updated_by' => $userId,
         ]);
@@ -265,9 +441,15 @@ final class SalesPerformanceRepository
                  renewal_case_id = :renewal_case_id,
                  performance_date = :performance_date,
                  performance_type = :performance_type,
+                 source_type = :source_type,
+                 insurer_name = :insurer_name,
+                 policy_no = :policy_no,
+                 policy_start_date = :policy_start_date,
+                 application_date = :application_date,
                  insurance_category = :insurance_category,
                  product_type = :product_type,
                  premium_amount = :premium_amount,
+                 installment_count = :installment_count,
                  receipt_no = :receipt_no,
                  settlement_month = :settlement_month,
                  staff_user_id = :staff_user_id,
@@ -279,18 +461,24 @@ final class SalesPerformanceRepository
 
         $stmt->execute([
             'id' => $id,
-            'customer_id' => $input['customer_id'],
-            'contract_id' => $input['contract_id'],
-            'renewal_case_id' => $input['renewal_case_id'],
-            'performance_date' => $input['performance_date'],
-            'performance_type' => $input['performance_type'],
-            'insurance_category' => $input['insurance_category'],
-            'product_type' => $input['product_type'],
-            'premium_amount' => $input['premium_amount'],
-            'receipt_no' => $input['receipt_no'],
-            'settlement_month' => $input['settlement_month'],
-            'staff_user_id' => $input['staff_user_id'],
-            'remark' => $input['remark'],
+            'customer_id' => $input['customer_id'] ?? 0,
+            'contract_id' => $input['contract_id'] ?? null,
+            'renewal_case_id' => $input['renewal_case_id'] ?? null,
+            'performance_date' => $input['performance_date'] ?? null,
+            'performance_type' => $input['performance_type'] ?? null,
+            'source_type' => $input['source_type'] ?? null,
+            'insurer_name' => $input['insurer_name'] ?? null,
+            'policy_no' => $input['policy_no'] ?? null,
+            'policy_start_date' => $input['policy_start_date'] ?? null,
+            'application_date' => $input['application_date'] ?? null,
+            'insurance_category' => $input['insurance_category'] ?? null,
+            'product_type' => $input['product_type'] ?? null,
+            'premium_amount' => $input['premium_amount'] ?? 0,
+            'installment_count' => $input['installment_count'] ?? null,
+            'receipt_no' => $input['receipt_no'] ?? null,
+            'settlement_month' => $input['settlement_month'] ?? null,
+            'staff_user_id' => $input['staff_user_id'] ?? null,
+            'remark' => $input['remark'] ?? null,
             'updated_by' => $userId,
         ]);
 
