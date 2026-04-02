@@ -7,6 +7,7 @@
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; font-family: 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif; font-size: 14px; background: #f4f3ee; color: #1a1a18; }
+body { padding-top: 36px; }
 
 /* ─── Color tokens (light mode) ─── */
 :root {
@@ -44,7 +45,7 @@ html, body { height: 100%; font-family: 'Noto Sans JP', 'Hiragino Kaku Gothic Pr
   background: var(--bg-primary);
   border-bottom: 0.5px solid var(--border-medium);
   display: flex; align-items: center; padding: 0 20px; height: 50px;
-  position: sticky; top: 0; z-index: 100;
+  position: sticky; top: 36px; z-index: 100;
   box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 .nav-logo { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-right: 28px; white-space: nowrap; letter-spacing: -0.2px; }
@@ -216,9 +217,170 @@ textarea.form-input { resize: none; }
   .two-col, .metric-grid, .metric-grid-5, .form-grid { grid-template-columns: 1fr; }
   .nav-item { padding: 0 8px; font-size: 11.5px; }
 }
+
+/* ─── Preview Bar ─── */
+#preview-bar {
+  position: fixed; top: 0; left: 0; right: 0; height: 36px;
+  background: #2c2c2a; color: #f4f3ee;
+  display: flex; align-items: center; padding: 0 16px; gap: 10px;
+  z-index: 9999; font-size: 12px;
+}
+.preview-label { color: #f4f3ee; margin-right: 4px; }
+.preview-btn {
+  padding: 3px 12px; border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.25);
+  background: rgba(255,255,255,0.1); color: #f4f3ee;
+  cursor: pointer; font-size: 12px; transition: background 0.12s;
+}
+.preview-btn:hover { background: rgba(255,255,255,0.2); }
+.preview-btn.active { background: #378add; border-color: #378add; }
+
+/* ─── Hamburger ─── */
+#nav-hamburger {
+  display: none; margin-left: auto;
+  background: none; border: none; color: var(--text-primary);
+  font-size: 22px; cursor: pointer; padding: 0 6px; line-height: 50px;
+}
+
+/* ─── Mobile Nav Overlay ─── */
+#mobile-nav-overlay {
+  display: none; position: fixed;
+  top: 86px; width: 375px; left: 50%; transform: translateX(-50%);
+  bottom: 0; background: var(--bg-primary); z-index: 200;
+  flex-direction: column;
+  border-top: 0.5px solid var(--border-medium);
+  overflow-y: auto; box-shadow: 2px 0 12px rgba(0,0,0,0.12);
+}
+#mobile-nav-overlay.open { display: flex; }
+.mobile-nav-close {
+  padding: 10px 20px; text-align: right; font-size: 20px;
+  cursor: pointer; color: var(--text-secondary);
+  border-bottom: 0.5px solid var(--border-light);
+}
+.mobile-nav-link {
+  padding: 14px 20px; font-size: 14px; color: var(--text-primary);
+  cursor: pointer; border-bottom: 0.5px solid var(--border-light);
+}
+.mobile-nav-link:hover { background: var(--bg-secondary); }
+.mobile-nav-link.active { color: var(--text-info); font-weight: 500; }
+
+/* ─── Mobile Filter Toggle Button ─── */
+.mobile-filter-toggle {
+  display: none; width: 100%; padding: 10px 14px;
+  background: var(--bg-info); color: var(--text-info);
+  border: 0.5px solid var(--border-info); border-radius: var(--radius-md);
+  font-size: 13px; cursor: pointer; margin-bottom: 8px; text-align: left;
+  font-family: inherit;
+}
+
+/* ─── Mobile Preview Scope ─── */
+body.mobile-preview { max-width: 375px; margin: 0 auto; overflow-x: hidden; }
+body.mobile-preview .nav-item { display: none !important; }
+body.mobile-preview .nav-spacer { display: none; }
+body.mobile-preview #nav-hamburger { display: flex; align-items: center; }
+body.mobile-preview .mobile-filter-toggle { display: block; }
+body.mobile-preview .page-header { flex-direction: column; align-items: flex-start; }
+body.mobile-preview .content { padding: 16px 12px; }
+body.mobile-preview .two-col,
+body.mobile-preview .metric-grid,
+body.mobile-preview .metric-grid-5,
+body.mobile-preview .form-grid { grid-template-columns: 1fr; }
+body.mobile-preview .filter-bar { display: none; }
+body.mobile-preview .filter-bar.open {
+  display: flex; flex-direction: column; gap: 8px;
+}
+body.mobile-preview .filter-bar input,
+body.mobile-preview .filter-bar select { width: 100%; }
+body.mobile-preview .filter-bar .btn { width: 100%; }
+
+/* ─── Mobile: Tables → Cards ─── */
+body.mobile-preview #page-maturity-list .tbl-wrap,
+body.mobile-preview #page-customer-list .tbl-wrap,
+body.mobile-preview #page-accident-list .tbl-wrap,
+body.mobile-preview #page-result-list .tbl-wrap { overflow-x: visible; }
+
+body.mobile-preview #page-maturity-list thead,
+body.mobile-preview #page-customer-list thead,
+body.mobile-preview #page-accident-list thead,
+body.mobile-preview #page-result-list thead { display: none; }
+
+body.mobile-preview #page-maturity-list tbody tr,
+body.mobile-preview #page-customer-list tbody tr,
+body.mobile-preview #page-accident-list tbody tr,
+body.mobile-preview #page-result-list tbody tr {
+  display: block; border: 0.5px solid var(--border-medium);
+  border-radius: 8px; margin-bottom: 10px; overflow: hidden;
+  background: var(--bg-primary);
+}
+body.mobile-preview #page-maturity-list tbody tr:hover td,
+body.mobile-preview #page-customer-list tbody tr:hover td,
+body.mobile-preview #page-accident-list tbody tr:hover td,
+body.mobile-preview #page-result-list tbody tr:hover td { background: transparent; }
+
+body.mobile-preview #page-maturity-list td,
+body.mobile-preview #page-customer-list td,
+body.mobile-preview #page-accident-list td,
+body.mobile-preview #page-result-list td {
+  display: flex; justify-content: space-between;
+  align-items: center; border-bottom: 0.5px solid var(--border-light);
+  padding: 7px 12px;
+}
+body.mobile-preview #page-maturity-list td::before,
+body.mobile-preview #page-customer-list td::before,
+body.mobile-preview #page-accident-list td::before,
+body.mobile-preview #page-result-list td::before {
+  color: var(--text-secondary); font-size: 11px; flex-shrink: 0; margin-right: 8px;
+}
+
+/* 満期一覧 列ラベル */
+body.mobile-preview #page-maturity-list td:nth-child(1)::before { content: "証券番号"; }
+body.mobile-preview #page-maturity-list td:nth-child(2)::before { content: "顧客名"; }
+body.mobile-preview #page-maturity-list td:nth-child(3)::before { content: "種目"; }
+body.mobile-preview #page-maturity-list td:nth-child(4)::before { content: "満期日"; }
+body.mobile-preview #page-maturity-list td:nth-child(5)::before { content: "残日数"; }
+body.mobile-preview #page-maturity-list td:nth-child(6)::before { content: "早期更改締切"; }
+body.mobile-preview #page-maturity-list td:nth-child(7)::before { content: "営業担当"; }
+body.mobile-preview #page-maturity-list td:nth-child(8)::before { content: "対応状況"; }
+body.mobile-preview #page-maturity-list td:nth-child(9)::before { content: "案内回数"; }
+
+/* 顧客一覧 列ラベル */
+body.mobile-preview #page-customer-list td:nth-child(1)::before { content: "顧客名"; }
+body.mobile-preview #page-customer-list td:nth-child(2)::before { content: "よみがな"; }
+body.mobile-preview #page-customer-list td:nth-child(3)::before { content: "TEL"; }
+body.mobile-preview #page-customer-list td:nth-child(4)::before { content: "保有契約数"; }
+body.mobile-preview #page-customer-list td:nth-child(5)::before { content: "担当者"; }
+body.mobile-preview #page-customer-list td:nth-child(6)::before { content: "最終更新"; }
+
+/* 事故案件一覧 列ラベル */
+body.mobile-preview #page-accident-list td:nth-child(1)::before { content: "案件番号"; }
+body.mobile-preview #page-accident-list td:nth-child(2)::before { content: "顧客名"; }
+body.mobile-preview #page-accident-list td:nth-child(3)::before { content: "事故日"; }
+body.mobile-preview #page-accident-list td:nth-child(4)::before { content: "受付日"; }
+body.mobile-preview #page-accident-list td:nth-child(5)::before { content: "事故種別"; }
+body.mobile-preview #page-accident-list td:nth-child(6)::before { content: "ステータス"; }
+body.mobile-preview #page-accident-list td:nth-child(7)::before { content: "担当"; }
+body.mobile-preview #page-accident-list td:nth-child(8)::before { content: "最終更新"; }
+
+/* 実績管理一覧 列ラベル */
+body.mobile-preview #page-result-list td:nth-child(1)::before { content: "計上日"; }
+body.mobile-preview #page-result-list td:nth-child(2)::before { content: "顧客名"; }
+body.mobile-preview #page-result-list td:nth-child(3)::before { content: "種目"; }
+body.mobile-preview #page-result-list td:nth-child(4)::before { content: "保険料"; }
+body.mobile-preview #page-result-list td:nth-child(5)::before { content: "区分"; }
+body.mobile-preview #page-result-list td:nth-child(6)::before { content: "担当"; }
+body.mobile-preview #page-result-list td:nth-child(7)::before { content: "備考"; }
+
 </style>
 </head>
 <body>
+
+<!-- ═══ PREVIEW BAR ═══ -->
+<div id="preview-bar">
+  <span class="preview-label">📐 プレビューモード</span>
+  <button id="btn-pc" class="preview-btn active" onclick="setPreviewMode('pc')">💻 PC</button>
+  <button id="btn-mobile" class="preview-btn" onclick="setPreviewMode('mobile')">📱 スマホ（375px）</button>
+</div>
+
 <div class="app">
 
 <!-- ═══ NAV ═══ -->
@@ -232,7 +394,20 @@ textarea.form-input { resize: none; }
   <div class="nav-item" onclick="showPage('activity-list')">営業活動</div>
   <div class="nav-spacer"></div>
   <div class="nav-item" onclick="showPage('settings')">設定</div>
+  <button id="nav-hamburger" onclick="openMobileNav()">☰</button>
 </nav>
+
+<!-- ═══ MOBILE NAV OVERLAY ═══ -->
+<div id="mobile-nav-overlay">
+  <div class="mobile-nav-close" onclick="closeMobileNav()">✕</div>
+  <div class="mobile-nav-link active" onclick="showPage('home')">ホーム</div>
+  <div class="mobile-nav-link" onclick="showPage('maturity-list')">満期一覧</div>
+  <div class="mobile-nav-link" onclick="showPage('customer-list')">顧客一覧</div>
+  <div class="mobile-nav-link" onclick="showPage('accident-list')">事故案件</div>
+  <div class="mobile-nav-link" onclick="showPage('result-list')">実績管理</div>
+  <div class="mobile-nav-link" onclick="showPage('activity-list')">営業活動</div>
+  <div class="mobile-nav-link" onclick="showPage('settings')">設定</div>
+</div>
 
 <div class="content">
 
@@ -297,7 +472,7 @@ textarea.form-input { resize: none; }
 <div class="page" id="page-maturity-list">
   <div class="page-header">
     <div><div class="page-title">満期一覧</div></div>
-    <button class="btn">CSV出力</button>
+    <button class="btn btn-primary">+ CSV取込</button>
   </div>
   <div class="card" style="padding:14px 18px; margin-bottom:14px;">
     <div style="font-size:12.5px; color:var(--text-info); cursor:pointer; margin-bottom:0;"
@@ -305,6 +480,7 @@ textarea.form-input { resize: none; }
       検索条件を開く
     </div>
     <div style="margin-top:12px;">
+      <button class="mobile-filter-toggle" onclick="toggleMobileFilter(this)">🔍 検索条件を絞り込む ▼</button>
       <div class="filter-bar">
         <input placeholder="顧客名・証券番号で検索" style="width:200px;" />
         <select><option>全担当者</option><option>飯田 光男</option><option>横手 輝明</option><option>森 雅人</option></select>
@@ -324,34 +500,34 @@ textarea.form-input { resize: none; }
       <div class="metric"><div class="metric-label">完了</div><div class="metric-value" style="font-size:20px;">12</div></div>
     </div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>証券番号</th><th>顧客名</th><th>種目</th><th>満期日</th><th>残日数</th><th>早期更改締切</th><th>営業担当</th><th>対応状況</th><th>案内回数</th><th>操作</th></tr></thead>
+      <thead><tr><th>証券番号</th><th>顧客名</th><th>種目</th><th>満期日</th><th>残日数</th><th>早期更改締切</th><th>営業担当</th><th>対応状況</th><th>案内回数</th></tr></thead>
       <tbody>
         <tr onclick="showDetail('maturity')">
           <td class="link">N8559-00123</td><td>森田 太郎</td><td>自動車</td>
           <td style="color:var(--text-danger);font-weight:500;">2026/4/5</td>
           <td style="color:var(--text-danger);">-4日</td>
           <td style="color:var(--text-danger);">3/8</td>
-          <td>飯田</td><td><span class="badge badge-danger">期限超過</span></td><td>2回</td><td><span class="link">詳細</span></td>
+          <td>飯田</td><td><span class="badge badge-danger">期限超過</span></td><td>2回</td>
         </tr>
         <tr onclick="showDetail('maturity')">
           <td class="link">N8559-00456</td><td>㈱クライム</td><td>火災</td>
           <td>2026/4/12</td><td>11日</td><td style="color:var(--text-warning);">3/15</td>
-          <td>横手</td><td><span class="badge badge-warn">返送待ち</span></td><td>1回</td><td><span class="link">詳細</span></td>
+          <td>横手</td><td><span class="badge badge-warn">返送待ち</span></td><td>1回</td>
         </tr>
         <tr onclick="showDetail('maturity')">
           <td class="link">N8559-00789</td><td>井野 美咲</td><td>傷害</td>
           <td>2026/4/20</td><td>19日</td><td>3/23</td>
-          <td>飯田</td><td><span class="badge badge-info">見積送付済</span></td><td>1回</td><td><span class="link">詳細</span></td>
+          <td>飯田</td><td><span class="badge badge-info">見積送付済</span></td><td>1回</td>
         </tr>
         <tr onclick="showDetail('maturity')">
           <td class="link">N8559-00234</td><td>橋本 健一</td><td>火災</td>
           <td>2026/4/28</td><td>27日</td><td>3/31</td>
-          <td>森</td><td><span class="badge badge-gray">未対応</span></td><td>0回</td><td><span class="link">詳細</span></td>
+          <td>森</td><td><span class="badge badge-gray">未対応</span></td><td>0回</td>
         </tr>
         <tr onclick="showDetail('maturity')">
           <td class="link">N8559-00567</td><td>横山 正尚</td><td>自動車</td>
           <td>2026/5/10</td><td>39日</td><td>4/12</td>
-          <td>中村</td><td><span class="badge badge-gray">未対応</span></td><td>0回</td><td><span class="link">詳細</span></td>
+          <td>中村</td><td><span class="badge badge-gray">未対応</span></td><td>0回</td>
         </tr>
       </tbody>
     </table></div>
@@ -382,7 +558,6 @@ textarea.form-input { resize: none; }
   <div class="page-header">
     <div>
       <div class="page-title">森田 太郎 — 自動車保険</div>
-      <div class="page-subtitle">証券番号：N8559-00123</div>
     </div>
     <div class="actions">
       <button class="btn" onclick="showDetail('customer')">顧客詳細を開く</button>
@@ -394,6 +569,7 @@ textarea.form-input { resize: none; }
     <div>
       <div class="card">
         <div class="detail-section-title">契約情報</div>
+        <div class="kv"><span class="kv-key">証券番号</span><span class="kv-val">N8559-00123</span></div>
         <div class="kv"><span class="kv-key">種目</span><span class="kv-val">自動車（SAP）</span></div>
         <div class="kv"><span class="kv-key">満期日</span><span class="kv-val" style="color:var(--text-danger);font-weight:500;">2026年4月5日</span></div>
         <div class="kv"><span class="kv-key">早期更改締切</span><span class="kv-val" style="color:var(--text-danger);">2026年3月8日</span></div>
@@ -471,7 +647,7 @@ textarea.form-input { resize: none; }
 ═══════════════════════════════════ -->
 <div class="page" id="page-customer-list">
   <div class="page-header">
-    <div><div class="page-title">顧客一覧</div><div class="page-subtitle">顧客起点で保有契約・対応履歴をまとめて確認する</div></div>
+    <div><div class="page-title">顧客一覧</div></div>
     <button class="btn btn-primary">+ 顧客登録</button>
   </div>
   <div class="card" style="padding:14px 18px; margin-bottom:14px;">
@@ -480,6 +656,7 @@ textarea.form-input { resize: none; }
       検索条件を開く
     </div>
     <div style="margin-top:12px;">
+      <button class="mobile-filter-toggle" onclick="toggleMobileFilter(this)">🔍 検索条件を絞り込む ▼</button>
       <div class="filter-bar">
         <input placeholder="顧客名・よみがな・TELで検索" style="width:230px;" />
         <select><option>全担当者</option><option>飯田</option><option>横手</option><option>森</option></select>
@@ -489,12 +666,12 @@ textarea.form-input { resize: none; }
   </div>
   <div class="card" style="padding:14px 18px;">
     <div class="tbl-wrap"><table>
-      <thead><tr><th>顧客名</th><th>よみがな</th><th>TEL</th><th>保有契約数</th><th>担当者</th><th>最終更新</th><th>操作</th></tr></thead>
+      <thead><tr><th>顧客名</th><th>よみがな</th><th>TEL</th><th>保有契約数</th><th>担当者</th><th>最終更新</th></tr></thead>
       <tbody>
-        <tr onclick="showDetail('customer')"><td class="link">森田 太郎</td><td>もりた たろう</td><td>03-3456-7890</td><td>3件</td><td>飯田</td><td>2026/3/10</td><td><span class="link">詳細</span></td></tr>
-        <tr onclick="showDetail('customer')"><td class="link">井野 美咲</td><td>いの みさき</td><td>090-1234-5678</td><td>1件</td><td>飯田</td><td>2026/1/6</td><td><span class="link">詳細</span></td></tr>
-        <tr onclick="showDetail('customer')"><td class="link">㈱クライム</td><td>かぶしきがいしゃ くらいむ</td><td>03-9876-5432</td><td>4件</td><td>横手</td><td>2026/2/28</td><td><span class="link">詳細</span></td></tr>
-        <tr onclick="showDetail('customer')"><td class="link">橋本 健一</td><td>はしもと けんいち</td><td>03-1111-2222</td><td>2件</td><td>森</td><td>2025/12/1</td><td><span class="link">詳細</span></td></tr>
+        <tr onclick="showDetail('customer')"><td class="link">森田 太郎</td><td>もりた たろう</td><td>03-3456-7890</td><td>3件</td><td>飯田</td><td>2026/3/10</td></tr>
+        <tr onclick="showDetail('customer')"><td class="link">井野 美咲</td><td>いの みさき</td><td>090-1234-5678</td><td>1件</td><td>飯田</td><td>2026/1/6</td></tr>
+        <tr onclick="showDetail('customer')"><td class="link">㈱クライム</td><td>かぶしきがいしゃ くらいむ</td><td>03-9876-5432</td><td>4件</td><td>横手</td><td>2026/2/28</td></tr>
+        <tr onclick="showDetail('customer')"><td class="link">橋本 健一</td><td>はしもと けんいち</td><td>03-1111-2222</td><td>2件</td><td>森</td><td>2025/12/1</td></tr>
       </tbody>
     </table></div>
     <div style="display:flex; align-items:center; justify-content:space-between;
@@ -522,7 +699,7 @@ textarea.form-input { resize: none; }
 <div class="page" id="page-customer-detail">
   <div class="breadcrumb"><span onclick="showPage('customer-list')">顧客一覧</span> &gt; 顧客詳細</div>
   <div class="page-header">
-    <div><div class="page-title">森田 太郎</div><div class="page-subtitle">顧客軸での全体把握画面</div></div>
+    <div><div class="page-title">森田 太郎</div></div>
     <div class="actions">
       <button class="btn" onclick="showPage('activity-new')">+ 活動を登録</button>
       <button class="btn">基本情報を編集</button>
@@ -580,7 +757,7 @@ textarea.form-input { resize: none; }
 ═══════════════════════════════════ -->
 <div class="page" id="page-accident-list">
   <div class="page-header">
-    <div><div class="page-title">事故案件一覧</div><div class="page-subtitle">日常業務の正式導線 — 毎日確認する画面</div></div>
+    <div><div class="page-title">事故案件一覧</div></div>
     <button class="btn btn-primary">+ 事故受付</button>
   </div>
   <div class="card" style="padding:14px 18px; margin-bottom:14px;">
@@ -589,6 +766,7 @@ textarea.form-input { resize: none; }
       検索条件を開く
     </div>
     <div style="margin-top:12px;">
+      <button class="mobile-filter-toggle" onclick="toggleMobileFilter(this)">🔍 検索条件を絞り込む ▼</button>
       <div class="filter-bar">
         <input placeholder="顧客名・案件番号で検索" style="width:190px;" />
         <select><option>全ステータス</option><option>新規受付</option><option>調査中</option><option>示談交渉中</option><option>完了</option></select>
@@ -599,11 +777,11 @@ textarea.form-input { resize: none; }
   </div>
   <div class="card" style="padding:14px 18px;">
     <div class="tbl-wrap"><table>
-      <thead><tr><th>案件番号</th><th>顧客名</th><th>事故日</th><th>受付日</th><th>事故種別</th><th>ステータス</th><th>担当</th><th>最終更新</th><th>操作</th></tr></thead>
+      <thead><tr><th>案件番号</th><th>顧客名</th><th>事故日</th><th>受付日</th><th>事故種別</th><th>ステータス</th><th>担当</th><th>最終更新</th></tr></thead>
       <tbody>
-        <tr onclick="showDetail('accident')"><td class="link">AC2026-003</td><td>上田 勇</td><td>2026/4/1</td><td>2026/4/1</td><td>自動車事故</td><td><span class="badge badge-danger">新規受付</span></td><td>飯田</td><td>今日</td><td><span class="link">詳細</span></td></tr>
-        <tr onclick="showDetail('accident')"><td class="link">AC2026-001</td><td>佐藤 圭一</td><td>2026/3/28</td><td>2026/3/28</td><td>自動車事故</td><td><span class="badge badge-warn">調査中</span></td><td>横手</td><td>3/30</td><td><span class="link">詳細</span></td></tr>
-        <tr onclick="showDetail('accident')"><td class="link">AC2026-002</td><td>㈱アトム</td><td>2026/3/15</td><td>2026/3/15</td><td>火災</td><td><span class="badge badge-info">示談交渉中</span></td><td>飯田</td><td>3/29</td><td><span class="link">詳細</span></td></tr>
+        <tr onclick="showDetail('accident')"><td class="link">AC2026-003</td><td>上田 勇</td><td>2026/4/1</td><td>2026/4/1</td><td>自動車事故</td><td><span class="badge badge-danger">新規受付</span></td><td>飯田</td><td>今日</td></tr>
+        <tr onclick="showDetail('accident')"><td class="link">AC2026-001</td><td>佐藤 圭一</td><td>2026/3/28</td><td>2026/3/28</td><td>自動車事故</td><td><span class="badge badge-warn">調査中</span></td><td>横手</td><td>3/30</td></tr>
+        <tr onclick="showDetail('accident')"><td class="link">AC2026-002</td><td>㈱アトム</td><td>2026/3/15</td><td>2026/3/15</td><td>火災</td><td><span class="badge badge-info">示談交渉中</span></td><td>飯田</td><td>3/29</td></tr>
       </tbody>
     </table></div>
     <div style="display:flex; align-items:center; justify-content:space-between;
@@ -680,7 +858,7 @@ textarea.form-input { resize: none; }
 ═══════════════════════════════════ -->
 <div class="page" id="page-result-list">
   <div class="page-header">
-    <div><div class="page-title">実績管理一覧</div><div class="page-subtitle">月次実績の検索・確認・新規計上</div></div>
+    <div><div class="page-title">実績管理一覧</div></div>
     <button class="btn btn-primary">+ 実績登録</button>
   </div>
   <div class="card" style="padding:14px 18px; margin-bottom:14px;">
@@ -689,6 +867,7 @@ textarea.form-input { resize: none; }
       検索条件を開く
     </div>
     <div style="margin-top:12px;">
+      <button class="mobile-filter-toggle" onclick="toggleMobileFilter(this)">🔍 検索条件を絞り込む ▼</button>
       <div class="filter-bar">
         <select><option>2026年</option><option>2025年</option></select>
         <select><option>4月</option><option>3月</option><option>2月</option><option>1月</option></select>
@@ -706,11 +885,11 @@ textarea.form-input { resize: none; }
       <div class="metric"><div class="metric-label">計上件数（当月）</div><div class="metric-value">24件</div><div class="metric-sub"></div></div>
     </div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>計上日</th><th>顧客名</th><th>種目</th><th>保険料</th><th>区分</th><th>担当</th><th>備考</th><th>操作</th></tr></thead>
+      <thead><tr><th>計上日</th><th>顧客名</th><th>種目</th><th>保険料</th><th>区分</th><th>担当</th><th>備考</th></tr></thead>
       <tbody>
-        <tr onclick="showDetail('result')"><td>2026/4/1</td><td class="link">上田 勇</td><td>自動車</td><td>34,680円</td><td><span class="badge badge-info">一般種目</span></td><td>飯田</td><td>—</td><td><span class="link">詳細</span></td></tr>
-        <tr onclick="showDetail('result')"><td>2026/4/3</td><td class="link">㈱クライム</td><td>火災</td><td>109,920円</td><td><span class="badge badge-info">損保挙積</span></td><td>横手</td><td>—</td><td><span class="link">詳細</span></td></tr>
-        <tr onclick="showDetail('result')"><td>2026/4/5</td><td class="link">矢部 翔太</td><td>自動車</td><td>161,160円</td><td><span class="badge badge-info">損保挙積</span></td><td>飯田</td><td>長期</td><td><span class="link">詳細</span></td></tr>
+        <tr onclick="showDetail('result')"><td>2026/4/1</td><td class="link">上田 勇</td><td>自動車</td><td>34,680円</td><td><span class="badge badge-info">一般種目</span></td><td>飯田</td><td>—</td></tr>
+        <tr onclick="showDetail('result')"><td>2026/4/3</td><td class="link">㈱クライム</td><td>火災</td><td>109,920円</td><td><span class="badge badge-info">損保挙積</span></td><td>横手</td><td>—</td></tr>
+        <tr onclick="showDetail('result')"><td>2026/4/5</td><td class="link">矢部 翔太</td><td>自動車</td><td>161,160円</td><td><span class="badge badge-info">損保挙積</span></td><td>飯田</td><td>長期</td></tr>
       </tbody>
     </table></div>
     <div style="display:flex; align-items:center; justify-content:space-between;
@@ -771,6 +950,7 @@ textarea.form-input { resize: none; }
       検索条件を開く
     </div>
     <div style="margin-top:12px;">
+      <button class="mobile-filter-toggle" onclick="toggleMobileFilter(this)">🔍 検索条件を絞り込む ▼</button>
       <div class="filter-bar">
         <input type="date" value="2026-04-01" style="width:148px;" />
         <select><option>自分の活動</option><option>全担当者</option></select>
@@ -781,11 +961,11 @@ textarea.form-input { resize: none; }
   </div>
   <div class="card" style="padding:14px 18px;">
     <div class="tbl-wrap"><table>
-      <thead><tr><th>日時</th><th>顧客名</th><th>種別</th><th>内容</th><th>担当</th><th>関連案件</th><th>操作</th></tr></thead>
+      <thead><tr><th>日時</th><th>顧客名</th><th>種別</th><th>内容</th><th>担当</th><th>関連案件</th></tr></thead>
       <tbody>
-        <tr onclick="showDetail('activity')"><td>10:00</td><td class="link">森田 太郎</td><td>訪問</td><td>満期更新案内・見積説明</td><td>飯田</td><td><span class="link" onclick="event.stopPropagation();showDetail('maturity');">満期：N8559-00123</span></td><td><span class="link">詳細</span></td></tr>
-        <tr onclick="showDetail('activity')"><td>14:00</td><td class="link">井野 美咲</td><td>電話</td><td>見積内容確認</td><td>飯田</td><td>—</td><td><span class="link">詳細</span></td></tr>
-        <tr onclick="showDetail('activity')"><td>16:30</td><td class="link">横山 正尚</td><td>電話</td><td>次回訪問日程調整</td><td>横手</td><td>—</td><td><span class="link">詳細</span></td></tr>
+        <tr onclick="showDetail('activity')"><td>10:00</td><td class="link">森田 太郎</td><td>訪問</td><td>満期更新案内・見積説明</td><td>飯田</td><td><span class="link" onclick="event.stopPropagation();showDetail('maturity');">満期：N8559-00123</span></td></tr>
+        <tr onclick="showDetail('activity')"><td>14:00</td><td class="link">井野 美咲</td><td>電話</td><td>見積内容確認</td><td>飯田</td><td>—</td></tr>
+        <tr onclick="showDetail('activity')"><td>16:30</td><td class="link">横山 正尚</td><td>電話</td><td>次回訪問日程調整</td><td>横手</td><td>—</td></tr>
       </tbody>
     </table></div>
     <div style="display:flex; align-items:center; justify-content:space-between;
@@ -813,7 +993,7 @@ textarea.form-input { resize: none; }
 <div class="page" id="page-activity-new">
   <div class="breadcrumb"><span onclick="showPage('activity-list')">営業活動一覧</span> &gt; 活動登録（新規専用）</div>
   <div class="page-header">
-    <div><div class="page-title">活動登録</div><div class="page-subtitle">登録後は活動一覧へ戻ります</div></div>
+    <div><div class="page-title">活動登録</div></div>
   </div>
   <div class="card" style="max-width:580px;">
     <div class="form-grid">
@@ -927,7 +1107,7 @@ textarea.form-input { resize: none; }
 ═══════════════════════════════════ -->
 <div class="page" id="page-settings">
   <div class="page-header">
-    <div><div class="page-title">テナント設定</div><div class="page-subtitle">マスタ・通知設定の管理</div></div>
+    <div><div class="page-title">テナント設定</div></div>
     <span class="badge badge-warn">管理者のみ</span>
   </div>
   <div class="tab-bar">
@@ -954,6 +1134,43 @@ textarea.form-input { resize: none; }
 </div><!-- /app -->
 
 <script>
+/* ─── Preview Mode ─── */
+function setPreviewMode(mode) {
+  if (mode === 'mobile') {
+    document.body.classList.add('mobile-preview');
+    document.getElementById('btn-pc').classList.remove('active');
+    document.getElementById('btn-mobile').classList.add('active');
+  } else {
+    document.body.classList.remove('mobile-preview');
+    document.getElementById('btn-pc').classList.add('active');
+    document.getElementById('btn-mobile').classList.remove('active');
+    document.getElementById('mobile-nav-overlay').classList.remove('open');
+    document.querySelectorAll('.filter-bar').forEach(fb => {
+      fb.classList.remove('open');
+    });
+    document.querySelectorAll('.mobile-filter-toggle').forEach(btn => {
+      btn.textContent = '🔍 検索条件を絞り込む ▼';
+    });
+  }
+}
+
+/* ─── Mobile Nav ─── */
+function openMobileNav() {
+  document.getElementById('mobile-nav-overlay').classList.add('open');
+}
+function closeMobileNav() {
+  document.getElementById('mobile-nav-overlay').classList.remove('open');
+}
+
+/* ─── Mobile Filter Toggle ─── */
+function toggleMobileFilter(btn) {
+  const filterBar = btn.nextElementSibling;
+  const willOpen = !filterBar.classList.contains('open');
+  filterBar.classList.toggle('open');
+  btn.textContent = willOpen ? '🔍 検索条件を絞り込む ▲' : '🔍 検索条件を絞り込む ▼';
+}
+
+/* ─── Page Navigation ─── */
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -968,10 +1185,17 @@ function showPage(name) {
     'settings': 6
   };
   const items = document.querySelectorAll('.nav-item');
+  const mobileLinks = document.querySelectorAll('.mobile-nav-link');
   const idx = navMap[name];
-  if (idx !== undefined && items[idx]) items[idx].classList.add('active');
+  if (idx !== undefined) {
+    if (items[idx]) items[idx].classList.add('active');
+    mobileLinks.forEach(l => l.classList.remove('active'));
+    if (mobileLinks[idx]) mobileLinks[idx].classList.add('active');
+  }
+  document.getElementById('mobile-nav-overlay').classList.remove('open');
   window.scrollTo(0, 0);
 }
+
 function showDetail(type) {
   const map = {
     maturity: 'maturity-detail', customer: 'customer-detail',
