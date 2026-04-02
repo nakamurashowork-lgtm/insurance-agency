@@ -268,9 +268,78 @@ final class AccidentCaseRepository
         $stmt->bindValue(':entity_id', $accidentCaseId, PDO::PARAM_INT);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
-        $rows = $stmt->fetchAll();
+        $events = $stmt->fetchAll();
+        if (!is_array($events) || $events === []) {
+            return [];
+        }
 
-        return is_array($rows) ? $rows : [];
+        $eventIds = [];
+        foreach ($events as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $eventId = (int) ($row['id'] ?? 0);
+            if ($eventId > 0) {
+                $eventIds[] = $eventId;
+            }
+        }
+
+        $detailsByEventId = $this->findAuditEventDetails($eventIds);
+
+        foreach ($events as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $eventId = (int) ($row['id'] ?? 0);
+            $events[$index]['details'] = $detailsByEventId[$eventId] ?? [];
+        }
+
+        return $events;
+    }
+
+    /**
+     * @param int[] $eventIds
+     * @return array<int, array<int, array<string, mixed>>>
+     */
+    private function findAuditEventDetails(array $eventIds): array
+    {
+        if ($eventIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(', ', array_fill(0, count($eventIds), '?'));
+        $stmt = $this->pdo->prepare(
+            'SELECT audit_event_id, field_key, field_label, value_type,
+                    before_value_text, after_value_text,
+                    before_value_json, after_value_json
+             FROM t_audit_event_detail
+             WHERE audit_event_id IN (' . $placeholders . ')
+             ORDER BY id ASC'
+        );
+
+        foreach ($eventIds as $index => $eventId) {
+            $stmt->bindValue($index + 1, $eventId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll();
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        $grouped = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $auditEventId = (int) ($row['audit_event_id'] ?? 0);
+            if ($auditEventId <= 0) {
+                continue;
+            }
+            $grouped[$auditEventId][] = $row;
+        }
+
+        return $grouped;
     }
 
     /**

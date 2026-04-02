@@ -34,7 +34,7 @@ final class DailyReportRepository
     /**
      * INSERT ON DUPLICATE KEY UPDATE でコメントを保存する。
      * UNIQUE KEY(report_date, staff_user_id) を前提とする。
-     * is_submitted は現時点では常に 0 のまま（将来フェーズ対応）。
+     * 提出済み（is_submitted=1）の場合はコメントを更新しない。
      */
     public function upsertComment(string $reportDate, int $staffUserId, string $comment): void
     {
@@ -42,12 +42,31 @@ final class DailyReportRepository
             'INSERT INTO t_daily_report (report_date, staff_user_id, comment, is_submitted)
              VALUES (:report_date, :staff_user_id, :comment, 0)
              ON DUPLICATE KEY UPDATE
-                comment    = VALUES(comment),
-                updated_at = CURRENT_TIMESTAMP'
+                comment    = IF(is_submitted = 0, VALUES(comment), comment),
+                updated_at = IF(is_submitted = 0, CURRENT_TIMESTAMP, updated_at)'
         );
         $stmt->bindValue(':report_date', $reportDate);
         $stmt->bindValue(':staff_user_id', $staffUserId, PDO::PARAM_INT);
         $stmt->bindValue(':comment', $comment);
+        $stmt->execute();
+    }
+
+    /**
+     * 日報を提出済みにする（is_submitted=1、submitted_at=NOW()）。
+     * 冪等。既に提出済みの場合は submitted_at を変更しない。
+     */
+    public function submit(string $reportDate, int $staffUserId): void
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO t_daily_report (report_date, staff_user_id, is_submitted, submitted_at)
+             VALUES (:report_date, :staff_user_id, 1, NOW())
+             ON DUPLICATE KEY UPDATE
+                is_submitted = 1,
+                submitted_at = IF(submitted_at IS NULL, NOW(), submitted_at),
+                updated_at   = CURRENT_TIMESTAMP'
+        );
+        $stmt->bindValue(':report_date', $reportDate);
+        $stmt->bindValue(':staff_user_id', $staffUserId, PDO::PARAM_INT);
         $stmt->execute();
     }
 

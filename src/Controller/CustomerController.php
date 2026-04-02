@@ -5,6 +5,7 @@ namespace App\Controller;
 
 use App\AppConfig;
 use App\Domain\Customer\CustomerRepository;
+use App\Domain\SalesCase\SalesCaseRepository;
 use App\Http\Responses;
 use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
@@ -109,6 +110,7 @@ final class CustomerController
             $contacts = $repository->findContacts($customerId);
             $contracts = $repository->findContracts($customerId);
             $activities = $repository->findActivities($customerId);
+            $salesCases = (new SalesCaseRepository($pdo))->findByCustomerId($customerId);
             $flashError = $this->guard->session()->consumeFlash('error');
 
             Responses::html(CustomerDetailView::render(
@@ -116,10 +118,12 @@ final class CustomerController
                 $contacts,
                 $contracts,
                 $activities,
+                $salesCases,
                 $listUrl,
                 $this->config->routeUrl('renewal/detail'),
                 $this->config->routeUrl('activity/new'),
                 $this->config->routeUrl('activity/detail'),
+                $this->config->routeUrl('sales-case/detail'),
                 $flashError,
                 ControllerLayoutHelper::build(
                     $this->guard,

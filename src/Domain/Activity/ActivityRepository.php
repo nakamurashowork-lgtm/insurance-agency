@@ -62,11 +62,16 @@ final class ActivityRepository
                     a.staff_user_id,
                     a.created_at,
                     a.updated_at,
-                    mc.customer_name
+                    mc.customer_name,
+                    COALESCE(dr.is_submitted, 0) AS daily_is_submitted
              FROM t_activity a
              INNER JOIN m_customer mc
                      ON mc.id = a.customer_id
-                    AND mc.is_deleted = 0'
+                    AND mc.is_deleted = 0
+             LEFT JOIN t_daily_report dr
+                     ON dr.report_date = a.activity_date
+                    AND dr.staff_user_id = a.staff_user_id
+                    AND dr.is_deleted = 0'
             . $whereSql
             . $this->buildOrderBy($sort, $direction)
             . ' LIMIT :limit OFFSET :offset';
@@ -255,6 +260,13 @@ final class ActivityRepository
             $params['staff_user_id'] = (int) $staffUserId;
         }
 
+        $dailyReportStatus = trim((string) ($criteria['daily_report_status'] ?? ''));
+        if ($dailyReportStatus === 'submitted') {
+            $sql .= ' AND COALESCE(dr.is_submitted, 0) = 1';
+        } elseif ($dailyReportStatus === 'not_submitted') {
+            $sql .= ' AND COALESCE(dr.is_submitted, 0) = 0';
+        }
+
         return $sql;
     }
 
@@ -268,7 +280,11 @@ final class ActivityRepository
              FROM t_activity a
              INNER JOIN m_customer mc
                      ON mc.id = a.customer_id
-                    AND mc.is_deleted = 0'
+                    AND mc.is_deleted = 0
+             LEFT JOIN t_daily_report dr
+                     ON dr.report_date = a.activity_date
+                    AND dr.staff_user_id = a.staff_user_id
+                    AND dr.is_deleted = 0'
             . $whereSql
         );
         foreach ($params as $key => $value) {
@@ -316,7 +332,7 @@ final class ActivityRepository
         $stmt->bindValue(':contract_id', $nullableInt($input['contract_id'] ?? null), PDO::PARAM_INT);
         $stmt->bindValue(':renewal_case_id', $nullableInt($input['renewal_case_id'] ?? null), PDO::PARAM_INT);
         $stmt->bindValue(':accident_case_id', $nullableInt($input['accident_case_id'] ?? null), PDO::PARAM_INT);
-        $stmt->bindValue(':sales_case_id', null, PDO::PARAM_NULL); // Phase C まで非使用
+        $stmt->bindValue(':sales_case_id', $nullableInt($input['sales_case_id'] ?? null), PDO::PARAM_INT);
         $stmt->bindValue(':activity_date', trim((string) ($input['activity_date'] ?? '')));
         $stmt->bindValue(':start_time', $nullableStr($input['start_time'] ?? null));
         $stmt->bindValue(':end_time', $nullableStr($input['end_time'] ?? null));

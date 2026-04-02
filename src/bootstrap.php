@@ -11,6 +11,7 @@ use App\Controller\AuthController;
 use App\Controller\CustomerController;
 use App\Controller\DashboardController;
 use App\Controller\RenewalCaseController;
+use App\Controller\SalesCaseController;
 use App\Controller\SalesPerformanceController;
 use App\Controller\TenantSettingsController;
 use App\Domain\Auth\GoogleOAuthClient;
@@ -62,6 +63,7 @@ $salesPerformanceController = new SalesPerformanceController($authGuard, $tenant
 $accidentCaseController = new AccidentCaseController($authGuard, $tenantFactory, $commonFactory, $config);
 $activityController = new ActivityController($authGuard, $tenantFactory, $commonFactory, $config);
 $tenantSettingsController = new TenantSettingsController($authGuard, $tenantFactory, $commonFactory, $config);
+$salesCaseController = new SalesCaseController($authGuard, $tenantFactory, $commonFactory, $config);
 
 $router = new Router($config->appUrl);
 
@@ -160,6 +162,9 @@ $router->get('activity/daily', static function () use ($activityController): voi
 $router->post('activity/comment', static function () use ($activityController): void {
     $activityController->saveComment();
 });
+$router->post('activity/submit', static function () use ($activityController): void {
+    $activityController->submit();
+});
 $router->post('tenant/settings/notify', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->saveNotify();
 });
@@ -168,6 +173,48 @@ $router->post('tenant/settings/phase', static function () use ($tenantSettingsCo
 });
 $router->post('tenant/settings/all', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->saveAll();
+});
+$router->post('tenant/settings/purpose-type/create', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->purposeTypeCreate();
+});
+$router->post('tenant/settings/purpose-type/update', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->purposeTypeUpdate();
+});
+$router->post('tenant/settings/purpose-type/deactivate', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->purposeTypeDeactivate();
+});
+$router->post('tenant/settings/purpose-type/activate', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->purposeTypeActivate();
+});
+$router->post('tenant/settings/sjnet/create', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->sjnetCreate();
+});
+$router->post('tenant/settings/sjnet/update', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->sjnetUpdate();
+});
+$router->post('tenant/settings/sjnet/deactivate', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->sjnetDeactivate();
+});
+$router->post('tenant/settings/sales-target/save', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->salesTargetSave();
+});
+$router->get('sales-case/list', static function () use ($salesCaseController): void {
+    $salesCaseController->list();
+});
+$router->get('sales-case/new', static function () use ($salesCaseController): void {
+    $salesCaseController->newForm();
+});
+$router->get('sales-case/detail', static function () use ($salesCaseController): void {
+    $salesCaseController->detail();
+});
+$router->post('sales-case/store', static function () use ($salesCaseController): void {
+    $salesCaseController->store();
+});
+$router->post('sales-case/update', static function () use ($salesCaseController): void {
+    $salesCaseController->update();
+});
+$router->post('sales-case/delete', static function () use ($salesCaseController): void {
+    $salesCaseController->delete();
 });
 $router->get('auth/google/start', static function () use ($authController): void {
     $authController->startGoogle();

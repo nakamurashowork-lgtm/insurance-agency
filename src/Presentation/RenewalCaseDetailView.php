@@ -97,8 +97,16 @@ final class RenewalCaseDetailView
                         $fieldLabel = (string) ($detailRow['field_key'] ?? '');
                     }
 
-                    $beforeValue = trim((string) ($detailRow['before_value_text'] ?? ''));
-                    $afterValue = trim((string) ($detailRow['after_value_text'] ?? ''));
+                    $valueType = strtoupper(trim((string) ($detailRow['value_type'] ?? '')));
+                    if ($valueType === 'JSON') {
+                        $beforeRaw = $detailRow['before_value_json'] ?? null;
+                        $afterRaw  = $detailRow['after_value_json'] ?? null;
+                        $beforeValue = $beforeRaw !== null ? (string) json_encode(json_decode((string) $beforeRaw), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) : '';
+                        $afterValue  = $afterRaw  !== null ? (string) json_encode(json_decode((string) $afterRaw),  JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) : '';
+                    } else {
+                        $beforeValue = trim((string) ($detailRow['before_value_text'] ?? ''));
+                        $afterValue  = trim((string) ($detailRow['after_value_text'] ?? ''));
+                    }
                     if ($beforeValue === '') {
                         $beforeValue = '未設定';
                     }

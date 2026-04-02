@@ -265,7 +265,9 @@ final class RenewalCaseRepository
 
         $placeholders = implode(', ', array_fill(0, count($eventIds), '?'));
         $stmt = $this->pdo->prepare(
-            'SELECT audit_event_id, field_key, field_label, value_type, before_value_text, after_value_text
+            'SELECT audit_event_id, field_key, field_label, value_type,
+                    before_value_text, after_value_text,
+                    before_value_json, after_value_json
              FROM t_audit_event_detail
              WHERE audit_event_id IN (' . $placeholders . ')
              ORDER BY id ASC'

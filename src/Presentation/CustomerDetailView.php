@@ -12,6 +12,7 @@ final class CustomerDetailView
      * @param array<int, array<string, mixed>> $contacts
      * @param array<int, array<string, mixed>> $contracts
      * @param array<int, array<string, mixed>> $activities
+     * @param array<int, array<string, mixed>> $salesCases
      * @param array<string, mixed> $layoutOptions
      */
     public static function render(
@@ -19,10 +20,12 @@ final class CustomerDetailView
         array $contacts,
         array $contracts,
         array $activities,
+        array $salesCases,
         string $listUrl,
         string $renewalDetailBaseUrl,
         string $activityNewBaseUrl,
         string $activityDetailBaseUrl,
+        string $salesCaseDetailBaseUrl,
         ?string $errorMessage,
         array $layoutOptions
     ): string {
@@ -75,6 +78,46 @@ final class CustomerDetailView
 
         $customerId = (int) ($detail['id'] ?? 0);
         $activityNewUrl = Layout::escape($activityNewBaseUrl . '&customer_id=' . $customerId);
+
+        $salesCasesHtml = '';
+        foreach ($salesCases as $sc) {
+            $scId     = (int) ($sc['id'] ?? 0);
+            $scName   = trim((string) ($sc['case_name'] ?? ''));
+            $scType   = trim((string) ($sc['case_type'] ?? ''));
+            $scStatus = trim((string) ($sc['status'] ?? ''));
+            $scRank   = trim((string) ($sc['prospect_rank'] ?? ''));
+            $scMonth  = trim((string) ($sc['expected_contract_month'] ?? ''));
+            $scUrl    = $scId > 0 ? Layout::escape($salesCaseDetailBaseUrl . '&id=' . $scId) : '';
+
+            $statusLabel = match ($scStatus) {
+                'open' => ['商談中', 'status-open'],
+                'negotiating' => ['交渉中', 'status-progress'],
+                'won' => ['成約', 'status-done'],
+                'lost' => ['失注', 'status-inactive'],
+                'on_hold' => ['保留', 'status-waiting'],
+                default => [$scStatus, 'status-open'],
+            };
+            $rankClass = match ($scRank) {
+                'A' => 'badge-danger',
+                'B' => 'badge-warning',
+                'C' => 'badge-info',
+                default => '',
+            };
+
+            $salesCasesHtml .= '<li style="padding:6px 0;border-bottom:1px solid #eef4f6;">'
+                . '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">'
+                . ($scRank !== '' ? '<span class="badge ' . $rankClass . '" style="font-size:12px;">' . Layout::escape($scRank) . '</span>' : '')
+                . '<span class="status-badge ' . $statusLabel[1] . '">' . Layout::escape($statusLabel[0]) . '</span>'
+                . '<strong style="font-size:14px;">' . Layout::escape($scName) . '</strong>'
+                . ($scType !== '' ? '<span style="font-size:12px;color:#627d98;">' . Layout::escape($scType) . '</span>' : '')
+                . ($scMonth !== '' ? '<span class="muted" style="font-size:12px;">契約予定：' . Layout::escape($scMonth) . '</span>' : '')
+                . ($scUrl !== '' ? '<a href="' . $scUrl . '" class="text-link" style="font-size:12px;margin-left:auto;">詳細</a>' : '')
+                . '</div>'
+                . '</li>';
+        }
+        if ($salesCasesHtml === '') {
+            $salesCasesHtml = '<li style="color:#627d98;padding:8px 0;">見込案件はありません。</li>';
+        }
 
         $activitiesHtml = '';
         foreach ($activities as $row) {
@@ -154,6 +197,12 @@ final class CustomerDetailView
             . '</table>'
             . '</div>'
             . '</div>'
+            . '<details class="card details-panel details-compact">'
+            . '<summary><span>見込案件</span><span class="muted">' . count($salesCases) . '件</span></summary>'
+            . '<div class="details-compact-body">'
+            . '<ul class="panel-list" style="list-style:none;padding:0;margin:0;">' . $salesCasesHtml . '</ul>'
+            . '</div>'
+            . '</details>'
             . '<details class="card details-panel details-compact">'
             . '<summary><span>活動履歴</span><span class="muted">' . count($activities) . '件</span></summary>'
             . '<div class="details-compact-body">'

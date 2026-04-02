@@ -30,6 +30,9 @@ final class ActivityDailyView
         string $activityDetailBaseUrl,
         string $customerDetailBaseUrl,
         string $commentCsrf,
+        int $loginUserId,
+        string $submitUrl,
+        string $submitCsrf,
         ?string $flashError,
         ?string $flashSuccess,
         ?string $errorMessage,
@@ -108,6 +111,64 @@ final class ActivityDailyView
         }
 
         $existingComment = (string) ($dailyReport['comment'] ?? '');
+        $isSubmitted     = (int) ($dailyReport['is_submitted'] ?? 0) === 1;
+        $submittedAt     = (string) ($dailyReport['submitted_at'] ?? '');
+        $isOwnReport     = ($loginUserId === $staffUserId);
+
+        // 日報コメントセクション（提出済みは読み取り専用）
+        if ($isSubmitted) {
+            $commentSectionHtml =
+                '<div class="card">'
+                . '<h2 style="margin:0 0 12px;font-size:16px;">日報コメント</h2>'
+                . '<textarea rows="5" readonly style="width:100%;padding:10px 12px;border:1px solid #d9e2ec;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;background:#f5f7fa;color:#52606d;">'
+                . Layout::escape($existingComment)
+                . '</textarea>'
+                . '</div>';
+        } else {
+            $commentSectionHtml =
+                '<div class="card">'
+                . '<h2 style="margin:0 0 12px;font-size:16px;">日報コメント</h2>'
+                . '<form method="post" action="' . Layout::escape($commentUrl) . '">'
+                . '<input type="hidden" name="route" value="activity/comment">'
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($commentCsrf) . '">'
+                . '<input type="hidden" name="report_date" value="' . Layout::escape($date) . '">'
+                . '<input type="hidden" name="staff_user_id" value="' . $staffUserId . '">'
+                . '<textarea name="comment" rows="5" style="width:100%;padding:10px 12px;border:1px solid #d9e2ec;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;">'
+                . Layout::escape($existingComment)
+                . '</textarea>'
+                . '<div class="actions" style="margin-top:10px;">'
+                . '<button type="submit" class="btn btn-primary">コメントを保存</button>'
+                . '</div>'
+                . '</form>'
+                . '</div>';
+        }
+
+        // 提出セクション
+        if ($isSubmitted) {
+            $submitSectionHtml =
+                '<div class="card" style="background:#f0fdf4;border-color:#86efac;">'
+                . '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">'
+                . '<span style="color:#166534;font-weight:700;font-size:15px;">✓ 提出済み</span>'
+                . ($submittedAt !== '' ? '<span style="color:#52606d;font-size:13px;">' . Layout::escape($submittedAt) . '</span>' : '')
+                . '</div>'
+                . '</div>';
+        } elseif ($isOwnReport && $submitUrl !== '' && $submitCsrf !== '') {
+            $submitSectionHtml =
+                '<div class="card">'
+                . '<h2 style="margin:0 0 8px;font-size:15px;">日報の提出</h2>'
+                . '<p style="margin:0 0 12px;font-size:13px;color:#52606d;">提出後はコメントの編集・再提出はできません。</p>'
+                . '<form method="post" action="' . Layout::escape($submitUrl) . '">'
+                . '<input type="hidden" name="route" value="activity/submit">'
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($submitCsrf) . '">'
+                . '<input type="hidden" name="report_date" value="' . Layout::escape($date) . '">'
+                . '<input type="hidden" name="staff_user_id" value="' . $staffUserId . '">'
+                . '<button type="submit" class="btn btn-primary"'
+                . ' onclick="return confirm(\'日報を提出します。提出後は取り消せません。よろしいですか？\')">日報を提出する</button>'
+                . '</form>'
+                . '</div>';
+        } else {
+            $submitSectionHtml = '';
+        }
 
         $content =
             '<div style="max-width:900px;">'
@@ -153,21 +214,10 @@ final class ActivityDailyView
             . '</div>'
 
             // 日報コメント
-            . '<div class="card">'
-            . '<h2 style="margin:0 0 12px;font-size:16px;">日報コメント</h2>'
-            . '<form method="post" action="' . Layout::escape($commentUrl) . '">'
-            . '<input type="hidden" name="route" value="activity/comment">'
-            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($commentCsrf) . '">'
-            . '<input type="hidden" name="report_date" value="' . Layout::escape($date) . '">'
-            . '<input type="hidden" name="staff_user_id" value="' . $staffUserId . '">'
-            . '<textarea name="comment" rows="5" style="width:100%;padding:10px 12px;border:1px solid #d9e2ec;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;">'
-            . Layout::escape($existingComment)
-            . '</textarea>'
-            . '<div class="actions" style="margin-top:10px;">'
-            . '<button type="submit" class="btn btn-primary">コメントを保存</button>'
-            . '</div>'
-            . '</form>'
-            . '</div>'
+            . $commentSectionHtml
+
+            // 提出セクション
+            . $submitSectionHtml
             . '</div>';
 
         return Layout::render('日報ビュー（' . $date . '）', $content, $layoutOptions);

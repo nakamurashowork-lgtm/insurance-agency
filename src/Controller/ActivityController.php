@@ -6,6 +6,7 @@ namespace App\Controller;
 use App\AppConfig;
 use App\Domain\Activity\ActivityRepository;
 use App\Domain\Activity\DailyReportRepository;
+use App\Domain\SalesCase\SalesCaseRepository;
 use App\Http\Responses;
 use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
@@ -40,8 +41,9 @@ final class ActivityController
     {
         $auth = $this->guard->requireAuthenticated();
 
-        $today = (new DateTimeImmutable())->format('Y-m-d');
-        $criteria = $this->extractCriteria($_GET, (int) ($auth['user_id'] ?? 0), $today);
+        $today   = (new DateTimeImmutable())->format('Y-m-d');
+        $isAdmin = $this->isAdmin($auth);
+        $criteria  = $this->extractCriteria($_GET, (int) ($auth['user_id'] ?? 0), $today, $isAdmin);
         $listState = $this->extractListState($_GET);
         $listUrl = $this->listUrl($criteria, $listState);
 
@@ -91,6 +93,7 @@ final class ActivityController
             $flashSuccess,
             $error,
             self::ALLOWED_ACTIVITY_TYPES,
+            $isAdmin,
             (string) ($_GET['filter_open'] ?? '') === '1',
             ControllerLayoutHelper::build($this->guard, $this->config, 'activity')
         ));
@@ -116,11 +119,14 @@ final class ActivityController
             $prefill = array_merge($prefill, (array) $draft);
         }
 
+        $salesCases = [];
+
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
             $repository = new ActivityRepository($pdo);
             $customers = $repository->fetchCustomers(500);
             $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
+            $salesCases = (new SalesCaseRepository($pdo))->fetchForDropdown();
         } catch (Throwable) {
             $error = '顧客・担当者情報の取得に失敗しました。';
         }
@@ -131,6 +137,7 @@ final class ActivityController
             $prefill,
             $customers,
             $staffUsers,
+            $salesCases,
             $listUrl,
             $this->config->routeUrl('activity/store'),
             $this->guard->session()->issueCsrfToken('activity_store'),
@@ -162,10 +169,11 @@ final class ActivityController
             Responses::redirect($listUrl);
         }
 
-        $record = null;
-        $customers = [];
+        $record     = null;
+        $customers  = [];
         $staffUsers = [];
-        $error = null;
+        $salesCases = [];
+        $error      = null;
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
@@ -179,6 +187,7 @@ final class ActivityController
             $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
             $staffUserNames = $this->buildUserNameMap($staffUsers);
             $record['staff_name'] = $staffUserNames[(int) ($record['staff_user_id'] ?? 0)] ?? '';
+            $salesCases = (new SalesCaseRepository($pdo))->fetchForDropdown();
 
             $editDraft = $this->consumeEditDraft();
             if ($editDraft !== null && (int) ($editDraft['id'] ?? 0) === $id && is_array($editDraft['input'] ?? null)) {
@@ -188,14 +197,15 @@ final class ActivityController
             $error = '活動詳細の取得に失敗しました。接続設定を確認してください。';
         }
 
-        $flashError = $this->guard->session()->consumeFlash('error');
+        $flashError   = $this->guard->session()->consumeFlash('error');
         $flashSuccess = $this->guard->session()->consumeFlash('success');
-        $detailUrl = $this->detailUrl($id);
+        $detailUrl    = $this->detailUrl($id);
 
         Responses::html(ActivityDetailView::renderDetail(
             $record,
             $customers,
             $staffUsers,
+            $salesCases,
             $listUrl,
             $detailUrl,
             $this->config->routeUrl('activity/update'),
@@ -370,6 +380,11 @@ final class ActivityController
         $flashSuccess = $this->guard->session()->consumeFlash('success');
         $listUrl      = $this->config->routeUrl('activity/list');
 
+        $isOwnReport = ($staffUserId === $loginUserId);
+        $submitCsrf  = $isOwnReport
+            ? $this->guard->session()->issueCsrfToken('activity_submit')
+            : '';
+
         Responses::html(ActivityDailyView::render(
             $date,
             $staffUserId,
@@ -385,6 +400,9 @@ final class ActivityController
             $this->config->routeUrl('activity/detail'),
             $this->config->routeUrl('customer/detail'),
             $this->guard->session()->issueCsrfToken('activity_comment'),
+            $loginUserId,
+            $this->config->routeUrl('activity/submit'),
+            $submitCsrf,
             $flashError,
             $flashSuccess,
             $error,
@@ -400,6 +418,52 @@ final class ActivityController
                 ]
             )
         ));
+    }
+
+    public function submit(): void
+    {
+        $auth        = $this->guard->requireAuthenticated();
+        $loginUserId = (int) ($auth['user_id'] ?? 0);
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('activity_submit', $token)) {
+            $this->guard->session()->setFlash('error', '不正な操作です。再度お試しください。');
+            Responses::redirect($this->config->routeUrl('activity/list'));
+        }
+
+        $date        = trim((string) ($_POST['report_date'] ?? ''));
+        $staffUserId = (int) ($_POST['staff_user_id'] ?? $loginUserId);
+
+        $parsedDate = DateTimeImmutable::createFromFormat('Y-m-d', $date);
+        if ($parsedDate === false || $parsedDate->format('Y-m-d') !== $date) {
+            $this->guard->session()->setFlash('error', '日付が不正です。');
+            Responses::redirect($this->config->routeUrl('activity/list'));
+        }
+
+        // 本人のみ提出可能
+        if ($staffUserId !== $loginUserId) {
+            $this->guard->session()->setFlash('error', '日報は本人のみ提出できます。');
+            Responses::redirect(ListViewHelper::buildUrl(
+                $this->config->routeUrl('activity/daily'),
+                ['date' => $date, 'staff' => (string) $staffUserId]
+            ));
+        }
+
+        $returnUrl = ListViewHelper::buildUrl(
+            $this->config->routeUrl('activity/daily'),
+            ['date' => $date, 'staff' => (string) $staffUserId]
+        );
+
+        try {
+            $pdo       = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $dailyRepo = new DailyReportRepository($pdo);
+            $dailyRepo->submit($date, $staffUserId);
+            $this->guard->session()->setFlash('success', '日報を提出しました。');
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '日報の提出に失敗しました。');
+        }
+
+        Responses::redirect($returnUrl);
     }
 
     public function saveComment(): void
@@ -446,7 +510,7 @@ final class ActivityController
      * @param array<string, mixed> $source
      * @return array<string, string>
      */
-    private function extractCriteria(array $source, int $loginUserId, string $today): array
+    private function extractCriteria(array $source, int $loginUserId, string $today, bool $isAdmin = false): array
     {
         $staffUserId = trim((string) ($source['staff_user_id'] ?? ''));
         if ($staffUserId === '') {
@@ -461,11 +525,12 @@ final class ActivityController
         }
 
         return [
-            'activity_date_from' => $dateFrom,
-            'activity_date_to'   => $dateTo,
-            'customer_name'      => trim((string) ($source['customer_name'] ?? '')),
-            'activity_type'      => trim((string) ($source['activity_type'] ?? '')),
-            'staff_user_id'      => $staffUserId,
+            'activity_date_from'  => $dateFrom,
+            'activity_date_to'    => $dateTo,
+            'customer_name'       => trim((string) ($source['customer_name'] ?? '')),
+            'activity_type'       => trim((string) ($source['activity_type'] ?? '')),
+            'staff_user_id'       => $staffUserId,
+            'daily_report_status' => $isAdmin ? trim((string) ($source['daily_report_status'] ?? '')) : '',
         ];
     }
 
@@ -508,9 +573,10 @@ final class ActivityController
 
     private function listUrlFromGet(): string
     {
-        $auth = $this->guard->requireAuthenticated();
-        $today = (new DateTimeImmutable())->format('Y-m-d');
-        $criteria = $this->extractCriteria($_GET, (int) ($auth['user_id'] ?? 0), $today);
+        $auth      = $this->guard->requireAuthenticated();
+        $today     = (new DateTimeImmutable())->format('Y-m-d');
+        $isAdmin   = $this->isAdmin($auth);
+        $criteria  = $this->extractCriteria($_GET, (int) ($auth['user_id'] ?? 0), $today, $isAdmin);
         $listState = $this->extractListState($_GET);
 
         return $this->listUrl($criteria, $listState);
@@ -559,6 +625,7 @@ final class ActivityController
             'next_action_note'  => trim((string) ($_POST['next_action_note'] ?? '')),
             'result_type'       => trim((string) ($_POST['result_type'] ?? '')),
             'staff_user_id'     => trim((string) ($_POST['staff_user_id'] ?? '')),
+            'sales_case_id'     => trim((string) ($_POST['sales_case_id'] ?? '')),
         ];
     }
 
@@ -692,6 +759,20 @@ final class ActivityController
         }
 
         return $map;
+    }
+
+    /**
+     * @param array<string, mixed> $auth
+     */
+    private function isAdmin(array $auth): bool
+    {
+        $permissions = $auth['permissions'] ?? [];
+        if (!is_array($permissions)) {
+            return false;
+        }
+
+        return !empty($permissions['is_system_admin'])
+            || (($permissions['tenant_role'] ?? '') === 'admin');
     }
 
     /**

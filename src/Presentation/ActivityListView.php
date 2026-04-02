@@ -31,6 +31,7 @@ final class ActivityListView
         ?string $flashSuccess,
         ?string $errorMessage,
         array $allowedActivityTypes,
+        bool $isAdmin,
         bool $forceFilterOpen,
         array $layoutOptions
     ): string {
@@ -50,11 +51,12 @@ final class ActivityListView
         $pager      = ListViewHelper::buildPager((int) ($listState['page'] ?? '1'), $perPage, $totalCount);
         $listState['page'] = (string) ($pager['currentPage'] ?? 1);
 
-        $dateFrom     = Layout::escape((string) ($criteria['activity_date_from'] ?? ''));
-        $dateTo       = Layout::escape((string) ($criteria['activity_date_to'] ?? ''));
-        $customerName = Layout::escape((string) ($criteria['customer_name'] ?? ''));
-        $activityType = (string) ($criteria['activity_type'] ?? '');
-        $staffUserId  = (string) ($criteria['staff_user_id'] ?? '');
+        $dateFrom           = Layout::escape((string) ($criteria['activity_date_from'] ?? ''));
+        $dateTo             = Layout::escape((string) ($criteria['activity_date_to'] ?? ''));
+        $customerName       = Layout::escape((string) ($criteria['customer_name'] ?? ''));
+        $activityType       = (string) ($criteria['activity_type'] ?? '');
+        $staffUserId        = (string) ($criteria['staff_user_id'] ?? '');
+        $dailyReportStatus  = (string) ($criteria['daily_report_status'] ?? '');
 
         // 活動種別セレクト
         $typeOptionsHtml = '<option value="">すべて</option>';
@@ -87,6 +89,8 @@ final class ActivityListView
             $staffName = (string) ($row['staff_name'] ?? '');
             $staffUid  = (int) ($row['staff_user_id'] ?? 0);
 
+            $isRowSubmitted = (int) ($row['daily_is_submitted'] ?? 0) === 1;
+
             $detailUrl = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, ['id' => (string) $id]));
             $dailyUrl  = Layout::escape(ListViewHelper::buildUrl($dailyBaseUrl, ['date' => $actDate, 'staff' => (string) $staffUid]));
             $custUrl   = $custId > 0 ? Layout::escape(ListViewHelper::buildUrl($customerDetailBaseUrl, ['id' => (string) $custId])) : '';
@@ -95,9 +99,13 @@ final class ActivityListView
                 ? '<a href="' . $custUrl . '" class="text-link">' . Layout::escape($custName) . '</a>'
                 : Layout::escape($custName);
 
+            $submittedBadge = $isRowSubmitted
+                ? ' <span style="display:inline-block;font-size:11px;font-weight:700;padding:1px 6px;border-radius:999px;background:#dcfce7;color:#166534;vertical-align:middle;">提出済み</span>'
+                : '';
+
             $rowsHtml .=
                 '<tr>'
-                . '<td data-label="活動日"><a href="' . $dailyUrl . '" class="text-link">' . Layout::escape($actDate) . '</a></td>'
+                . '<td data-label="活動日"><a href="' . $dailyUrl . '" class="text-link">' . Layout::escape($actDate) . '</a>' . $submittedBadge . '</td>'
                 . '<td data-label="活動種別">' . Layout::escape($typeLabel) . '</td>'
                 . '<td data-label="顧客名">' . $custHtml . '</td>'
                 . '<td data-label="件名"><span class="truncate">' . Layout::escape($subject) . '</span></td>'
@@ -119,9 +127,10 @@ final class ActivityListView
 
         $content =
             '<div class="list-page-frame">'
-            . '<div class="list-page-header"><h1 class="title">活動一覧</h1>'
+            . '<div class="list-page-header"><h1 class="title">営業活動一覧</h1>'
             . '<div class="list-page-header-actions">'
-            . '<a href="' . Layout::escape($newUrl) . '" class="btn">＋ 活動登録</a>'
+            . '<a href="' . Layout::escape(ListViewHelper::buildUrl($dailyBaseUrl, ['date' => date('Y-m-d'), 'staff' => $staffUserId])) . '" class="btn btn-ghost btn-small">日報ビュー</a>'
+            . '<a href="' . Layout::escape($newUrl) . '" class="btn btn-primary btn-small">＋ 活動登録</a>'
             . '</div></div>'
             . $noticeHtml
             . '<details class="card details-panel list-filter-card"' . $filterState . '>'
@@ -139,6 +148,7 @@ final class ActivityListView
             . '<label class="list-filter-field"><span>顧客名</span><input type="text" name="customer_name" value="' . $customerName . '" placeholder="顧客名で絞り込み"></label>'
             . '<label class="list-filter-field"><span>活動種別</span><select name="activity_type">' . $typeOptionsHtml . '</select></label>'
             . '<label class="list-filter-field"><span>担当者</span><select name="staff_user_id">' . $staffOptionsHtml . '</select></label>'
+            . ($isAdmin ? self::renderDailyReportStatusFilter($dailyReportStatus) : '')
             . '</div>'
             . '<div class="actions list-filter-actions">'
             . '<button class="btn" type="submit">検索</button> '
@@ -165,7 +175,7 @@ final class ActivityListView
             . '</div>'
             . '</div>';
 
-        return Layout::render('活動一覧', $content, $layoutOptions);
+        return Layout::render('営業活動一覧', $content, $layoutOptions);
     }
 
     /**
@@ -272,6 +282,22 @@ final class ActivityListView
             . '<select name="per_page" onchange="this.form.submit()">' . $optionsHtml . '</select></label>'
             . '<noscript><button class="btn btn-ghost btn-small" type="submit">更新</button></noscript>'
             . '</form>';
+    }
+
+    private static function renderDailyReportStatusFilter(string $current): string
+    {
+        $options = [
+            ''             => '全て',
+            'submitted'    => '提出済み',
+            'not_submitted' => '未提出',
+        ];
+        $optHtml = '';
+        foreach ($options as $val => $label) {
+            $sel      = $current === $val ? ' selected' : '';
+            $optHtml .= '<option value="' . Layout::escape($val) . '"' . $sel . '>' . Layout::escape($label) . '</option>';
+        }
+
+        return '<label class="list-filter-field"><span>日報提出状態</span><select name="daily_report_status">' . $optHtml . '</select></label>';
     }
 
     /**

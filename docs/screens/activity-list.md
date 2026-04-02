@@ -52,6 +52,7 @@
 | アクション | 遷移先 | 備考 |
 |-----------|--------|------|
 | ＋活動登録 | activity/new | customer_id なしで開始 |
+| 日報ビュー | activity/daily?date={今日の日付}&staff={ログインユーザーID} | ページヘッダー右側。副操作ボタン（btn クラス）。「＋活動登録」ボタンの左隣に配置する |
 | 行クリック（詳細） | activity/detail?id={id} | |
 | 日付リンク | activity/daily?date={date}&staff={staff_user_id} | 日報ビューへ |
 | 顧客名リンク | customer/detail?id={customer_id} | |

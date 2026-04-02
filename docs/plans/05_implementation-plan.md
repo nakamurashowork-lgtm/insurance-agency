@@ -1431,3 +1431,86 @@ Phase C-Lite 完了後に別途スコープを定義する。
 - 用件区分マスタ: 用件区分の追加・編集・無効化ができる
 - いずれも他テナントのデータへの影響がないこと
 - SJNET取込後に「マッピング未登録」がある場合、取込結果からテナント設定へ遷移できる
+
+---
+
+## 営業活動管理 Phase A/B 受入判定
+
+実施日: 2026-04-01
+
+判定:
+- 確認済み: 25項目（A-1〜A-11、B-1〜B-13b）
+- 不具合: 1件（修正済み）
+- 未実装: なし
+
+修正内容:
+- `DailyReportRepository::submit()` の `submitted_at` が NULL になるバグを修正
+- `IF(is_submitted = 0, NOW(), submitted_at)` → `IF(submitted_at IS NULL, NOW(), submitted_at)`
+- 原因: MySQL の ON DUPLICATE KEY UPDATE 内では列参照が新値（代入後の値）を使うため、`is_submitted` が既に 1 に更新された後の値を参照していた
+
+Phase A/B 判定結論: 受入完了としてクローズする。
+
+---
+
+## audit_event_detail 表示対応 受入判定
+
+実施日: 2026-04-01
+
+変更ファイル:
+- `src/Domain/Accident/AccidentCaseRepository.php`: `findAuditEvents()` に詳細 attach ロジック追加、private `findAuditEventDetails()` 新設（JSON フィールド含む）
+- `src/Domain/Renewal/RenewalCaseRepository.php`: `findAuditEventDetails()` の SELECT に `before_value_json`/`after_value_json` を追加
+- `src/Presentation/AccidentCaseDetailView.php`: 監査ログループ内に詳細テーブル描画を追加（`value_type='JSON'` 対応、null → 「未設定」、0件イベント安全）
+- `src/Presentation/RenewalCaseDetailView.php`: `value_type='JSON'` 時に `before/after_value_json` を使用して整形表示
+
+判定: 構文エラーなし。実装完了。
+
+---
+
+## Phase 設定A 受入判定
+
+実施日: 2026-04-02
+
+確認済み: 18項目（S1-1〜S1-8、S2-1〜S2-5、S3-1〜S3-5）
+不具合: 0件
+未実装: なし
+
+変更ファイル:
+- src/Domain/Tenant/ActivityPurposeTypeRepository.php（新規）
+- src/Domain/Tenant/SjnetStaffMappingRepository.php（新規）
+- src/Domain/Tenant/SalesTargetRepository.php（新規）
+- src/Controller/TenantSettingsController.php（8ハンドラ追加）
+- src/Presentation/TenantSettingsView.php（3セクション追加）
+- src/bootstrap.php（8ルート追加）
+
+補足: SJNETコード重複チェックは pre-check 方式で実装。
+フラッシュメッセージ「既に登録されています」で確認済み。
+
+Phase 設定A 判定結論: 受入完了としてクローズする。
+
+## Phase C-Lite 受入判定
+
+実施日: 2026-04-02
+
+確認済み: 74項目（C1-1〜C1-17、C2-1〜C2-13、C3-1〜C3-7、
+C4-1〜C4-12、C5-1〜C5-7、C6-1〜C6-2、C7-1、
+C8-1〜C8-2、C9-1〜C9-3、C10-1〜C10-3、
+C11-1〜C11-3、C12-1〜C12-4）
+不具合: 0件
+未実装: なし
+
+変更ファイル（新規）:
+- src/Domain/SalesCase/SalesCaseRepository.php
+- src/Controller/SalesCaseController.php
+- src/Presentation/SalesCaseListView.php
+- src/Presentation/SalesCaseDetailView.php
+
+変更ファイル（既存）:
+- src/bootstrap.php（6ルート追加）
+- src/Presentation/View/Layout.php（営業案件ナビ追加）
+- src/Controller/ActivityController.php（sales_case_id 有効化）
+- src/Presentation/ActivityDetailView.php（sales_case_id プルダウン追加）
+- src/Controller/CustomerController.php（SalesCase ロード追加）
+- src/Presentation/CustomerDetailView.php（見込案件セクション追加）
+
+Phase C-Lite 判定結論: 受入完了としてクローズする。
+Phase C-Full は Phase C-Lite 完了後に別途スコープを定義する。

@@ -21,6 +21,7 @@ final class ActivityDetailView
         array $prefill,
         array $customers,
         array $staffUsers,
+        array $salesCases,
         string $listUrl,
         string $storeUrl,
         string $storeCsrf,
@@ -37,7 +38,7 @@ final class ActivityDetailView
             $noticeHtml .= '<div class="error">' . Layout::escape($errorMessage) . '</div>';
         }
 
-        $formHtml = self::buildForm($prefill, $customers, $staffUsers, $allowedActivityTypes);
+        $formHtml = self::buildForm($prefill, $customers, $staffUsers, $allowedActivityTypes, 0, $salesCases);
 
         $content =
             '<div class="card">'
@@ -77,6 +78,7 @@ final class ActivityDetailView
         ?array $record,
         array $customers,
         array $staffUsers,
+        array $salesCases,
         string $listUrl,
         string $detailUrl,
         string $updateUrl,
@@ -120,7 +122,7 @@ final class ActivityDetailView
             ? '<a href="' . $custUrl . '" class="text-link">' . Layout::escape($custName) . '</a>'
             : Layout::escape($custName);
 
-        $formHtml = self::buildForm($record, $customers, $staffUsers, $allowedActivityTypes, $id);
+        $formHtml = self::buildForm($record, $customers, $staffUsers, $allowedActivityTypes, $id, $salesCases);
 
         $deleteDialog =
             '<dialog id="dlg-delete" class="modal-dialog">'
@@ -186,7 +188,8 @@ final class ActivityDetailView
         array $customers,
         array $staffUsers,
         array $allowedActivityTypes,
-        int $id = 0
+        int $id = 0,
+        array $salesCases = []
     ): string {
         $customerIdVal    = (string) ($data['customer_id'] ?? '');
         $activityDateVal  = (string) ($data['activity_date'] ?? '');
@@ -204,6 +207,7 @@ final class ActivityDetailView
         $resultTypeVal    = (string) ($data['result_type'] ?? '');
         $renewalIdVal     = (string) ($data['renewal_case_id'] ?? '');
         $accidentIdVal    = (string) ($data['accident_case_id'] ?? '');
+        $salesCaseIdVal   = (string) ($data['sales_case_id'] ?? '');
         $staffUserIdVal   = (string) ($data['staff_user_id'] ?? '');
 
         $custOptionsHtml = '<option value="">-- 顧客を選択 --</option>';
@@ -218,6 +222,16 @@ final class ActivityDetailView
         foreach ($allowedActivityTypes as $val => $label) {
             $sel = $activityTypeVal === $val ? ' selected' : '';
             $typeOptionsHtml .= '<option value="' . Layout::escape($val) . '"' . $sel . '>' . Layout::escape($label) . '</option>';
+        }
+
+        $salesCaseOptionsHtml = '<option value="">-- 選択 --</option>';
+        foreach ($salesCases as $sc) {
+            $scId   = (int) ($sc['id'] ?? 0);
+            $scName = (string) ($sc['case_name'] ?? '');
+            $scCust = (string) ($sc['customer_name'] ?? '');
+            $scLabel = $scCust !== '' ? $scCust . '｜' . $scName : $scName;
+            $sel = $salesCaseIdVal === (string) $scId ? ' selected' : '';
+            $salesCaseOptionsHtml .= '<option value="' . $scId . '"' . $sel . '>' . Layout::escape($scLabel) . '</option>';
         }
 
         $staffOptionsHtml = '<option value="">-- 選択 --</option>';
@@ -276,6 +290,8 @@ final class ActivityDetailView
 
             . '<label class="list-filter-field" style="grid-column:span 4;"><span>担当者</span>'
             . '<select name="staff_user_id">' . $staffOptionsHtml . '</select></label>'
+            . '<label class="list-filter-field" style="grid-column:span 4;"><span>関連見込案件</span>'
+            . '<select name="sales_case_id">' . $salesCaseOptionsHtml . '</select></label>'
             . '<label class="list-filter-field" style="grid-column:span 4;"><span>関連満期案件ID</span>'
             . '<input type="text" name="renewal_case_id" value="' . Layout::escape($renewalIdVal) . '" maxlength="20" inputmode="numeric"></label>'
             . '<label class="list-filter-field" style="grid-column:span 4;"><span>関連事故案件ID</span>'

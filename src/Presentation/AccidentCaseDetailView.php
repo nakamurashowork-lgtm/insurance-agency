@@ -136,6 +136,49 @@ final class AccidentCaseDetailView
             $actionLabel = $actionLabels[strtoupper((string) ($row['action_type'] ?? ''))] ?? (string) ($row['action_type'] ?? '');
             $sourceLabel = $sourceLabels[strtoupper((string) ($row['change_source'] ?? ''))] ?? (string) ($row['change_source'] ?? '');
             $note = trim((string) ($row['note'] ?? ''));
+
+            $detailsHtml = '';
+            $details = $row['details'] ?? [];
+            if (is_array($details)) {
+                foreach ($details as $detailRow) {
+                    if (!is_array($detailRow)) {
+                        continue;
+                    }
+
+                    $fieldLabel = trim((string) ($detailRow['field_label'] ?? ''));
+                    if ($fieldLabel === '') {
+                        $fieldLabel = (string) ($detailRow['field_key'] ?? '');
+                    }
+
+                    $valueType = strtoupper(trim((string) ($detailRow['value_type'] ?? '')));
+                    if ($valueType === 'JSON') {
+                        $beforeRaw = $detailRow['before_value_json'] ?? null;
+                        $afterRaw  = $detailRow['after_value_json'] ?? null;
+                        $beforeValue = $beforeRaw !== null ? (string) json_encode(json_decode((string) $beforeRaw), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) : '';
+                        $afterValue  = $afterRaw  !== null ? (string) json_encode(json_decode((string) $afterRaw),  JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) : '';
+                    } else {
+                        $beforeValue = trim((string) ($detailRow['before_value_text'] ?? ''));
+                        $afterValue  = trim((string) ($detailRow['after_value_text'] ?? ''));
+                    }
+                    if ($beforeValue === '') {
+                        $beforeValue = '未設定';
+                    }
+                    if ($afterValue === '') {
+                        $afterValue = '未設定';
+                    }
+
+                    $detailsHtml .= '<tr>'
+                        . '<td>' . Layout::escape($fieldLabel) . '</td>'
+                        . '<td>' . Layout::escape($beforeValue) . '</td>'
+                        . '<td>' . Layout::escape($afterValue) . '</td>'
+                        . '</tr>';
+                }
+            }
+
+            if ($detailsHtml !== '') {
+                $detailsHtml = '<div class="history-detail-table-wrap"><table class="history-detail-table"><thead><tr><th>変更項目</th><th>変更前</th><th>変更後</th></tr></thead><tbody>' . $detailsHtml . '</tbody></table></div>';
+            }
+
             $auditsHtml .= '<li class="history-item">'
                 . '<div class="history-meta">'
                 . '<span>' . Layout::escape($changedAt) . '</span>'
@@ -144,6 +187,7 @@ final class AccidentCaseDetailView
                 . '<span>変更元: ' . Layout::escape($sourceLabel) . '</span>'
                 . '</div>'
                 . ($note !== '' ? '<div class="history-summary">内容: ' . Layout::escape($note) . '</div>' : '')
+                . $detailsHtml
                 . '</li>';
         }
         if ($auditsHtml === '') {

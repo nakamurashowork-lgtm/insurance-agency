@@ -8,10 +8,16 @@ use App\Presentation\View\Layout;
 final class TenantSettingsView
 {
     /**
-     * @param array<string, mixed> $auth
+     * @param array<string, mixed>              $auth
      * @param array<string, array<string, mixed>> $notifySettings
-     * @param array<int, array<string, mixed>> $phases
-     * @param array<string, mixed> $layoutOptions
+     * @param array<int, array<string, mixed>>  $phases
+     * @param array<string, mixed>              $layoutOptions
+     * @param array<int, array<string, mixed>>  $purposeTypes
+     * @param array<int, array<string, mixed>>  $sjnetMappings
+     * @param array<int, array{id:int,name:string}> $staffUsers
+     * @param array<int, array<string, mixed>>  $salesTargets
+     * @param array<string, string>             $masterCsrfs
+     * @param array<string, string>             $masterUrls
      */
     public static function render(
         array $auth,
@@ -22,7 +28,14 @@ final class TenantSettingsView
         ?string $errorMessage,
         ?string $flashError,
         ?string $flashSuccess,
-        array $layoutOptions
+        array $layoutOptions,
+        array $purposeTypes = [],
+        array $sjnetMappings = [],
+        array $staffUsers = [],
+        array $salesTargets = [],
+        int $currentFiscalYear = 0,
+        array $masterCsrfs = [],
+        array $masterUrls = []
     ): string {
         $errorHtml = '';
         if (is_string($errorMessage) && $errorMessage !== '') {
@@ -61,8 +74,371 @@ final class TenantSettingsView
 
         $content .= $notifyContent;
 
+        $content .= self::renderPurposeTypeSection($purposeTypes, $masterCsrfs, $masterUrls);
+        $content .= self::renderSjnetSection($sjnetMappings, $staffUsers, $masterCsrfs, $masterUrls);
+        $content .= self::renderSalesTargetSection($salesTargets, $staffUsers, $currentFiscalYear, $masterCsrfs, $masterUrls);
+
         return Layout::render('管理・設定', $content, $layoutOptions);
     }
+
+    // ---- 用件区分マスタ ----
+
+    /**
+     * @param array<int, array<string, mixed>> $purposeTypes
+     * @param array<string, string>            $masterCsrfs
+     * @param array<string, string>            $masterUrls
+     */
+    private static function renderPurposeTypeSection(
+        array $purposeTypes,
+        array $masterCsrfs,
+        array $masterUrls
+    ): string {
+        $createUrl     = $masterUrls['purpose_type_create'] ?? '';
+        $updateUrl     = $masterUrls['purpose_type_update'] ?? '';
+        $deactivateUrl = $masterUrls['purpose_type_deactivate'] ?? '';
+        $activateUrl   = $masterUrls['purpose_type_activate'] ?? '';
+
+        $csrfCreate     = $masterCsrfs['purpose_type_create'] ?? '';
+        $csrfUpdate     = $masterCsrfs['purpose_type_update'] ?? '';
+        $csrfDeactivate = $masterCsrfs['purpose_type_deactivate'] ?? '';
+        $csrfActivate   = $masterCsrfs['purpose_type_activate'] ?? '';
+
+        $rows = '';
+        foreach ($purposeTypes as $row) {
+            $code         = Layout::escape((string) ($row['code'] ?? ''));
+            $label        = Layout::escape((string) ($row['label'] ?? ''));
+            $displayOrder = (int) ($row['display_order'] ?? 0);
+            $isActive     = (int) ($row['is_active'] ?? 1);
+            $rowStyle     = $isActive ? '' : ' style="color:#999;"';
+
+            $activeLabel = $isActive ? '<span class="badge badge-success">有効</span>' : '<span class="badge">無効</span>';
+
+            if ($isActive) {
+                $toggleForm = ''
+                    . '<form method="post" action="' . Layout::escape($deactivateUrl) . '" style="display:inline;">'
+                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDeactivate) . '">'
+                    . '<input type="hidden" name="code" value="' . $code . '">'
+                    . '<button type="submit" class="btn btn-sm" onclick="return confirm(\'無効化しますか？\')">無効化</button>'
+                    . '</form>';
+            } else {
+                $toggleForm = ''
+                    . '<form method="post" action="' . Layout::escape($activateUrl) . '" style="display:inline;">'
+                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfActivate) . '">'
+                    . '<input type="hidden" name="code" value="' . $code . '">'
+                    . '<button type="submit" class="btn btn-sm">有効化</button>'
+                    . '</form>';
+            }
+
+            $editForm = ''
+                . '<details style="display:inline;">'
+                . '<summary class="btn btn-sm" style="display:inline;cursor:pointer;">編集</summary>'
+                . '<div style="background:#f9f9f9;padding:12px;margin-top:8px;border:1px solid #ddd;">'
+                . '<form method="post" action="' . Layout::escape($updateUrl) . '">'
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfUpdate) . '">'
+                . '<input type="hidden" name="code" value="' . $code . '">'
+                . '<label style="display:block;margin-bottom:6px;">表示名 <input type="text" name="label" value="' . $label . '" required style="width:200px;"></label>'
+                . '<label style="display:block;margin-bottom:6px;">表示順 <input type="number" name="display_order" value="' . $displayOrder . '" min="0" style="width:80px;"></label>'
+                . '<button type="submit" class="btn btn-primary btn-sm">更新</button>'
+                . '</form>'
+                . '</div>'
+                . '</details>';
+
+            $rows .= '<tr' . $rowStyle . '>'
+                . '<td>' . $code . '</td>'
+                . '<td>' . $label . '</td>'
+                . '<td style="text-align:center;">' . $displayOrder . '</td>'
+                . '<td style="text-align:center;">' . $activeLabel . '</td>'
+                . '<td>' . $editForm . ' ' . $toggleForm . '</td>'
+                . '</tr>';
+        }
+
+        if ($rows === '') {
+            $rows = '<tr><td colspan="5" class="muted" style="text-align:center;">登録なし</td></tr>';
+        }
+
+        $table = ''
+            . '<table style="width:100%;border-collapse:collapse;">'
+            . '<thead><tr>'
+            . '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;">コード</th>'
+            . '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;">表示名</th>'
+            . '<th style="text-align:center;padding:6px 8px;border-bottom:1px solid #ddd;">表示順</th>'
+            . '<th style="text-align:center;padding:6px 8px;border-bottom:1px solid #ddd;">状態</th>'
+            . '<th style="padding:6px 8px;border-bottom:1px solid #ddd;"></th>'
+            . '</tr></thead>'
+            . '<tbody>' . $rows . '</tbody>'
+            . '</table>';
+
+        $addForm = ''
+            . '<details style="margin-top:12px;">'
+            . '<summary class="btn btn-sm" style="cursor:pointer;">＋ 追加</summary>'
+            . '<div style="background:#f9f9f9;padding:12px;margin-top:8px;border:1px solid #ddd;">'
+            . '<form method="post" action="' . Layout::escape($createUrl) . '">'
+            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfCreate) . '">'
+            . '<label style="display:block;margin-bottom:6px;">コード（半角英数・_・-）<input type="text" name="code" required pattern="[a-zA-Z0-9_\-]+" style="width:200px;margin-left:8px;"></label>'
+            . '<label style="display:block;margin-bottom:6px;">表示名 <input type="text" name="label" required style="width:200px;margin-left:8px;"></label>'
+            . '<label style="display:block;margin-bottom:8px;">表示順 <input type="number" name="display_order" value="0" min="0" style="width:80px;margin-left:8px;"></label>'
+            . '<button type="submit" class="btn btn-primary btn-sm">追加</button>'
+            . '</form>'
+            . '</div>'
+            . '</details>';
+
+        return ''
+            . '<div class="card" style="margin-top:24px;">'
+            . '<h2>用件区分マスタ</h2>'
+            . '<p class="muted" style="margin:0 0 12px;">活動記録の用件区分を管理します。</p>'
+            . $table
+            . $addForm
+            . '</div>';
+    }
+
+    // ---- SJNETコード設定 ----
+
+    /**
+     * @param array<int, array<string, mixed>>      $sjnetMappings
+     * @param array<int, array{id:int,name:string}> $staffUsers
+     * @param array<string, string>                 $masterCsrfs
+     * @param array<string, string>                 $masterUrls
+     */
+    private static function renderSjnetSection(
+        array $sjnetMappings,
+        array $staffUsers,
+        array $masterCsrfs,
+        array $masterUrls
+    ): string {
+        $createUrl     = $masterUrls['sjnet_create'] ?? '';
+        $updateUrl     = $masterUrls['sjnet_update'] ?? '';
+        $deactivateUrl = $masterUrls['sjnet_deactivate'] ?? '';
+
+        $csrfCreate     = $masterCsrfs['sjnet_create'] ?? '';
+        $csrfUpdate     = $masterCsrfs['sjnet_update'] ?? '';
+        $csrfDeactivate = $masterCsrfs['sjnet_deactivate'] ?? '';
+
+        // Build user id->name lookup
+        $userMap = [];
+        foreach ($staffUsers as $u) {
+            $userMap[(int) ($u['id'] ?? 0)] = (string) ($u['name'] ?? '');
+        }
+
+        $userSelectOptions = '<option value="">（選択）</option>';
+        foreach ($staffUsers as $u) {
+            $uid  = (int) ($u['id'] ?? 0);
+            $name = Layout::escape((string) ($u['name'] ?? ''));
+            $userSelectOptions .= '<option value="' . $uid . '">' . $name . '</option>';
+        }
+
+        $rows = '';
+        foreach ($sjnetMappings as $row) {
+            $id           = (int) ($row['id'] ?? 0);
+            $agencyCode   = Layout::escape((string) ($row['sjnet_agency_code'] ?? ''));
+            $staffName    = Layout::escape((string) ($row['sjnet_staff_name'] ?? ''));
+            $userId       = (int) ($row['user_id'] ?? 0);
+            $userName     = Layout::escape($userMap[$userId] ?? '(不明)');
+            $note         = Layout::escape((string) ($row['note'] ?? ''));
+            $isActive     = (int) ($row['is_active'] ?? 1);
+            $rowStyle     = $isActive ? '' : ' style="color:#999;"';
+
+            $activeLabel = $isActive ? '<span class="badge badge-success">有効</span>' : '<span class="badge">無効</span>';
+
+            $deactivateBtn = '';
+            if ($isActive) {
+                $deactivateBtn = ''
+                    . '<form method="post" action="' . Layout::escape($deactivateUrl) . '" style="display:inline;">'
+                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDeactivate) . '">'
+                    . '<input type="hidden" name="id" value="' . $id . '">'
+                    . '<button type="submit" class="btn btn-sm" onclick="return confirm(\'無効化しますか？\')">無効化</button>'
+                    . '</form>';
+            }
+
+            // Build user select options with current selection
+            $userSelectEdit = '<select name="user_id" required>';
+            foreach ($staffUsers as $u) {
+                $uid  = (int) ($u['id'] ?? 0);
+                $name = Layout::escape((string) ($u['name'] ?? ''));
+                $sel  = $uid === $userId ? ' selected' : '';
+                $userSelectEdit .= '<option value="' . $uid . '"' . $sel . '>' . $name . '</option>';
+            }
+            $userSelectEdit .= '</select>';
+
+            $editForm = ''
+                . '<details style="display:inline;">'
+                . '<summary class="btn btn-sm" style="display:inline;cursor:pointer;">編集</summary>'
+                . '<div style="background:#f9f9f9;padding:12px;margin-top:8px;border:1px solid #ddd;">'
+                . '<form method="post" action="' . Layout::escape($updateUrl) . '">'
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfUpdate) . '">'
+                . '<input type="hidden" name="id" value="' . $id . '">'
+                . '<label style="display:block;margin-bottom:6px;">代理店コード <input type="text" name="sjnet_agency_code" value="' . $agencyCode . '" required style="width:160px;"></label>'
+                . '<label style="display:block;margin-bottom:6px;">SJNETスタッフ名 <input type="text" name="sjnet_staff_name" value="' . $staffName . '" style="width:160px;"></label>'
+                . '<label style="display:block;margin-bottom:6px;">担当者 ' . $userSelectEdit . '</label>'
+                . '<label style="display:block;margin-bottom:8px;">備考 <input type="text" name="note" value="' . $note . '" style="width:200px;"></label>'
+                . '<button type="submit" class="btn btn-primary btn-sm">更新</button>'
+                . '</form>'
+                . '</div>'
+                . '</details>';
+
+            $rows .= '<tr' . $rowStyle . '>'
+                . '<td>' . $agencyCode . '</td>'
+                . '<td>' . $staffName . '</td>'
+                . '<td>' . $userName . '</td>'
+                . '<td>' . $note . '</td>'
+                . '<td style="text-align:center;">' . $activeLabel . '</td>'
+                . '<td>' . $editForm . ' ' . $deactivateBtn . '</td>'
+                . '</tr>';
+        }
+
+        if ($rows === '') {
+            $rows = '<tr><td colspan="6" class="muted" style="text-align:center;">登録なし</td></tr>';
+        }
+
+        $table = ''
+            . '<table style="width:100%;border-collapse:collapse;">'
+            . '<thead><tr>'
+            . '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;">代理店コード</th>'
+            . '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;">SJNETスタッフ名</th>'
+            . '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;">担当者</th>'
+            . '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;">備考</th>'
+            . '<th style="text-align:center;padding:6px 8px;border-bottom:1px solid #ddd;">状態</th>'
+            . '<th style="padding:6px 8px;border-bottom:1px solid #ddd;"></th>'
+            . '</tr></thead>'
+            . '<tbody>' . $rows . '</tbody>'
+            . '</table>';
+
+        $addForm = ''
+            . '<details style="margin-top:12px;">'
+            . '<summary class="btn btn-sm" style="cursor:pointer;">＋ 追加</summary>'
+            . '<div style="background:#f9f9f9;padding:12px;margin-top:8px;border:1px solid #ddd;">'
+            . '<form method="post" action="' . Layout::escape($createUrl) . '">'
+            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfCreate) . '">'
+            . '<label style="display:block;margin-bottom:6px;">代理店コード <input type="text" name="sjnet_agency_code" required style="width:160px;margin-left:8px;"></label>'
+            . '<label style="display:block;margin-bottom:6px;">SJNETスタッフ名 <input type="text" name="sjnet_staff_name" style="width:160px;margin-left:8px;"></label>'
+            . '<label style="display:block;margin-bottom:6px;">担当者 <select name="user_id" required style="margin-left:8px;">' . $userSelectOptions . '</select></label>'
+            . '<label style="display:block;margin-bottom:8px;">備考 <input type="text" name="note" style="width:200px;margin-left:8px;"></label>'
+            . '<button type="submit" class="btn btn-primary btn-sm">追加</button>'
+            . '</form>'
+            . '</div>'
+            . '</details>';
+
+        return ''
+            . '<div class="card" style="margin-top:24px;">'
+            . '<h2>SJNETコード設定</h2>'
+            . '<p class="muted" style="margin:0 0 12px;">SJNETの代理店コードとシステムユーザーの紐付けを管理します。</p>'
+            . $table
+            . $addForm
+            . '</div>';
+    }
+
+    // ---- 目標管理 ----
+
+    /**
+     * @param array<int, array<string, mixed>>      $salesTargets
+     * @param array<int, array{id:int,name:string}> $staffUsers
+     * @param array<string, string>                 $masterCsrfs
+     * @param array<string, string>                 $masterUrls
+     */
+    private static function renderSalesTargetSection(
+        array $salesTargets,
+        array $staffUsers,
+        int $currentFiscalYear,
+        array $masterCsrfs,
+        array $masterUrls
+    ): string {
+        $saveUrl  = $masterUrls['sales_target_save'] ?? '';
+        $csrfSave = $masterCsrfs['sales_target_save'] ?? '';
+
+        $targetTypeLabels = [
+            'premium_non_life' => '非生保保険料',
+            'premium_life'     => '生保保険料',
+            'premium_total'    => '合計保険料',
+            'case_count'       => '件数',
+        ];
+
+        // Build user id->name lookup
+        $userMap = [];
+        foreach ($staffUsers as $u) {
+            $userMap[(int) ($u['id'] ?? 0)] = (string) ($u['name'] ?? '');
+        }
+
+        $rows = '';
+        foreach ($salesTargets as $row) {
+            $targetMonth  = $row['target_month'] !== null ? (int) $row['target_month'] : null;
+            $staffUserId  = $row['staff_user_id'] !== null ? (int) $row['staff_user_id'] : null;
+            $targetType   = (string) ($row['target_type'] ?? '');
+            $targetAmount = (int) ($row['target_amount'] ?? 0);
+
+            $monthLabel  = $targetMonth !== null ? $targetMonth . '月' : '通年';
+            $staffLabel  = $staffUserId !== null ? Layout::escape($userMap[$staffUserId] ?? '(UID:' . $staffUserId . ')') : 'チーム全体';
+            $typeLabel   = Layout::escape($targetTypeLabels[$targetType] ?? $targetType);
+            $amountLabel = number_format($targetAmount);
+
+            $rows .= '<tr>'
+                . '<td style="padding:4px 8px;">' . $monthLabel . '</td>'
+                . '<td style="padding:4px 8px;">' . $staffLabel . '</td>'
+                . '<td style="padding:4px 8px;">' . $typeLabel . '</td>'
+                . '<td style="padding:4px 8px;text-align:right;">' . $amountLabel . '</td>'
+                . '</tr>';
+        }
+
+        if ($rows === '') {
+            $rows = '<tr><td colspan="4" class="muted" style="text-align:center;padding:8px;">登録なし</td></tr>';
+        }
+
+        $table = ''
+            . '<p style="margin:0 0 8px;">対象年度: <strong>' . $currentFiscalYear . '年度</strong></p>'
+            . '<table style="width:100%;border-collapse:collapse;">'
+            . '<thead><tr>'
+            . '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;">月</th>'
+            . '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;">対象</th>'
+            . '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;">種別</th>'
+            . '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;">目標値</th>'
+            . '</tr></thead>'
+            . '<tbody>' . $rows . '</tbody>'
+            . '</table>';
+
+        // target_type select options
+        $typeOptions = '';
+        foreach ($targetTypeLabels as $val => $lbl) {
+            $typeOptions .= '<option value="' . Layout::escape($val) . '">' . Layout::escape($lbl) . '</option>';
+        }
+
+        // month select options (blank = annual)
+        $monthOptions = '<option value="">通年</option>';
+        for ($m = 1; $m <= 12; $m++) {
+            $monthOptions .= '<option value="' . $m . '">' . $m . '月</option>';
+        }
+
+        // staff select options
+        $staffOptions = '<option value="">チーム全体</option>';
+        foreach ($staffUsers as $u) {
+            $uid  = (int) ($u['id'] ?? 0);
+            $name = Layout::escape((string) ($u['name'] ?? ''));
+            $staffOptions .= '<option value="' . $uid . '">' . $name . '</option>';
+        }
+
+        $upsertForm = ''
+            . '<details style="margin-top:12px;">'
+            . '<summary class="btn btn-sm" style="cursor:pointer;">目標を設定する</summary>'
+            . '<div style="background:#f9f9f9;padding:12px;margin-top:8px;border:1px solid #ddd;">'
+            . '<form method="post" action="' . Layout::escape($saveUrl) . '">'
+            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfSave) . '">'
+            . '<input type="hidden" name="fiscal_year" value="' . $currentFiscalYear . '">'
+            . '<label style="display:block;margin-bottom:6px;">月 <select name="target_month" style="margin-left:8px;">' . $monthOptions . '</select></label>'
+            . '<label style="display:block;margin-bottom:6px;">対象 <select name="staff_user_id" style="margin-left:8px;">' . $staffOptions . '</select></label>'
+            . '<label style="display:block;margin-bottom:6px;">種別 <select name="target_type" style="margin-left:8px;">' . $typeOptions . '</select></label>'
+            . '<label style="display:block;margin-bottom:8px;">目標値 <input type="number" name="target_amount" value="0" min="0" required style="width:120px;margin-left:8px;"></label>'
+            . '<button type="submit" class="btn btn-primary btn-sm">保存（追加/更新）</button>'
+            . '</form>'
+            . '</div>'
+            . '</details>';
+
+        return ''
+            . '<div class="card" style="margin-top:24px;">'
+            . '<h2>目標管理</h2>'
+            . '<p class="muted" style="margin:0 0 12px;">年度・月別・担当者別の目標値を管理します。</p>'
+            . $table
+            . $upsertForm
+            . '</div>';
+    }
+
+    // ---- 通知設定 ----
 
     /**
      * @param array<string, mixed> $renewal
