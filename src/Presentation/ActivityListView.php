@@ -108,16 +108,15 @@ final class ActivityListView
                 . '<td data-label="活動日"><a href="' . $dailyUrl . '" class="text-link">' . Layout::escape($actDate) . '</a>' . $submittedBadge . '</td>'
                 . '<td data-label="活動種別">' . Layout::escape($typeLabel) . '</td>'
                 . '<td data-label="顧客名">' . $custHtml . '</td>'
-                . '<td data-label="件名"><span class="truncate">' . Layout::escape($subject) . '</span></td>'
+                . '<td data-label="件名"><a href="' . $detailUrl . '" class="text-link"><span class="truncate">' . Layout::escape($subject) . '</span></a></td>'
                 . '<td data-label="内容要約"><span class="truncate">' . Layout::escape(mb_strimwidth($summary, 0, 60, '…')) . '</span></td>'
                 . '<td data-label="次回予定日">' . Layout::escape($nextDate) . '</td>'
                 . '<td data-label="担当者">' . Layout::escape($staffName) . '</td>'
-                . '<td data-label="操作" class="cell-action"><a href="' . $detailUrl . '" class="text-link">詳細を開く</a></td>'
                 . '</tr>';
         }
 
         if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="8">該当する活動の記録がありません。</td></tr>';
+            $rowsHtml = '<tr><td colspan="7">該当する活動の記録がありません。</td></tr>';
         }
 
         $filterState = $filterOpen ? ' open' : '';
@@ -126,12 +125,13 @@ final class ActivityListView
         $clearUrl    = Layout::escape(ListViewHelper::buildUrl($listUrl, ['filter_open' => '1']));
 
         $content =
-            '<div class="list-page-frame">'
-            . '<div class="list-page-header"><h1 class="title">営業活動一覧</h1>'
-            . '<div class="list-page-header-actions">'
-            . '<a href="' . Layout::escape(ListViewHelper::buildUrl($dailyBaseUrl, ['date' => date('Y-m-d'), 'staff' => $staffUserId])) . '" class="btn btn-ghost btn-small">日報ビュー</a>'
-            . '<a href="' . Layout::escape($newUrl) . '" class="btn btn-primary btn-small">＋ 活動登録</a>'
-            . '</div></div>'
+            '<div class="page-header">'
+            . '<div><div class="page-title">営業活動一覧</div></div>'
+            . '<div class="actions">'
+            . '<a href="' . Layout::escape(ListViewHelper::buildUrl($dailyBaseUrl, ['date' => date('Y-m-d'), 'staff' => $staffUserId])) . '" class="btn">日報ビュー</a>'
+            . '<a href="' . Layout::escape($newUrl) . '" class="btn btn-primary">＋活動登録</a>'
+            . '</div>'
+            . '</div>'
             . $noticeHtml
             . '<details class="card details-panel list-filter-card"' . $filterState . '>'
             . '<summary class="list-filter-toggle">'
@@ -162,17 +162,16 @@ final class ActivityListView
             . '<table class="table-fixed table-card list-table list-table-activity">'
             . '<colgroup>'
             . '<col class="list-col-date"><col style="width:90px"><col class="list-col-customer">'
-            . '<col><col><col class="list-col-date"><col style="width:110px"><col class="list-col-action">'
+            . '<col><col><col class="list-col-date"><col style="width:110px">'
             . '</colgroup>'
             . '<thead><tr>'
             . '<th>活動日</th><th>活動種別</th><th>顧客名</th>'
-            . '<th>件名</th><th>内容要約</th><th>次回予定日</th><th>担当者</th><th class="align-right">操作</th>'
+            . '<th>件名</th><th>内容要約</th><th>次回予定日</th><th>担当者</th>'
             . '</tr></thead>'
             . '<tbody>' . $rowsHtml . '</tbody>'
             . '</table>'
             . '</div>'
             . $bottomPager
-            . '</div>'
             . '</div>';
 
         return Layout::render('営業活動一覧', $content, $layoutOptions);

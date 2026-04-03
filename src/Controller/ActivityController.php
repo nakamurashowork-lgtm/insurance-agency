@@ -6,7 +6,7 @@ namespace App\Controller;
 use App\AppConfig;
 use App\Domain\Activity\ActivityRepository;
 use App\Domain\Activity\DailyReportRepository;
-use App\Domain\SalesCase\SalesCaseRepository;
+use App\Domain\Tenant\ActivityPurposeTypeRepository;
 use App\Http\Responses;
 use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
@@ -104,9 +104,10 @@ final class ActivityController
         $auth = $this->guard->requireAuthenticated();
 
         $listUrl = $this->listUrlFromGet();
-        $customers = [];
-        $staffUsers = [];
-        $error = null;
+        $customers    = [];
+        $staffUsers   = [];
+        $purposeTypes = [];
+        $error        = null;
 
         $prefill = [
             'customer_id'    => trim((string) ($_GET['customer_id'] ?? '')),
@@ -119,14 +120,12 @@ final class ActivityController
             $prefill = array_merge($prefill, (array) $draft);
         }
 
-        $salesCases = [];
-
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
             $repository = new ActivityRepository($pdo);
-            $customers = $repository->fetchCustomers(500);
-            $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
-            $salesCases = (new SalesCaseRepository($pdo))->fetchForDropdown();
+            $customers    = $repository->fetchCustomers(500);
+            $staffUsers   = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
+            $purposeTypes = (new ActivityPurposeTypeRepository($pdo))->findAll();
         } catch (Throwable) {
             $error = '顧客・担当者情報の取得に失敗しました。';
         }
@@ -137,7 +136,7 @@ final class ActivityController
             $prefill,
             $customers,
             $staffUsers,
-            $salesCases,
+            [],
             $listUrl,
             $this->config->routeUrl('activity/store'),
             $this->guard->session()->issueCsrfToken('activity_store'),
@@ -153,7 +152,8 @@ final class ActivityController
                     ['label' => '活動一覧', 'url' => $listUrl],
                     ['label' => '活動登録'],
                 ]
-            )
+            ),
+            $purposeTypes
         ));
     }
 
@@ -169,11 +169,11 @@ final class ActivityController
             Responses::redirect($listUrl);
         }
 
-        $record     = null;
-        $customers  = [];
-        $staffUsers = [];
-        $salesCases = [];
-        $error      = null;
+        $record       = null;
+        $customers    = [];
+        $staffUsers   = [];
+        $purposeTypes = [];
+        $error        = null;
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
@@ -183,11 +183,11 @@ final class ActivityController
                 $this->guard->session()->setFlash('error', '対象の活動が見つかりません。');
                 Responses::redirect($listUrl);
             }
-            $customers = $repository->fetchCustomers(500);
-            $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
+            $customers    = $repository->fetchCustomers(500);
+            $staffUsers   = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
             $staffUserNames = $this->buildUserNameMap($staffUsers);
             $record['staff_name'] = $staffUserNames[(int) ($record['staff_user_id'] ?? 0)] ?? '';
-            $salesCases = (new SalesCaseRepository($pdo))->fetchForDropdown();
+            $purposeTypes = (new ActivityPurposeTypeRepository($pdo))->findAll();
 
             $editDraft = $this->consumeEditDraft();
             if ($editDraft !== null && (int) ($editDraft['id'] ?? 0) === $id && is_array($editDraft['input'] ?? null)) {
@@ -205,7 +205,7 @@ final class ActivityController
             $record,
             $customers,
             $staffUsers,
-            $salesCases,
+            [],
             $listUrl,
             $detailUrl,
             $this->config->routeUrl('activity/update'),
@@ -226,7 +226,8 @@ final class ActivityController
                     ['label' => '活動一覧', 'url' => $listUrl],
                     ['label' => '活動詳細'],
                 ]
-            )
+            ),
+            $purposeTypes
         ));
     }
 
@@ -625,7 +626,6 @@ final class ActivityController
             'next_action_note'  => trim((string) ($_POST['next_action_note'] ?? '')),
             'result_type'       => trim((string) ($_POST['result_type'] ?? '')),
             'staff_user_id'     => trim((string) ($_POST['staff_user_id'] ?? '')),
-            'sales_case_id'     => trim((string) ($_POST['sales_case_id'] ?? '')),
         ];
     }
 

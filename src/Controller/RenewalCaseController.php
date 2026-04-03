@@ -5,7 +5,8 @@ namespace App\Controller;
 
 use App\AppConfig;
 use App\Domain\Renewal\RenewalCaseRepository;
-use App\Domain\Sales\SalesPerformanceRepository;
+use App\Domain\Renewal\SjnetCsvImportService;
+use App\Domain\Renewal\SjnetImportRepository;
 use App\Http\Responses;
 use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
@@ -13,6 +14,7 @@ use App\Presentation\RenewalCaseDetailView;
 use App\Presentation\RenewalCaseListView;
 use App\Presentation\View\ListViewHelper;
 use App\Security\AuthGuard;
+use DateTimeImmutable;
 use PDO;
 use Throwable;
 
@@ -37,6 +39,7 @@ final class RenewalCaseController
         $error = null;
         $importBatch = null;
         $importRows = [];
+        $allUsers = [];
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
@@ -51,25 +54,43 @@ final class RenewalCaseController
             $rows = $result['rows'];
             $total = (int) ($result['total'] ?? 0);
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
+            // 行の assigned_user_id からユーザー名を一括取得して付与
+            $assignedUserIds = [];
+            foreach ($rows as $row) {
+                $uid = (int) ($row['assigned_user_id'] ?? 0);
+                if ($uid > 0) {
+                    $assignedUserIds[$uid] = true;
+                }
+            }
+            $assignedUserNames = $this->fetchUserNames(array_keys($assignedUserIds));
+            foreach ($rows as $index => $row) {
+                $uid = (int) ($row['assigned_user_id'] ?? 0);
+                $rows[$index]['assigned_user_name'] = $uid > 0 ? ($assignedUserNames[$uid] ?? '') : '';
+            }
+
+            // フィルタ用の全ユーザー一覧
+            $allUsers = $this->fetchAllActiveUsers();
 
             $importBatchId = (int) ($_GET['import_batch_id'] ?? 0);
             if ($importBatchId > 0) {
-                $salesRepository = new SalesPerformanceRepository($pdo);
-                $importBatch = $salesRepository->findImportBatchById($importBatchId);
+                $sjnetRepo = new SjnetImportRepository($pdo);
+                $importBatch = $sjnetRepo->findBatchById($importBatchId);
                 if ($importBatch !== null) {
-                    $importRows = $salesRepository->findImportRowsByBatchId($importBatchId, 200);
+                    $importRows = $sjnetRepo->findRowsByBatchId($importBatchId, 200);
                 }
             }
         } catch (Throwable) {
             $error = '満期一覧の取得に失敗しました。接続設定を確認してください。';
         }
 
-        $flashError = $this->guard->session()->consumeFlash('error');
+        $flashError   = $this->guard->session()->consumeFlash('error');
         $flashSuccess = $this->guard->session()->consumeFlash('success');
+        $importFlashError   = $this->guard->session()->consumeFlash('import_error');
+        $importFlashSuccess = $this->guard->session()->consumeFlash('import_success');
         $openImportDialog = (string) ($_GET['import_dialog'] ?? '') === '1'
             || $importBatch !== null
-            || (is_string($flashError) && $flashError !== '')
-            || (is_string($flashSuccess) && $flashSuccess !== '');
+            || (is_string($importFlashError)   && $importFlashError   !== '')
+            || (is_string($importFlashSuccess) && $importFlashSuccess !== '');
 
         Responses::html(RenewalCaseListView::render(
             $rows,
@@ -78,16 +99,20 @@ final class RenewalCaseController
             $listState,
             $this->config->routeUrl('renewal/list'),
             $this->config->routeUrl('renewal/detail'),
-            $this->config->routeUrl('sales/import'),
-            $this->guard->session()->issueCsrfToken('sales_import'),
-            $flashError,
-            $flashSuccess,
+            $this->config->routeUrl('renewal/import'),
+            $this->guard->session()->issueCsrfToken('renewal_import'),
+            $this->config->routeUrl('renewal/delete'),
+            $this->guard->session()->issueCsrfToken('renewal_delete'),
+            $importFlashError,
+            $importFlashSuccess,
             $importBatch,
             $importRows,
             $openImportDialog,
-            $error,
+            $error ?? $flashError,
             (string) ($_GET['filter_open'] ?? '') === '1',
-            ControllerLayoutHelper::build($this->guard, $this->config, 'renewal')
+            $allUsers,
+            ControllerLayoutHelper::build($this->guard, $this->config, 'renewal'),
+            $flashSuccess
         ));
     }
 
@@ -119,16 +144,16 @@ final class RenewalCaseController
             $auditUserNames = $this->fetchUserNamesByRows($audits, 'changed_by');
             $audits = $this->attachAuditUserNames($audits, $auditUserNames);
             $assignedUid = (int) ($detail['assigned_user_id'] ?? 0);
-            if ($assignedUid > 0) {
-                $assignedNames = $this->fetchUserNames([$assignedUid]);
-                $detail['assigned_user_name'] = $assignedNames[$assignedUid] ?? '';
-            } else {
-                $detail['assigned_user_name'] = '';
-            }
+            $officeUid   = (int) ($detail['office_user_id'] ?? 0);
+            $uidsTofetch = array_filter(array_unique([$assignedUid, $officeUid]));
+            $fetchedNames = $uidsTofetch !== [] ? $this->fetchUserNames($uidsTofetch) : [];
+            $detail['assigned_user_name'] = $assignedUid > 0 ? ($fetchedNames[$assignedUid] ?? '') : '';
+            $detail['office_user_name']   = $officeUid   > 0 ? ($fetchedNames[$officeUid]   ?? '') : '';
+
             $updateInput = $this->consumeUpdateInput($renewalCaseId);
             $fieldErrors = $this->consumeUpdateErrors($renewalCaseId);
             if (is_array($updateInput)) {
-                foreach (['case_status', 'next_action_date', 'renewal_result', 'lost_reason', 'remark'] as $key) {
+                foreach (['case_status', 'next_action_date', 'renewal_result', 'renewal_method', 'procedure_method', 'lost_reason', 'remark', 'completed_date'] as $key) {
                     if (array_key_exists($key, $updateInput)) {
                         $detail[$key] = $updateInput[$key];
                     }
@@ -162,7 +187,7 @@ final class RenewalCaseController
                     [
                         ['label' => 'ホーム', 'url' => $this->config->routeUrl('dashboard')],
                         ['label' => '満期一覧', 'url' => $listUrl],
-                        ['label' => '満期詳細'],
+                        ['label' => '契約詳細'],
                     ]
                 )
             ));
@@ -250,6 +275,87 @@ final class RenewalCaseController
         Responses::redirect($returnTo);
     }
 
+    public function delete(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+        $criteria  = $this->extractCriteria($_POST);
+        $listState = $this->extractListState($_POST);
+
+        $renewalCaseId = (int) ($_POST['id'] ?? 0);
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('renewal_delete', $token)) {
+            $this->guard->session()->setFlash('error', '不正な削除要求を検出しました。');
+            Responses::redirect($this->listUrl($criteria, $listState));
+        }
+
+        if ($renewalCaseId <= 0) {
+            $this->guard->session()->setFlash('error', '案件IDが不正です。');
+            Responses::redirect($this->listUrl($criteria, $listState));
+        }
+
+        try {
+            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $deleted = (new RenewalCaseRepository($pdo))->softDelete($renewalCaseId, (int) ($auth['user_id'] ?? 0));
+            if ($deleted) {
+                $this->guard->session()->setFlash('success', '満期案件を削除しました。');
+            } else {
+                $this->guard->session()->setFlash('error', '対象案件が見つからないか既に削除されています。');
+            }
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '削除に失敗しました。');
+        }
+
+        Responses::redirect($this->listUrl($criteria, $listState));
+    }
+
+    public function import(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('renewal_import', $token)) {
+            $this->guard->session()->setFlash('import_error', '不正なリクエストを検出しました。');
+            Responses::redirect($this->config->routeUrl('renewal/list') . '&import_dialog=1');
+        }
+
+        $returnTo = trim((string) ($_POST['return_to'] ?? ''));
+        if ($returnTo === '' || !str_contains($returnTo, 'import_dialog')) {
+            $returnTo = $this->config->routeUrl('renewal/list') . '&import_dialog=1';
+        }
+
+        $uploadedFile = $_FILES['csv_file'] ?? null;
+        if (!is_array($uploadedFile) || ($uploadedFile['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            $this->guard->session()->setFlash('import_error', 'CSVファイルのアップロードに失敗しました。');
+            Responses::redirect($returnTo);
+        }
+
+        $tmpPath  = (string) ($uploadedFile['tmp_name'] ?? '');
+        $origName = (string) ($uploadedFile['name'] ?? 'upload.csv');
+
+        if ($tmpPath === '' || !is_file($tmpPath)) {
+            $this->guard->session()->setFlash('import_error', 'アップロードファイルが見つかりません。');
+            Responses::redirect($returnTo);
+        }
+
+        $result = [];
+        try {
+            $pdo       = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $commonPdo = $this->commonConnectionFactory->create();
+            $userId    = (int) ($auth['user_id'] ?? 0);
+            $service   = new SjnetCsvImportService($pdo, $commonPdo, $userId, new DateTimeImmutable('today'));
+            $result  = $service->import($tmpPath, $origName);
+        } catch (Throwable $e) {
+            $this->guard->session()->setFlash('import_error', 'CSV取込に失敗しました: ' . $e->getMessage());
+            Responses::redirect($returnTo);
+        }
+
+        $batchId = (int) ($result['batch_id'] ?? 0);
+        $this->guard->session()->setFlash('import_success', 'CSV取込が完了しました。');
+
+        $listUrl = $this->config->routeUrl('renewal/list');
+        Responses::redirect($listUrl . '&import_batch_id=' . $batchId . '&import_dialog=1');
+    }
+
     /**
      * @param array<string, mixed> $source
      * @return array<string, string>
@@ -257,11 +363,14 @@ final class RenewalCaseController
     private function collectUpdateInput(array $source): array
     {
         return [
-            'case_status' => trim((string) ($source['case_status'] ?? '')),
+            'case_status'     => trim((string) ($source['case_status'] ?? '')),
             'next_action_date' => trim((string) ($source['next_action_date'] ?? '')),
-            'renewal_result' => trim((string) ($source['renewal_result'] ?? '')),
-            'lost_reason' => trim((string) ($source['lost_reason'] ?? '')),
-            'remark' => trim((string) ($source['remark'] ?? '')),
+            'renewal_result'  => trim((string) ($source['renewal_result'] ?? '')),
+            'renewal_method'  => trim((string) ($source['renewal_method'] ?? '')),
+            'procedure_method' => trim((string) ($source['procedure_method'] ?? '')),
+            'lost_reason'     => trim((string) ($source['lost_reason'] ?? '')),
+            'remark'          => trim((string) ($source['remark'] ?? '')),
+            'completed_date'  => trim((string) ($source['completed_date'] ?? '')),
         ];
     }
 
@@ -272,12 +381,16 @@ final class RenewalCaseController
     private function validateUpdateInput(array $input): array
     {
         $errors = [];
-        $allowedStatuses = ['open', 'contacted', 'quoted', 'waiting', 'renewed', 'lost', 'closed'];
+        $allowedStatuses = ['not_started', 'sj_requested', 'doc_prepared', 'waiting_return', 'quote_sent', 'waiting_payment', 'completed'];
         $allowedResults = ['', 'pending', 'renewed', 'cancelled', 'lost'];
+        $allowedRenewalMethods = ['', '対面', '郵送', '電話募集'];
+        $allowedProcedureMethods = ['', '対面', '対面ナビ', '電話ナビ', '電話募集', '署名・捺印', 'ケータイOR', 'マイページ'];
 
         $caseStatus = $input['case_status'] ?? '';
         $nextActionDate = $input['next_action_date'] ?? '';
         $renewalResult = $input['renewal_result'] ?? '';
+        $renewalMethod = $input['renewal_method'] ?? '';
+        $procedureMethod = $input['procedure_method'] ?? '';
 
         if (!in_array($caseStatus, $allowedStatuses, true)) {
             $errors['case_status'] = '対応ステータスを選択してください。';
@@ -285,6 +398,19 @@ final class RenewalCaseController
 
         if (!in_array($renewalResult, $allowedResults, true)) {
             $errors['renewal_result'] = '更改結果が不正です。';
+        }
+
+        if (!in_array($renewalMethod, $allowedRenewalMethods, true)) {
+            $errors['renewal_method'] = '更改方法が不正です。';
+        }
+
+        if (!in_array($procedureMethod, $allowedProcedureMethods, true)) {
+            $errors['procedure_method'] = '手続方法が不正です。';
+        }
+
+        $completedDate = $input['completed_date'] ?? '';
+        if ($completedDate !== '' && !$this->isValidDate($completedDate)) {
+            $errors['completed_date'] = '完了日は YYYY-MM-DD 形式で入力してください。';
         }
 
         if ($nextActionDate !== '' && !$this->isValidDate($nextActionDate)) {
@@ -310,12 +436,18 @@ final class RenewalCaseController
      */
     private function extractCriteria(array $source): array
     {
+        $window = trim((string) ($source['maturity_window'] ?? 'all'));
+        if (!in_array($window, ['30', '60', '90', 'all'], true)) {
+            $window = 'all';
+        }
+
         return [
-            'customer_name' => trim((string) ($source['customer_name'] ?? '')),
-            'policy_no' => trim((string) ($source['policy_no'] ?? '')),
-            'case_status' => trim((string) ($source['case_status'] ?? '')),
-            'maturity_date_from' => trim((string) ($source['maturity_date_from'] ?? '')),
-            'maturity_date_to' => trim((string) ($source['maturity_date_to'] ?? '')),
+            'customer_name'    => trim((string) ($source['customer_name'] ?? '')),
+            'policy_no'        => trim((string) ($source['policy_no'] ?? '')),
+            'case_status'      => trim((string) ($source['case_status'] ?? '')),
+            'maturity_window'  => $window,
+            'assigned_user_id' => trim((string) ($source['assigned_user_id'] ?? '')),
+            'product_type'     => trim((string) ($source['product_type'] ?? '')),
         ];
     }
 
@@ -463,6 +595,41 @@ final class RenewalCaseController
         }
 
         return $this->fetchUserNames(array_keys($userIds));
+    }
+
+    /**
+     * @return array<int, string>  [user_id => name]
+     */
+    private function fetchAllActiveUsers(): array
+    {
+        try {
+            $pdo = $this->commonConnectionFactory->create();
+            $stmt = $pdo->prepare(
+                'SELECT id, name
+                 FROM users
+                 WHERE status = 1
+                   AND is_deleted = 0
+                 ORDER BY name ASC'
+            );
+            $stmt->execute();
+            $names = [];
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            if (is_array($rows)) {
+                foreach ($rows as $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    $id = (int) ($row['id'] ?? 0);
+                    $name = trim((string) ($row['name'] ?? ''));
+                    if ($id > 0 && $name !== '') {
+                        $names[$id] = $name;
+                    }
+                }
+            }
+            return $names;
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     /**

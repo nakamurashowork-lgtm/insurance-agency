@@ -93,6 +93,9 @@ $router->get('customer/detail', static function () use ($customerController): vo
 $router->post('customer/create', static function () use ($customerController): void {
     $customerController->create();
 });
+$router->post('customer/update', static function () use ($customerController): void {
+    $customerController->update();
+});
 $router->get('sales/list', static function () use ($salesPerformanceController): void {
     $salesPerformanceController->list();
 });
@@ -116,6 +119,12 @@ $router->post('renewal/update', static function () use ($renewalCaseController):
 });
 $router->post('renewal/comment', static function () use ($renewalCaseController): void {
     $renewalCaseController->comment();
+});
+$router->post('renewal/import', static function () use ($renewalCaseController): void {
+    $renewalCaseController->import();
+});
+$router->post('renewal/delete', static function () use ($renewalCaseController): void {
+    $renewalCaseController->delete();
 });
 $router->post('sales/create', static function () use ($salesPerformanceController): void {
     $salesPerformanceController->create();
@@ -168,6 +177,12 @@ $router->post('activity/submit', static function () use ($activityController): v
 $router->post('tenant/settings/notify', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->saveNotify();
 });
+$router->post('tenant/settings/notify-renewal', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->saveRenewalNotify();
+});
+$router->post('tenant/settings/notify-accident', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->saveAccidentNotify();
+});
 $router->post('tenant/settings/phase', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->savePhase();
 });
@@ -180,23 +195,35 @@ $router->post('tenant/settings/purpose-type/create', static function () use ($te
 $router->post('tenant/settings/purpose-type/update', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->purposeTypeUpdate();
 });
-$router->post('tenant/settings/purpose-type/deactivate', static function () use ($tenantSettingsController): void {
-    $tenantSettingsController->purposeTypeDeactivate();
+$router->post('tenant/settings/purpose-type/delete', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->purposeTypeDelete();
 });
-$router->post('tenant/settings/purpose-type/activate', static function () use ($tenantSettingsController): void {
-    $tenantSettingsController->purposeTypeActivate();
+$router->post('tenant/settings/staff/create', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->staffCreate();
 });
-$router->post('tenant/settings/sjnet/create', static function () use ($tenantSettingsController): void {
-    $tenantSettingsController->sjnetCreate();
+$router->post('tenant/settings/staff/update', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->staffUpdate();
 });
-$router->post('tenant/settings/sjnet/update', static function () use ($tenantSettingsController): void {
-    $tenantSettingsController->sjnetUpdate();
+$router->post('tenant/settings/staff/delete', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->staffDelete();
 });
-$router->post('tenant/settings/sjnet/deactivate', static function () use ($tenantSettingsController): void {
-    $tenantSettingsController->sjnetDeactivate();
+$router->post('tenant/settings/status/create', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->statusCreate();
 });
-$router->post('tenant/settings/sales-target/save', static function () use ($tenantSettingsController): void {
-    $tenantSettingsController->salesTargetSave();
+$router->post('tenant/settings/status/update-name', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->statusUpdateDisplayName();
+});
+$router->post('tenant/settings/status/delete', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->statusDelete();
+});
+$router->post('tenant/settings/category/create', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->categoryCreate();
+});
+$router->post('tenant/settings/category/update', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->categoryUpdate();
+});
+$router->post('tenant/settings/category/delete', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->categoryDelete();
 });
 $router->get('sales-case/list', static function () use ($salesCaseController): void {
     $salesCaseController->list();

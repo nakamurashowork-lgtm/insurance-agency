@@ -138,6 +138,12 @@ final class AccidentCaseRepository
             $params['status'] = $status;
         }
 
+        $assignedUserId = (int) ($criteria['assigned_user_id'] ?? 0);
+        if ($assignedUserId > 0) {
+            $sql .= ' AND ac.assigned_user_id = :assigned_user_id';
+            $params['assigned_user_id'] = $assignedUserId;
+        }
+
         return $sql;
     }
 
@@ -212,7 +218,13 @@ final class AccidentCaseRepository
                     mc.customer_name,
                     mc.phone,
                     mc.email,
-                    c.policy_no
+                    c.policy_no,
+                    (SELECT rc.id
+                       FROM t_renewal_case rc
+                      WHERE rc.contract_id = ac.contract_id
+                        AND rc.is_deleted = 0
+                      ORDER BY rc.id DESC
+                      LIMIT 1) AS renewal_case_id
              FROM t_accident_case ac
              INNER JOIN m_customer mc
                      ON mc.id = ac.customer_id
@@ -440,6 +452,55 @@ final class AccidentCaseRepository
         $rows = $stmt->fetchAll();
 
         return is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * 案件IDリストに対して次回リマインド日（base_date + interval_weeks * 7）を取得する。
+     * 複数ルールがある場合は最も近い日付を返す。
+     *
+     * @param int[] $caseIds
+     * @return array<int, string>  [accident_case_id => 'Y-m-d']
+     */
+    public function findNextReminderDates(array $caseIds): array
+    {
+        if ($caseIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(', ', array_fill(0, count($caseIds), '?'));
+        $stmt = $this->pdo->prepare(
+            'SELECT r.accident_case_id,
+                    MIN(DATE_ADD(r.base_date, INTERVAL r.interval_weeks * 7 DAY)) AS next_reminder_date
+             FROM t_accident_reminder_rule r
+             WHERE r.accident_case_id IN (' . $placeholders . ')
+               AND r.is_enabled = 1
+               AND r.is_deleted = 0
+             GROUP BY r.accident_case_id'
+        );
+
+        foreach ($caseIds as $index => $id) {
+            $stmt->bindValue($index + 1, $id, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll();
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = (int) ($row['accident_case_id'] ?? 0);
+            $date = trim((string) ($row['next_reminder_date'] ?? ''));
+            if ($id > 0 && $date !== '') {
+                $result[$id] = $date;
+            }
+        }
+
+        return $result;
     }
 
     public function createComment(int $accidentCaseId, string $commentBody, int $userId): void

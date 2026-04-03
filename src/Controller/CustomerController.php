@@ -18,6 +18,13 @@ use Throwable;
 
 final class CustomerController
 {
+    private const ALLOWED_RETURN_PREFIXES = [
+        'customer/list',
+        'renewal/detail',
+        'sales/detail',
+        'accident/detail',
+    ];
+
     public function __construct(
         private AuthGuard $guard,
         private TenantConnectionFactory $tenantConnectionFactory,
@@ -92,6 +99,12 @@ final class CustomerController
         $listState = $this->extractListState($_GET);
         $listUrl = $this->listUrl($criteria, $listState);
         $customerId = (int) ($_GET['id'] ?? 0);
+        $returnToPath = $this->resolveReturnTo($_GET['return_to'] ?? null);
+        $rtParts  = explode('?', $returnToPath, 2);
+        $returnTo = $this->config->routeUrl($rtParts[0]);
+        if (isset($rtParts[1])) {
+            $returnTo .= '&' . $rtParts[1];
+        }
         if ($customerId <= 0) {
             $this->guard->session()->setFlash('error', '顧客IDが不正です。');
             Responses::redirect($listUrl);
@@ -107,24 +120,45 @@ final class CustomerController
                 Responses::redirect($listUrl);
             }
 
-            $contacts = $repository->findContacts($customerId);
+            $assignedUid = (int) ($detail['assigned_user_id'] ?? 0);
+            if ($assignedUid > 0) {
+                $allUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
+                $userMap = array_column($allUsers, 'name', 'id');
+                $detail['assigned_user_name'] = $userMap[$assignedUid] ?? '';
+            } else {
+                $detail['assigned_user_name'] = '';
+            }
+
             $contracts = $repository->findContracts($customerId);
-            $activities = $repository->findActivities($customerId);
+            $activities = $repository->findActivities($customerId, 5);
             $salesCases = (new SalesCaseRepository($pdo))->findByCustomerId($customerId);
-            $flashError = $this->guard->session()->consumeFlash('error');
+            $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
+            $flashError   = $this->guard->session()->consumeFlash('error');
+            $flashSuccess = $this->guard->session()->consumeFlash('success');
+            $editDraft    = $this->consumeEditDraft($customerId);
+            $editErrors   = $this->consumeEditErrors($customerId);
+            $editCsrf     = $this->guard->session()->issueCsrfToken('customer_update_' . $customerId);
+            $detailUrl    = $this->detailUrl($customerId, $criteria, $listState);
 
             Responses::html(CustomerDetailView::render(
                 $detail,
-                $contacts,
                 $contracts,
                 $activities,
                 $salesCases,
                 $listUrl,
+                $detailUrl,
+                $returnTo,
                 $this->config->routeUrl('renewal/detail'),
-                $this->config->routeUrl('activity/new'),
-                $this->config->routeUrl('activity/detail'),
+                $this->config->routeUrl('activity/list'),
+                $this->config->routeUrl('renewal/detail'),
                 $this->config->routeUrl('sales-case/detail'),
+                $this->config->routeUrl('customer/update'),
+                $editCsrf,
+                $staffUsers,
+                $editDraft,
+                $editErrors,
                 $flashError,
+                $flashSuccess,
                 ControllerLayoutHelper::build(
                     $this->guard,
                     $this->config,
@@ -139,6 +173,55 @@ final class CustomerController
         } catch (Throwable) {
             $this->guard->session()->setFlash('error', '顧客詳細の取得に失敗しました。');
             Responses::redirect($listUrl);
+        }
+    }
+
+    public function update(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+        $customerId = (int) ($_POST['id'] ?? 0);
+        $criteria   = $this->extractCriteria($_POST);
+        $listState  = $this->extractListState($_POST);
+        $detailUrl  = $this->detailUrl($customerId, $criteria, $listState);
+
+        if ($customerId <= 0) {
+            $this->guard->session()->setFlash('error', '顧客IDが不正です。');
+            Responses::redirect($this->listUrl($criteria, $listState));
+        }
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('customer_update_' . $customerId, $token)) {
+            $this->guard->session()->setFlash('error', '不正な操作です。再度お試しください。');
+            Responses::redirect($detailUrl);
+        }
+
+        $input  = $this->collectUpdateInput();
+        $errors = $this->validateUpdateInput($input);
+        if ($input['assigned_user_id'] !== null) {
+            $tenantCode = (string) ($auth['tenant_code'] ?? '');
+            $validIds   = array_column($this->fetchAssignableUsers($tenantCode), 'id');
+            if (!in_array($input['assigned_user_id'], $validIds, true)) {
+                $input['assigned_user_id'] = null;
+            }
+        }
+
+        if ($errors !== []) {
+            $this->guard->session()->setFlash('error', implode(' ', $errors));
+            $this->storeEditDraft($customerId, $input);
+            $this->storeEditErrors($customerId, $errors);
+            Responses::redirect(ListViewHelper::buildUrl($detailUrl, ['open_modal' => 'edit']));
+        }
+
+        try {
+            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $repository = new CustomerRepository($pdo);
+            $repository->update($customerId, $input, (int) ($auth['user_id'] ?? 0));
+            $this->guard->session()->setFlash('success', '顧客情報を更新しました。');
+            Responses::redirect($detailUrl);
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '顧客情報の更新に失敗しました。');
+            $this->storeEditDraft($customerId, $input);
+            Responses::redirect(ListViewHelper::buildUrl($detailUrl, ['open_modal' => 'edit']));
         }
     }
 
@@ -192,10 +275,12 @@ final class CustomerController
      */
     private function extractCriteria(array $source): array
     {
+        $assignedUserId = (int) ($source['assigned_user_id'] ?? 0);
         return [
-            'customer_name' => trim((string) ($source['customer_name'] ?? '')),
-            'phone' => trim((string) ($source['phone'] ?? '')),
-            'email' => trim((string) ($source['email'] ?? '')),
+            'customer_name'    => trim((string) ($source['customer_name'] ?? '')),
+            'phone'            => trim((string) ($source['phone'] ?? '')),
+            'email'            => trim((string) ($source['email'] ?? '')),
+            'assigned_user_id' => $assignedUserId > 0 ? (string) $assignedUserId : '',
         ];
     }
 
@@ -247,6 +332,21 @@ final class CustomerController
     private function listUrl(array $criteria, array $listState): string
     {
         return ListViewHelper::buildUrl($this->config->routeUrl('customer/list'), $this->buildListQuery($criteria, $listState));
+    }
+
+    private function resolveReturnTo(?string $rawReturnTo): string
+    {
+        $default = 'customer/list';
+        if ($rawReturnTo === null || $rawReturnTo === '') {
+            return $default;
+        }
+        $decoded = urldecode($rawReturnTo);
+        foreach (self::ALLOWED_RETURN_PREFIXES as $prefix) {
+            if (str_starts_with($decoded, $prefix)) {
+                return $decoded;
+            }
+        }
+        return $default;
     }
 
     private function validateReturnTo(mixed $returnTo): string
@@ -323,6 +423,111 @@ final class CustomerController
     {
         $int = (int) $value;
         return $int > 0 ? $int : null;
+    }
+
+    /**
+     * @param array<string, string> $criteria
+     * @param array<string, string> $listState
+     */
+    private function detailUrl(int $customerId, array $criteria, array $listState): string
+    {
+        return ListViewHelper::buildUrl(
+            $this->config->routeUrl('customer/detail'),
+            array_merge(['id' => (string) $customerId], $this->buildListQuery($criteria, $listState))
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function collectUpdateInput(): array
+    {
+        return [
+            'customer_type'      => trim((string) ($_POST['customer_type'] ?? '')),
+            'customer_name'      => trim((string) ($_POST['customer_name'] ?? '')),
+            'customer_name_kana' => $this->nullableText($_POST['customer_name_kana'] ?? null),
+            'phone'              => $this->nullableText($_POST['phone'] ?? null),
+            'email'              => $this->nullableText($_POST['email'] ?? null),
+            'postal_code'        => $this->nullableText($_POST['postal_code'] ?? null),
+            'address1'           => $this->nullableText($_POST['address1'] ?? null),
+            'address2'           => $this->nullableText($_POST['address2'] ?? null),
+            'assigned_user_id'   => $this->nullableInt($_POST['assigned_user_id'] ?? null),
+            'note'               => $this->nullableText($_POST['note'] ?? null),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     * @return array<int, string>
+     */
+    private function validateUpdateInput(array $input): array
+    {
+        $errors = [];
+
+        $customerType = (string) ($input['customer_type'] ?? '');
+        if (!in_array($customerType, ['individual', 'corporate'], true)) {
+            $errors[] = '顧客区分を選択してください。';
+        }
+
+        $customerName = (string) ($input['customer_name'] ?? '');
+        if ($customerName === '') {
+            $errors[] = '顧客名は必須です。';
+        } elseif (mb_strlen($customerName) > 200) {
+            $errors[] = '顧客名は200文字以内で入力してください。';
+        }
+
+        $email = $input['email'] ?? null;
+        if ($email !== null && $email !== '') {
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $errors[] = 'メールアドレスの形式が正しくありません。';
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    private function storeEditDraft(int $customerId, array $input): void
+    {
+        $this->guard->session()->setFlash('customer_edit_draft_' . $customerId, json_encode($input, JSON_UNESCAPED_UNICODE) ?: '{}');
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function consumeEditDraft(int $customerId): ?array
+    {
+        $raw = (string) $this->guard->session()->consumeFlash('customer_edit_draft_' . $customerId);
+        if ($raw === '') {
+            return null;
+        }
+
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * @param array<int, string> $errors
+     */
+    private function storeEditErrors(int $customerId, array $errors): void
+    {
+        $this->guard->session()->setFlash('customer_edit_errors_' . $customerId, json_encode($errors, JSON_UNESCAPED_UNICODE) ?: '[]');
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function consumeEditErrors(int $customerId): array
+    {
+        $raw = (string) $this->guard->session()->consumeFlash('customer_edit_errors_' . $customerId);
+        if ($raw === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? array_values($decoded) : [];
     }
 
     /**

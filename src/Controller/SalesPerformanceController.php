@@ -44,6 +44,7 @@ final class SalesPerformanceController
         $staffUsers = [];
         $contracts = [];
         $renewalCases = [];
+        $metrics = ['non_life_month' => 0, 'non_life_ytd' => 0, 'general_month' => 0, 'total_count_month' => 0];
         $createDraft = $this->consumeCreateDraft();
         $importBatch = null;
         $importRows = [];
@@ -77,6 +78,8 @@ final class SalesPerformanceController
             $renewalCases = $repository->fetchRenewalCases(500);
             $staffUserNames = $this->buildUserNameMap($staffUsers);
             $rows = $this->attachStaffNamesToRows($rows, $staffUserNames);
+            $now = new DateTimeImmutable();
+            $metrics = $repository->fetchMonthlyMetrics((int) $now->format('Y'), (int) $now->format('n'));
 
             $importBatchId = (int) ($_GET['import_batch_id'] ?? 0);
             if ($importBatchId > 0) {
@@ -118,6 +121,7 @@ final class SalesPerformanceController
             self::ALLOWED_TYPES,
             $importBatch,
             $importRows,
+            $metrics,
             (string) ($_GET['filter_open'] ?? '') === '1',
             ControllerLayoutHelper::build($this->guard, $this->config, 'sales')
         ));
@@ -186,6 +190,8 @@ final class SalesPerformanceController
             $flashError,
             $flashSuccess,
             $error,
+            $this->config->routeUrl('customer/detail'),
+            $this->config->routeUrl('renewal/detail'),
             ControllerLayoutHelper::build(
                 $this->guard,
                 $this->config,
@@ -563,6 +569,21 @@ final class SalesPerformanceController
     {
         $text = trim((string) $value);
         return $text === '' ? null : $text;
+    }
+
+    private function nullableDate(mixed $value): ?string
+    {
+        $text = trim((string) $value);
+        return $text === '' ? null : $text;
+    }
+
+    private function nullableInt(mixed $value): ?int
+    {
+        $text = trim((string) $value);
+        if ($text === '') {
+            return null;
+        }
+        return is_numeric($text) ? (int) $text : null;
     }
 
     /**

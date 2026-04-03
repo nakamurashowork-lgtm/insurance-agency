@@ -28,7 +28,8 @@ final class ActivityDetailView
         ?string $flashError,
         ?string $errorMessage,
         array $allowedActivityTypes,
-        array $layoutOptions
+        array $layoutOptions,
+        array $purposeTypes = []
     ): string {
         $noticeHtml = '';
         if (is_string($flashError) && $flashError !== '') {
@@ -38,7 +39,7 @@ final class ActivityDetailView
             $noticeHtml .= '<div class="error">' . Layout::escape($errorMessage) . '</div>';
         }
 
-        $formHtml = self::buildForm($prefill, $customers, $staffUsers, $allowedActivityTypes, 0, $salesCases);
+        $formHtml = self::buildForm($prefill, $customers, $staffUsers, $allowedActivityTypes, 0, $purposeTypes);
 
         $content =
             '<div class="card">'
@@ -90,7 +91,8 @@ final class ActivityDetailView
         ?string $flashSuccess,
         ?string $errorMessage,
         array $allowedActivityTypes,
-        array $layoutOptions
+        array $layoutOptions,
+        array $purposeTypes = []
     ): string {
         $noticeHtml = '';
         if (is_string($flashError) && $flashError !== '') {
@@ -122,7 +124,7 @@ final class ActivityDetailView
             ? '<a href="' . $custUrl . '" class="text-link">' . Layout::escape($custName) . '</a>'
             : Layout::escape($custName);
 
-        $formHtml = self::buildForm($record, $customers, $staffUsers, $allowedActivityTypes, $id, $salesCases);
+        $formHtml = self::buildForm($record, $customers, $staffUsers, $allowedActivityTypes, $id, $purposeTypes);
 
         $deleteDialog =
             '<dialog id="dlg-delete" class="modal-dialog">'
@@ -182,6 +184,7 @@ final class ActivityDetailView
      * @param array<int, array<string, mixed>> $customers
      * @param array<int, array{id:int, name:string}> $staffUsers
      * @param array<string, string> $allowedActivityTypes
+     * @param array<int, array<string, mixed>> $purposeTypes
      */
     private static function buildForm(
         array $data,
@@ -189,26 +192,25 @@ final class ActivityDetailView
         array $staffUsers,
         array $allowedActivityTypes,
         int $id = 0,
-        array $salesCases = []
+        array $purposeTypes = []
     ): string {
-        $customerIdVal    = (string) ($data['customer_id'] ?? '');
-        $activityDateVal  = (string) ($data['activity_date'] ?? '');
-        $startTimeVal     = (string) ($data['start_time'] ?? '');
-        $endTimeVal       = (string) ($data['end_time'] ?? '');
-        $activityTypeVal  = (string) ($data['activity_type'] ?? '');
-        $purposeTypeVal   = (string) ($data['purpose_type'] ?? '');
-        $visitPlaceVal    = (string) ($data['visit_place'] ?? '');
-        $intervieweeVal   = (string) ($data['interviewee_name'] ?? '');
-        $subjectVal       = (string) ($data['subject'] ?? '');
-        $summaryVal       = (string) ($data['content_summary'] ?? '');
-        $detailTextVal    = (string) ($data['detail_text'] ?? '');
-        $nextDateVal      = (string) ($data['next_action_date'] ?? '');
-        $nextNoteVal      = (string) ($data['next_action_note'] ?? '');
-        $resultTypeVal    = (string) ($data['result_type'] ?? '');
-        $renewalIdVal     = (string) ($data['renewal_case_id'] ?? '');
-        $accidentIdVal    = (string) ($data['accident_case_id'] ?? '');
-        $salesCaseIdVal   = (string) ($data['sales_case_id'] ?? '');
-        $staffUserIdVal   = (string) ($data['staff_user_id'] ?? '');
+        $customerIdVal   = (string) ($data['customer_id'] ?? '');
+        $activityDateVal = (string) ($data['activity_date'] ?? '');
+        $startTimeVal    = (string) ($data['start_time'] ?? '');
+        $endTimeVal      = (string) ($data['end_time'] ?? '');
+        $activityTypeVal = (string) ($data['activity_type'] ?? '');
+        $purposeTypeVal  = (string) ($data['purpose_type'] ?? '');
+        $visitPlaceVal   = (string) ($data['visit_place'] ?? '');
+        $intervieweeVal  = (string) ($data['interviewee_name'] ?? '');
+        $subjectVal      = (string) ($data['subject'] ?? '');
+        $summaryVal      = (string) ($data['content_summary'] ?? '');
+        $detailTextVal   = (string) ($data['detail_text'] ?? '');
+        $nextDateVal     = (string) ($data['next_action_date'] ?? '');
+        $nextNoteVal     = (string) ($data['next_action_note'] ?? '');
+        $resultTypeVal   = (string) ($data['result_type'] ?? '');
+        $renewalIdVal    = (string) ($data['renewal_case_id'] ?? '');
+        $accidentIdVal   = (string) ($data['accident_case_id'] ?? '');
+        $staffUserIdVal  = (string) ($data['staff_user_id'] ?? '');
 
         $custOptionsHtml = '<option value="">-- 顧客を選択 --</option>';
         foreach ($customers as $cust) {
@@ -224,14 +226,25 @@ final class ActivityDetailView
             $typeOptionsHtml .= '<option value="' . Layout::escape($val) . '"' . $sel . '>' . Layout::escape($label) . '</option>';
         }
 
-        $salesCaseOptionsHtml = '<option value="">-- 選択 --</option>';
-        foreach ($salesCases as $sc) {
-            $scId   = (int) ($sc['id'] ?? 0);
-            $scName = (string) ($sc['case_name'] ?? '');
-            $scCust = (string) ($sc['customer_name'] ?? '');
-            $scLabel = $scCust !== '' ? $scCust . '｜' . $scName : $scName;
-            $sel = $salesCaseIdVal === (string) $scId ? ' selected' : '';
-            $salesCaseOptionsHtml .= '<option value="' . $scId . '"' . $sel . '>' . Layout::escape($scLabel) . '</option>';
+        // 用件区分セレクト（m_activity_purpose_type マスタ選択）
+        // マスタに存在しないコードが設定されている場合は先頭に旧値として表示
+        $purposeOptionsHtml = '<option value="">— 選択してください —</option>';
+        $purposeCodeExists  = false;
+        foreach ($purposeTypes as $pt) {
+            $ptCode  = (string) ($pt['code'] ?? '');
+            $ptLabel = (string) ($pt['label'] ?? '');
+            $sel     = $purposeTypeVal === $ptCode ? ' selected' : '';
+            if ($sel !== '') {
+                $purposeCodeExists = true;
+            }
+            $purposeOptionsHtml .= '<option value="' . Layout::escape($ptCode) . '"' . $sel . '>' . Layout::escape($ptLabel) . '</option>';
+        }
+        // マスタ外の既存値を先頭オプションとして追加（グレーアウト表示）
+        if ($purposeTypeVal !== '' && !$purposeCodeExists) {
+            $orphanLabel        = '（旧値: ' . $purposeTypeVal . '）';
+            $purposeOptionsHtml = '<option value="">— 選択してください —</option>'
+                . '<option value="' . Layout::escape($purposeTypeVal) . '" selected style="color:#999;">' . Layout::escape($orphanLabel) . '</option>'
+                . substr($purposeOptionsHtml, strlen('<option value="">— 選択してください —</option>'));
         }
 
         $staffOptionsHtml = '<option value="">-- 選択 --</option>';
@@ -261,7 +274,7 @@ final class ActivityDetailView
             . '<label class="list-filter-field"><span>活動種別' . $req . '</span>'
             . '<select name="activity_type" required>' . $typeOptionsHtml . '</select></label>'
             . '<label class="list-filter-field"><span>用件区分</span>'
-            . '<input type="text" name="purpose_type" value="' . Layout::escape($purposeTypeVal) . '" maxlength="50"></label>'
+            . '<select name="purpose_type">' . $purposeOptionsHtml . '</select></label>'
 
             . '<label class="list-filter-field"><span>訪問先</span>'
             . '<input type="text" name="visit_place" value="' . Layout::escape($visitPlaceVal) . '" maxlength="200"></label>'
@@ -290,8 +303,6 @@ final class ActivityDetailView
 
             . '<label class="list-filter-field" style="grid-column:span 4;"><span>担当者</span>'
             . '<select name="staff_user_id">' . $staffOptionsHtml . '</select></label>'
-            . '<label class="list-filter-field" style="grid-column:span 4;"><span>関連見込案件</span>'
-            . '<select name="sales_case_id">' . $salesCaseOptionsHtml . '</select></label>'
             . '<label class="list-filter-field" style="grid-column:span 4;"><span>関連満期案件ID</span>'
             . '<input type="text" name="renewal_case_id" value="' . Layout::escape($renewalIdVal) . '" maxlength="20" inputmode="numeric"></label>'
             . '<label class="list-filter-field" style="grid-column:span 4;"><span>関連事故案件ID</span>'

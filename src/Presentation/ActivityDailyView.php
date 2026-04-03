@@ -119,7 +119,7 @@ final class ActivityDailyView
         if ($isSubmitted) {
             $commentSectionHtml =
                 '<div class="card">'
-                . '<h2 style="margin:0 0 12px;font-size:16px;">日報コメント</h2>'
+                . '<div class="detail-section-title">日報コメント</div>'
                 . '<textarea rows="5" readonly style="width:100%;padding:10px 12px;border:1px solid #d9e2ec;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;background:#f5f7fa;color:#52606d;">'
                 . Layout::escape($existingComment)
                 . '</textarea>'
@@ -127,7 +127,7 @@ final class ActivityDailyView
         } else {
             $commentSectionHtml =
                 '<div class="card">'
-                . '<h2 style="margin:0 0 12px;font-size:16px;">日報コメント</h2>'
+                . '<div class="detail-section-title">日報コメント</div>'
                 . '<form method="post" action="' . Layout::escape($commentUrl) . '">'
                 . '<input type="hidden" name="route" value="activity/comment">'
                 . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($commentCsrf) . '">'
@@ -200,7 +200,7 @@ final class ActivityDailyView
             // 活動一覧
             . '<div class="card" style="padding:0;overflow:hidden;margin-bottom:16px;">'
             . '<div style="padding:14px 16px;border-bottom:1px solid #d9e2ec;">'
-            . '<h2 style="margin:0;font-size:16px;">当日の活動（' . count($activities) . '件）</h2>'
+            . '<div class="detail-section-title">当日の活動（' . count($activities) . '件）</div>'
             . '</div>'
             . '<div style="overflow-x:auto;">'
             . '<table class="list-table" style="width:100%;border-collapse:collapse;">'
@@ -210,6 +210,9 @@ final class ActivityDailyView
             . '</tr></thead>'
             . '<tbody>' . $activitiesHtml . '</tbody>'
             . '</table>'
+            . '</div>'
+            . '<div style="padding:8px 16px 12px;font-size:12px;color:var(--text-secondary);">'
+            . '活動の登録・編集は <a href="' . Layout::escape($listUrl) . '" class="kv-link">活動一覧</a> から行います'
             . '</div>'
             . '</div>'
 

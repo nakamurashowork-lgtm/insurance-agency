@@ -55,10 +55,22 @@ final class AccidentCaseController
             $total = (int) ($result['total'] ?? 0);
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
             $customerOptions = $repository->fetchCustomers(500);
+
+            // 次回リマインド日を付与
+            $caseIds = array_map(fn($r) => (int) ($r['id'] ?? 0), $rows);
+            $caseIds = array_filter($caseIds, fn($id) => $id > 0);
+            if ($caseIds !== []) {
+                $reminderDates = $repository->findNextReminderDates(array_values($caseIds));
+                foreach ($rows as $idx => $row) {
+                    $caseId = (int) ($row['id'] ?? 0);
+                    $rows[$idx]['next_reminder_date'] = $reminderDates[$caseId] ?? null;
+                }
+            }
         } catch (Throwable) {
             $error = '事故案件一覧の取得に失敗しました。接続設定を確認してください。';
         }
 
+        $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
         $createDraft = $this->consumeCreateDraft();
         $openModal = trim((string) ($_GET['open_modal'] ?? ''));
         if ($openModal !== 'create') {
@@ -83,6 +95,7 @@ final class AccidentCaseController
             $createDraft,
             $openModal,
             $customerOptions,
+            $staffUsers,
             [
                 'id' => (int) ($auth['user_id'] ?? 0),
                 'name' => (string) ($auth['display_name'] ?? 'ログインユーザー'),
@@ -145,6 +158,8 @@ final class AccidentCaseController
                 $this->guard->session()->issueCsrfToken('accident_update_' . $id),
                 $this->guard->session()->issueCsrfToken('accident_comment_' . $id),
                 $detailUrl,
+                $this->config->routeUrl('customer/detail'),
+                $this->config->routeUrl('renewal/detail'),
                 $flashError,
                 $flashSuccess,
                 ControllerLayoutHelper::build(
@@ -320,13 +335,15 @@ final class AccidentCaseController
      */
     private function extractCriteria(array $source): array
     {
+        $assignedUserId = (int) ($source['assigned_user_id'] ?? 0);
         return [
             'accepted_date_from' => trim((string) ($source['accepted_date_from'] ?? '')),
-            'accepted_date_to' => trim((string) ($source['accepted_date_to'] ?? '')),
-            'customer_name' => trim((string) ($source['customer_name'] ?? '')),
-            'policy_no' => trim((string) ($source['policy_no'] ?? '')),
-            'product_type' => trim((string) ($source['product_type'] ?? '')),
-            'status' => trim((string) ($source['status'] ?? '')),
+            'accepted_date_to'   => trim((string) ($source['accepted_date_to'] ?? '')),
+            'customer_name'      => trim((string) ($source['customer_name'] ?? '')),
+            'policy_no'          => trim((string) ($source['policy_no'] ?? '')),
+            'product_type'       => trim((string) ($source['product_type'] ?? '')),
+            'status'             => trim((string) ($source['status'] ?? '')),
+            'assigned_user_id'   => $assignedUserId > 0 ? (string) $assignedUserId : '',
         ];
     }
 

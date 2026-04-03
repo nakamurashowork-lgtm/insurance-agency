@@ -42,9 +42,9 @@ final class RenewalCaseDetailView
             $successHtml = '<div class="notice">' . Layout::escape($successMessage) . '</div>';
         }
 
-        $statusOptions = ['open', 'contacted', 'quoted', 'waiting', 'renewed', 'lost', 'closed'];
+        $statusOptions = ['not_started', 'sj_requested', 'doc_prepared', 'waiting_return', 'quote_sent', 'waiting_payment', 'completed'];
         $statusHtml = '';
-        $currentStatus = (string) ($detail['case_status'] ?? 'open');
+        $currentStatus = (string) ($detail['case_status'] ?? 'not_started');
         foreach ($statusOptions as $status) {
             $selected = $status === $currentStatus ? ' selected' : '';
             $statusHtml .= '<option value="' . Layout::escape($status) . '"' . $selected . '>' . Layout::escape(self::statusLabel($status)) . '</option>';
@@ -57,6 +57,22 @@ final class RenewalCaseDetailView
             $selected = $result === $currentResult ? ' selected' : '';
             $label = self::resultLabel($result);
             $resultHtml .= '<option value="' . Layout::escape($result) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
+        }
+
+        $renewalMethodOptions = ['', '対面', '郵送', '電話募集'];
+        $renewalMethodHtml = '';
+        $currentRenewalMethod = (string) ($detail['renewal_method'] ?? '');
+        foreach ($renewalMethodOptions as $method) {
+            $selected = $method === $currentRenewalMethod ? ' selected' : '';
+            $renewalMethodHtml .= '<option value="' . Layout::escape($method) . '"' . $selected . '>' . Layout::escape($method === '' ? '未設定' : $method) . '</option>';
+        }
+
+        $procedureMethodOptions = ['', '対面', '対面ナビ', '電話ナビ', '電話募集', '署名・捺印', 'ケータイOR', 'マイページ'];
+        $procedureMethodHtml = '';
+        $currentProcedureMethod = (string) ($detail['procedure_method'] ?? '');
+        foreach ($procedureMethodOptions as $method) {
+            $selected = $method === $currentProcedureMethod ? ' selected' : '';
+            $procedureMethodHtml .= '<option value="' . Layout::escape($method) . '"' . $selected . '>' . Layout::escape($method === '' ? '未設定' : $method) . '</option>';
         }
 
         $commentsHtml = '';
@@ -146,7 +162,12 @@ final class RenewalCaseDetailView
             $auditsHtml = '<li class="muted">0件</li>';
         }
 
-        $customerUrl = Layout::escape($customerDetailBaseUrl . '&id=' . (string) ($detail['customer_id'] ?? '0'));
+        $renewalCaseId = (int) ($detail['renewal_case_id'] ?? 0);
+        $customerUrl = Layout::escape(
+            $customerDetailBaseUrl
+            . '&id=' . (string) ($detail['customer_id'] ?? '0')
+            . '&return_to=' . urlencode('renewal/detail?id=' . $renewalCaseId)
+        );
         $statusBadge = self::renderStatusBadge((string) ($detail['case_status'] ?? 'open'));
         $nextActionHtml = self::renderNextAction((string) ($detail['next_action_date'] ?? ''), (string) ($detail['case_status'] ?? 'open'));
         $address = trim((string) (($detail['address1'] ?? '') . ' ' . ($detail['address2'] ?? '')));
@@ -162,95 +183,122 @@ final class RenewalCaseDetailView
         $statusClass = isset($fieldErrors['case_status']) ? ' input-error' : '';
         $nextActionClass = isset($fieldErrors['next_action_date']) ? ' input-error' : '';
         $resultClass = isset($fieldErrors['renewal_result']) ? ' input-error' : '';
+        $renewalMethodClass = isset($fieldErrors['renewal_method']) ? ' input-error' : '';
+        $procedureMethodClass = isset($fieldErrors['procedure_method']) ? ' input-error' : '';
         $lostReasonClass = isset($fieldErrors['lost_reason']) ? ' input-error' : '';
+        $completedDateClass = isset($fieldErrors['completed_date']) ? ' input-error' : '';
 
-        $content = ''
-            . '<div class="card">'
-            . '<div class="section-head">'
+        $today = date('Y-m-d');
+        $earlyDeadline = trim((string) ($detail['early_renewal_deadline'] ?? ''));
+        $isEarlyDeadlineOverdue = $earlyDeadline !== '' && $earlyDeadline < $today && $currentStatus !== 'completed';
+        $alertHtml = '';
+        if ($isEarlyDeadlineOverdue) {
+            $alertHtml = '<div class="alert alert-warn">⚠ 早期更改締切日（' . Layout::escape($earlyDeadline) . '）を超過しています。</div>';
+        }
+        $earlyDeadlineHtml = $earlyDeadline !== ''
+            ? ($earlyDeadline < $today ? '<span style="color:var(--text-danger);font-weight:500;">' . Layout::escape($earlyDeadline) . '</span>' : Layout::escape($earlyDeadline))
+            : '未設定';
+        $officeUserName = trim((string) ($detail['office_user_name'] ?? ''));
+        $officeUserId   = trim((string) ($detail['office_user_id'] ?? ''));
+        $officeUserHtml = $officeUserName !== '' ? Layout::escape($officeUserName) : ($officeUserId !== '' ? Layout::escape($officeUserId) : '<span class="muted">未設定</span>');
+
+        $customerName = Layout::escape(trim((string) ($detail['customer_name'] ?? '')));
+        $productType  = Layout::escape(trim((string) ($detail['product_type'] ?? '')));
+        $maturityDate = (string) ($detail['maturity_date'] ?? '');
+        $maturityDateStyle = $maturityDate !== '' && $maturityDate < $today ? ' style="color:var(--text-danger);font-weight:500;"' : '';
+
+        $content = $errorHtml
+            . $successHtml
+            . '<div class="page-header">'
             . '<div>'
-            . '<h1 class="title">満期詳細</h1>'
-            . '<div class="meta-row">'
-            . $statusBadge
-            . '<span class="tag">満期日: ' . Layout::escape((string) ($detail['maturity_date'] ?? '')) . '</span>'
-            . '<span class="tag">' . $nextActionHtml . '</span>'
-            . '</div>'
+            . '<h1 class="title">' . $customerName . ($productType !== '' ? ' — ' . $productType : '') . '</h1>'
+            . '<div class="meta-row">' . $statusBadge . '<span class="tag">満期日: ' . Layout::escape($maturityDate) . '</span><span class="tag">' . $nextActionHtml . '</span></div>'
             . '</div>'
             . '<div class="actions">'
             . '<a class="btn btn-secondary" href="' . Layout::escape($listUrl) . '">一覧へ戻る</a>'
             . '<a class="btn btn-ghost" href="' . $customerUrl . '">顧客詳細を見る</a>'
-            . '<button class="btn" type="submit" form="renewal-update-form">保存</button>'
+            . '<button class="btn btn-primary" type="submit" form="renewal-update-form">保存</button>'
             . '</div>'
             . '</div>'
-            . $errorHtml
-            . $successHtml
-            . '</div>'
-            . '<div class="detail-top">'
+            . $alertHtml
+            . '<div class="two-col">'
+            // ── 左カラム ──
+            . '<div>'
             . '<div class="card">'
-            . '<div class="section-head"><h2>契約情報</h2><span class="tag">証券番号 ' . Layout::escape((string) ($detail['policy_no'] ?? '')) . '</span></div>'
-            . '<dl class="kv-list">'
-            . '<dt>保険会社</dt><dd>' . Layout::escape((string) ($detail['insurer_name'] ?? '')) . '</dd>'
-            . '<dt>種目</dt><dd>' . Layout::escape((string) ($detail['product_type'] ?? '')) . '</dd>'
-            . '<dt>始期日</dt><dd>' . Layout::escape((string) ($detail['policy_start_date'] ?? '')) . '</dd>'
-            . '<dt>契約状態</dt><dd>' . Layout::escape($contractStatus) . '</dd>'
-            . '<dt>保険料</dt><dd>' . Layout::escape($premiumText) . '</dd>'
-            . '<dt>満期日</dt><dd>' . Layout::escape((string) ($detail['maturity_date'] ?? '')) . '</dd>'
-            . '<dt>更改結果</dt><dd>' . Layout::escape(self::resultLabel((string) ($detail['renewal_result'] ?? ''))) . '</dd>'
-            . '<dt>失注理由</dt><dd>' . Layout::escape((string) ($detail['lost_reason'] ?? '')) . '</dd>'
-            . '<dt>備考</dt><dd>' . Layout::escape((string) ($detail['remark'] ?? '')) . '</dd>'
-            . '</dl>'
-            . '</div>'
-            . '<div class="detail-side">'
-            . '<div class="card">'
-            . '<div class="section-head"><h2>顧客要約</h2></div>'
-            . '<dl class="kv-list">'
-            . '<dt>顧客名</dt><dd>' . Layout::escape((string) ($detail['customer_name'] ?? '')) . '</dd>'
-            . '<dt>主担当者</dt><dd>' . ($assignedUserName !== '' ? Layout::escape($assignedUserName) : ($assignedUserId !== '' ? Layout::escape($assignedUserId) : '<span class="muted">未設定</span>')) . '</dd>'
-            . '<dt>電話</dt><dd>' . Layout::escape((string) ($detail['phone'] ?? '')) . '</dd>'
-            . '<dt>メール</dt><dd>' . Layout::escape((string) ($detail['email'] ?? '')) . '</dd>'
-            . '<dt>住所</dt><dd>' . Layout::escape($address) . '</dd>'
-            . '</dl>'
+            . '<div class="detail-section-title">契約情報</div>'
+            . '<div class="kv"><span class="kv-key">証券番号</span><span class="kv-val">' . Layout::escape((string) ($detail['policy_no'] ?? '')) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">種目</span><span class="kv-val">' . $productType . '</span></div>'
+            . '<div class="kv"><span class="kv-key">満期日</span><span class="kv-val"' . $maturityDateStyle . '>' . Layout::escape($maturityDate) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">早期更改締切</span><span class="kv-val">' . $earlyDeadlineHtml . '</span></div>'
+            . '<div class="kv"><span class="kv-key">始期日</span><span class="kv-val">' . Layout::escape((string) ($detail['policy_start_date'] ?? '')) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">保険料</span><span class="kv-val">' . Layout::escape($premiumText) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">保険会社</span><span class="kv-val">' . Layout::escape((string) ($detail['insurer_name'] ?? '')) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">契約状態</span><span class="kv-val">' . Layout::escape($contractStatus) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">営業担当</span><span class="kv-val">' . ($assignedUserName !== '' ? Layout::escape($assignedUserName) : ($assignedUserId !== '' ? Layout::escape($assignedUserId) : '<span class="muted">未設定</span>')) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">事務担当</span><span class="kv-val">' . $officeUserHtml . '</span></div>'
+            . '<div class="kv"><span class="kv-key">備考</span><span class="kv-val">' . Layout::escape((string) ($detail['remark'] ?? '')) . '</span></div>'
             . '</div>'
             . '<div class="card">'
-            . '<div class="section-head"><h2>満期対応更新</h2></div>'
+            . '<div class="detail-section-title">対応状況の更新</div>'
             . '<form id="renewal-update-form" method="post" action="' . Layout::escape($updateUrl) . '">'
             . '<input type="hidden" name="id" value="' . Layout::escape((string) ($detail['renewal_case_id'] ?? '')) . '">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfToken) . '">'
             . self::renderHiddenInputs($listStateParams)
-            . '<div class="renewal-update-grid">'
-            . '<div class="update-field">'
-            . '<label for="renewal-case-status">対応ステータス <strong class="required-mark">*</strong></label>'
-            . '<select id="renewal-case-status" class="' . trim($statusClass) . '" name="case_status" required>' . $statusHtml . '</select>'
+            . '<div class="form-row">'
+            . '<div class="form-label">対応状況 <span class="req">*</span></div>'
+            . '<select id="renewal-case-status" class="form-select' . $statusClass . '" name="case_status" required>' . $statusHtml . '</select>'
             . self::renderFieldError($fieldErrors, 'case_status')
             . '</div>'
-            . '<div class="update-field">'
-            . '<label for="renewal-result-field">更改結果</label>'
-            . '<select id="renewal-result-field" class="' . trim($resultClass) . '" name="renewal_result">' . $resultHtml . '</select>'
+            . '<div class="form-row">'
+            . '<div class="form-label">更改方法</div>'
+            . '<select id="renewal-method-field" class="form-select' . $renewalMethodClass . '" name="renewal_method">' . $renewalMethodHtml . '</select>'
+            . self::renderFieldError($fieldErrors, 'renewal_method')
+            . '</div>'
+            . '<div class="form-row">'
+            . '<div class="form-label">手続方法</div>'
+            . '<select id="procedure-method-field" class="form-select' . $procedureMethodClass . '" name="procedure_method">' . $procedureMethodHtml . '</select>'
+            . self::renderFieldError($fieldErrors, 'procedure_method')
+            . '</div>'
+            . '<div class="form-row">'
+            . '<div class="form-label">更改結果</div>'
+            . '<select id="renewal-result-field" class="form-select' . $resultClass . '" name="renewal_result">' . $resultHtml . '</select>'
             . self::renderFieldError($fieldErrors, 'renewal_result')
             . '</div>'
-            . '<div class="update-field">'
-            . '<label for="renewal-next-action-date">次回対応予定日</label>'
-            . '<input type="date" id="renewal-next-action-date" class="' . trim($nextActionClass) . '" name="next_action_date" value="' . Layout::escape((string) ($detail['next_action_date'] ?? '')) . '" placeholder="YYYY-MM-DD">'
+            . '<div class="form-row">'
+            . '<div class="form-label">完了日</div>'
+            . '<input type="date" id="renewal-completed-date" class="form-input' . $completedDateClass . '" name="completed_date" value="' . Layout::escape((string) ($detail['completed_date'] ?? '')) . '">'
+            . self::renderFieldError($fieldErrors, 'completed_date')
+            . '</div>'
+            . '<div class="form-row">'
+            . '<div class="form-label">次回対応予定日</div>'
+            . '<input type="date" id="renewal-next-action-date" class="form-input' . $nextActionClass . '" name="next_action_date" value="' . Layout::escape((string) ($detail['next_action_date'] ?? '')) . '">'
             . self::renderFieldError($fieldErrors, 'next_action_date')
             . '</div>'
-            . '<div class="update-field">'
-            . '<label for="renewal-lost-reason">失注理由</label>'
-            . '<input type="text" id="renewal-lost-reason" class="' . trim($lostReasonClass) . '" name="lost_reason" value="' . Layout::escape((string) ($detail['lost_reason'] ?? '')) . '">'
+            . '<div class="form-row">'
+            . '<div class="form-label">失注理由</div>'
+            . '<input type="text" id="renewal-lost-reason" class="form-input' . $lostReasonClass . '" name="lost_reason" value="' . Layout::escape((string) ($detail['lost_reason'] ?? '')) . '">'
             . self::renderFieldError($fieldErrors, 'lost_reason')
             . '</div>'
-            . '<div class="update-field update-field-full">'
-            . '<label for="renewal-remark">備考</label>'
-            . '<textarea id="renewal-remark" name="remark" rows="4">' . Layout::escape((string) ($detail['remark'] ?? '')) . '</textarea>'
+            . '<div class="form-row">'
+            . '<div class="form-label">備考</div>'
+            . '<textarea id="renewal-remark" class="form-input" name="remark" rows="4">' . Layout::escape((string) ($detail['remark'] ?? '')) . '</textarea>'
             . '</div>'
-            . '</div>'
-            . '<div class="renewal-update-actions">'
-            . '<button class="btn btn-primary" type="submit">更新を保存</button>'
-            . '</div>'
+            . '<button class="btn btn-primary" type="submit" style="width:100%;">更新を保存</button>'
             . '</form>'
             . '</div>'
             . '</div>'
+            // ── 右カラム ──
+            . '<div>'
+            . '<div class="card">'
+            . '<div class="detail-section-title">顧客情報（参照）</div>'
+            . '<div class="kv"><span class="kv-key">氏名</span><span class="kv-val"><a class="kv-link" href="' . $customerUrl . '">' . $customerName . '</a></span></div>'
+            . '<div class="kv"><span class="kv-key">主担当者</span><span class="kv-val">' . ($assignedUserName !== '' ? Layout::escape($assignedUserName) : ($assignedUserId !== '' ? Layout::escape($assignedUserId) : '<span class="muted">未設定</span>')) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">電話</span><span class="kv-val">' . Layout::escape((string) ($detail['phone'] ?? '')) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">メール</span><span class="kv-val">' . Layout::escape((string) ($detail['email'] ?? '')) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">住所</span><span class="kv-val">' . Layout::escape($address) . '</span></div>'
+            . '<div class="card-footer-link"><a class="kv-link" href="' . $customerUrl . '">顧客詳細を見る →</a></div>'
             . '</div>'
-            . '<div class="section-stack">'
-            . '<details class="card details-panel details-compact">'
+            . '<details class="card details-panel details-compact" open>'
             . '<summary><span>コメント</span><span class="muted">' . count($comments) . '件</span></summary>'
             . '<div class="details-compact-body">'
             . '<form method="post" action="' . Layout::escape($commentUrl) . '" style="margin:0 0 12px;">'
@@ -264,10 +312,11 @@ final class RenewalCaseDetailView
             . '<ul class="panel-list">' . $commentsHtml . '</ul>'
             . '</div>'
             . '</details>'
-            . '<details class="card details-panel details-compact">'
+            . '<details class="card details-panel details-compact" open>'
             . '<summary><span>変更履歴</span><span class="muted">' . count($audits) . '件</span></summary>'
             . '<div class="details-compact-body"><ul class="panel-list">' . $auditsHtml . '</ul></div>'
             . '</details>'
+            . '</div>'
             . '</div>';
 
         return Layout::render('満期詳細', $content, $layoutOptions);
@@ -276,13 +325,13 @@ final class RenewalCaseDetailView
     private static function statusLabel(string $status): string
     {
         return match ($status) {
-            'open' => '未対応',
-            'contacted' => '対応中',
-            'quoted' => '見積提示',
-            'waiting' => '回答待ち',
-            'renewed' => '完了',
-            'lost' => '失注',
-            'closed' => '終了',
+            'not_started'    => '未対応',
+            'sj_requested'   => 'SJ依頼中',
+            'doc_prepared'   => '書類作成済',
+            'waiting_return' => '返送待ち',
+            'quote_sent'     => '見積送付済',
+            'waiting_payment' => '入金待ち',
+            'completed'      => '完了',
             default => '未設定',
         };
     }
@@ -313,13 +362,12 @@ final class RenewalCaseDetailView
     private static function renderStatusBadge(string $status): string
     {
         $class = match ($status) {
-            'renewed', 'closed' => 'status-done',
-            'contacted', 'quoted', 'waiting' => 'status-progress',
-            'lost' => 'status-inactive',
-            default => 'status-open',
+            'completed' => 'badge-success',
+            'sj_requested', 'doc_prepared', 'waiting_return', 'quote_sent', 'waiting_payment' => 'badge-info',
+            default => 'badge-danger',
         };
 
-        return '<span class="status-badge ' . $class . '">' . Layout::escape(self::statusLabel($status)) . '</span>';
+        return '<span class="badge ' . $class . '">' . Layout::escape(self::statusLabel($status)) . '</span>';
     }
 
     /**
@@ -396,7 +444,7 @@ final class RenewalCaseDetailView
         }
 
         $today = date('Y-m-d');
-        if (!in_array($status, ['renewed', 'lost', 'closed'], true) && $normalized < $today) {
+        if ($status !== 'completed' && $normalized < $today) {
             return '次回対応予定日: 期限超過 ' . Layout::escape($normalized);
         }
 

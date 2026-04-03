@@ -20,6 +20,7 @@ final class SalesPerformanceListView
      * @param array<int, string> $allowedTypes
      * @param array<string, mixed>|null $importBatch
      * @param array<int, array<string, mixed>> $importRows
+     * @param array{non_life_month: int, non_life_ytd: int, general_month: int, total_count_month: int} $metrics
      * @param array<string, mixed> $layoutOptions
      */
     public static function render(
@@ -45,6 +46,7 @@ final class SalesPerformanceListView
         array $allowedTypes,
         ?array $importBatch,
         array $importRows,
+        array $metrics,
         bool $forceFilterOpen,
         array $layoutOptions
     ): string {
@@ -92,10 +94,12 @@ final class SalesPerformanceListView
         $bottomPager = self::renderBottomPager($listUrl, $criteria, $listState, $pager);
         $importReturnTo = ListViewHelper::buildUrl($listUrl, ['open_modal' => 'import']);
 
+        $metricsHtml = self::renderMetrics($metrics);
+
         $content = ''
             . '<div class="list-page-frame">'
             . '<div class="list-page-header">'
-            . '<h1 class="title">実績一覧</h1>'
+            . '<h1 class="title">実績管理一覧</h1>'
             . '<div class="list-page-header-actions">'
             . '<button class="btn" type="button" data-open-dialog="sales-create-dialog">実績を追加</button>'
             . '</div>'
@@ -104,21 +108,17 @@ final class SalesPerformanceListView
             . $successHtml
             . $searchForm
             . '<div class="card">'
+            . $metricsHtml
             . $topToolbar
             . '<div class="table-wrap">'
             . '<table class="table-fixed table-card list-table">'
             . '<thead><tr>'
             . '<th>' . self::renderSortLink('計上日', 'performance_date', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('実績区分', 'performance_type', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('業務区分', 'source_type', $listUrl, $criteria, $listState) . '</th>'
             . '<th>' . self::renderSortLink('契約者名', 'customer_name', $listUrl, $criteria, $listState) . '</th>'
             . '<th>' . self::renderSortLink('担当者名', 'staff_user_id', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('保険会社名', 'insurer_name', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('証券番号', 'policy_no', $listUrl, $criteria, $listState) . '</th>'
+            . '<th>' . self::renderSortLink('業務区分', 'source_type', $listUrl, $criteria, $listState) . '</th>'
             . '<th>' . self::renderSortLink('種目', 'product_type', $listUrl, $criteria, $listState) . '</th>'
             . '<th>' . self::renderSortLink('保険料', 'premium_amount', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('精算月', 'settlement_month', $listUrl, $criteria, $listState) . '</th>'
-            . '<th class="align-right">操作</th>'
             . '</tr></thead>'
             . '<tbody>' . $rowsHtml . '</tbody>'
             . '</table>'
@@ -144,7 +144,34 @@ final class SalesPerformanceListView
             . '(function(){const dialog=document.getElementById("sales-create-dialog");if(!dialog){return;}const customer=document.querySelector("#sales-create-dialog select[name=\"customer_id\"]");const contract=document.querySelector("#sales-create-dialog select[name=\"contract_id\"]");const renewal=document.querySelector("#sales-create-dialog select[name=\"renewal_case_id\"]");const source=document.querySelector("#sales-create-dialog select[name=\"source_type\"]");const appField=document.querySelector("#sales-create-dialog [data-role=\"application-date-field\"]");const fillTargets={insurer_name:document.querySelector("#sales-create-dialog input[name=\"insurer_name\"]"),policy_no:document.querySelector("#sales-create-dialog input[name=\"policy_no\"]"),policy_start_date:document.querySelector("#sales-create-dialog input[name=\"policy_start_date\"]"),insurance_category:document.querySelector("#sales-create-dialog input[name=\"insurance_category\"]"),product_type:document.querySelector("#sales-create-dialog input[name=\"product_type\"]")};const toggleLifeField=()=>{if(!source||!appField){return;}appField.style.display=source.value==="life"?"":"none";};const filterContracts=()=>{if(!customer||!contract){return;}const cid=customer.value;Array.from(contract.options).forEach((opt,idx)=>{if(idx===0){opt.hidden=false;return;}const owner=opt.getAttribute("data-customer-id")||"";opt.hidden=(cid!==""&&owner!==cid);});if(contract.selectedOptions[0]&&contract.selectedOptions[0].hidden){contract.value="";}};const filterRenewals=()=>{if(!renewal){return;}const cid=customer?customer.value:"";const contractId=contract?contract.value:"";Array.from(renewal.options).forEach((opt,idx)=>{if(idx===0){opt.hidden=false;return;}const ownerContract=opt.getAttribute("data-contract-id")||"";const ownerCustomer=opt.getAttribute("data-customer-id")||"";let visible=true;if(contractId!==""){visible=ownerContract===contractId;}else if(cid!==""){visible=ownerCustomer===cid;}opt.hidden=!visible;});if(renewal.selectedOptions[0]&&renewal.selectedOptions[0].hidden){renewal.value="";}};const autofillFromContract=()=>{if(!contract){return;}const selected=contract.selectedOptions[0];if(!selected){return;}const map={insurer_name:selected.getAttribute("data-insurer-name")||"",policy_no:selected.getAttribute("data-policy-no")||"",policy_start_date:selected.getAttribute("data-policy-start-date")||"",insurance_category:selected.getAttribute("data-insurance-category")||"",product_type:selected.getAttribute("data-product-type")||""};Object.keys(map).forEach((key)=>{const target=fillTargets[key];if(!target){return;}if((target.value||"").trim()!==""){return;}target.value=map[key];});};if(customer){customer.addEventListener("change",()=>{filterContracts();filterRenewals();});}if(contract){contract.addEventListener("change",()=>{filterRenewals();autofillFromContract();});}if(source){source.addEventListener("change",toggleLifeField);}toggleLifeField();filterContracts();filterRenewals();})();'
             . '</script>';
 
-        return Layout::render('実績一覧', $content, $layoutOptions);
+        return Layout::render('実績管理一覧', $content, $layoutOptions);
+    }
+
+    /**
+     * @param array{non_life_month: int, non_life_ytd: int, general_month: int, total_count_month: int} $metrics
+     */
+    private static function renderMetrics(array $metrics): string
+    {
+        $fmt = static fn(int $v): string => number_format((int) round($v / 1000)) . '千';
+
+        return '<div class="metric-grid" style="margin-bottom:14px;">'
+            . '<div class="metric">'
+            . '<div class="metric-label">当月損保挙積</div>'
+            . '<div class="metric-value">' . Layout::escape($fmt($metrics['non_life_month'])) . '</div>'
+            . '</div>'
+            . '<div class="metric">'
+            . '<div class="metric-label">損保挙積累計（年度）</div>'
+            . '<div class="metric-value">' . Layout::escape($fmt($metrics['non_life_ytd'])) . '</div>'
+            . '</div>'
+            . '<div class="metric">'
+            . '<div class="metric-label">一般種目（当月）</div>'
+            . '<div class="metric-value">' . Layout::escape($fmt($metrics['general_month'])) . '</div>'
+            . '</div>'
+            . '<div class="metric">'
+            . '<div class="metric-label">計上件数（当月）</div>'
+            . '<div class="metric-value">' . Layout::escape((string) $metrics['total_count_month']) . '件</div>'
+            . '</div>'
+            . '</div>';
     }
 
     /**
@@ -213,12 +240,7 @@ final class SalesPerformanceListView
             . '<label class="list-filter-field"><span>実績計上日To</span><input type="date" name="performance_date_to" value="' . $dateTo . '"></label>'
             . '<label class="list-filter-field"><span>契約者名</span><input type="text" name="customer_name" value="' . $customerName . '"></label>'
             . '<label class="list-filter-field"><span>担当者</span><select name="staff_user_id">' . $staffOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>業務区分</span><select name="source_type">' . $sourceOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>実績区分</span><select name="performance_type">' . $performanceOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>保険会社名</span><input type="text" name="insurer_name" value="' . $insurerName . '"></label>'
-            . '<label class="list-filter-field"><span>証券番号</span><input type="text" name="policy_no" value="' . $policyNo . '"></label>'
             . '<label class="list-filter-field"><span>種目</span><input type="text" name="product_type" value="' . $productType . '"></label>'
-            . '<label class="list-filter-field"><span>精算月</span><input type="month" name="settlement_month" value="' . $settlementMonth . '"></label>'
             . '</div>'
             . '<div class="actions list-filter-actions">'
             . '<button class="btn" type="submit">検索</button>'
@@ -446,23 +468,24 @@ final class SalesPerformanceListView
             $params = self::buildListQueryParams($criteria, $listState);
             $detailUrl = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, array_merge(['id' => (string) $id], $params)));
 
+            $customerName = (string) ($row['customer_name'] ?? '');
+            $premium = (int) ($row['premium_amount'] ?? 0);
+            $premiumFormatted = number_format($premium) . '円';
+            $premiumHtml = $premium < 0
+                ? '<span style="color:var(--text-danger);">' . Layout::escape($premiumFormatted) . '</span>'
+                : Layout::escape($premiumFormatted);
             $rowsHtml .= '<tr>'
-                . '<td data-label="計上日">' . Layout::escape((string) ($row['performance_date'] ?? '')) . '</td>'
-                . '<td data-label="実績区分">' . Layout::escape(self::performanceTypeLabel((string) ($row['performance_type'] ?? ''))) . '</td>'
-                . '<td data-label="業務区分">' . Layout::escape(self::sourceTypeLabel((string) ($row['source_type'] ?? ''))) . '</td>'
-                . '<td data-label="契約者名"><span class="truncate" title="' . Layout::escape((string) ($row['customer_name'] ?? '')) . '">' . Layout::escape((string) ($row['customer_name'] ?? '')) . '</span></td>'
+                . '<td data-label="計上日"><a class="text-link" href="' . $detailUrl . '"><strong>' . Layout::escape((string) ($row['performance_date'] ?? '')) . '</strong></a></td>'
+                . '<td data-label="契約者名"><span class="truncate" title="' . Layout::escape($customerName) . '">' . Layout::escape($customerName) . '</span></td>'
                 . '<td data-label="担当者名">' . Layout::escape((string) ($row['staff_user_name'] ?? '')) . '</td>'
-                . '<td data-label="保険会社名"><span class="truncate" title="' . Layout::escape((string) (($row['insurer_name'] ?? '') !== '' ? $row['insurer_name'] : ($row['contract_insurer_name'] ?? ''))) . '">' . Layout::escape((string) (($row['insurer_name'] ?? '') !== '' ? $row['insurer_name'] : ($row['contract_insurer_name'] ?? ''))) . '</span></td>'
-                . '<td data-label="証券番号"><span class="truncate" title="' . Layout::escape((string) (($row['policy_no_display'] ?? '') !== '' ? $row['policy_no_display'] : ($row['policy_no'] ?? ''))) . '">' . Layout::escape((string) (($row['policy_no_display'] ?? '') !== '' ? $row['policy_no_display'] : ($row['policy_no'] ?? ''))) . '</span></td>'
+                . '<td data-label="業務区分">' . Layout::escape(self::sourceTypeLabel((string) ($row['source_type'] ?? ''))) . '</td>'
                 . '<td data-label="種目"><span class="truncate" title="' . Layout::escape((string) ($row['product_type'] ?? '')) . '">' . Layout::escape((string) ($row['product_type'] ?? '')) . '</span></td>'
-                . '<td data-label="保険料">' . Layout::escape((string) ($row['premium_amount'] ?? '0')) . '</td>'
-                . '<td data-label="精算月">' . Layout::escape((string) ($row['settlement_month'] ?? '')) . '</td>'
-                . '<td data-label="操作" class="cell-action"><a class="text-link" href="' . $detailUrl . '">詳細を開く</a></td>'
+                . '<td data-label="保険料">' . $premiumHtml . '</td>'
                 . '</tr>';
         }
 
         if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="11">該当データはありません。</td></tr>';
+            $rowsHtml = '<tr><td colspan="6">該当データはありません。</td></tr>';
         }
 
         return $rowsHtml;
@@ -644,15 +667,11 @@ final class SalesPerformanceListView
 
         $label = match ($sort) {
             'performance_date' => '計上日',
-            'performance_type' => '実績区分',
-            'source_type' => '業務区分',
             'customer_name' => '契約者名',
             'staff_user_id' => '担当者名',
-            'insurer_name' => '保険会社名',
-            'policy_no' => '証券番号',
+            'source_type' => '業務区分',
             'product_type' => '種目',
             'premium_amount' => '保険料',
-            'settlement_month' => '精算月',
             default => '計上日',
         };
 

@@ -9,10 +9,10 @@ final class SalesPerformanceDetailView
 {
     /**
      * @param array<string, mixed>|null $record
-    * @param array<int, array<string, mixed>> $customers
-    * @param array<int, array<string, mixed>> $staffUsers
-    * @param array<int, array<string, mixed>> $contracts
-    * @param array<int, array<string, mixed>> $renewalCases
+     * @param array<int, array<string, mixed>> $customers
+     * @param array<int, array<string, mixed>> $staffUsers
+     * @param array<int, array<string, mixed>> $contracts
+     * @param array<int, array<string, mixed>> $renewalCases
      * @param array<int, string> $allowedTypes
      * @param array<string, mixed> $layoutOptions
      */
@@ -32,6 +32,8 @@ final class SalesPerformanceDetailView
         ?string $flashError,
         ?string $flashSuccess,
         ?string $fatalError,
+        string $customerDetailBaseUrl,
+        string $renewalDetailBaseUrl,
         array $layoutOptions
     ): string {
         $errorHtml = '';
@@ -48,21 +50,22 @@ final class SalesPerformanceDetailView
         }
 
         if (!is_array($record)) {
-            $content = ''
-                . '<div class="card">'
-                . '<h1 class="title">実績詳細</h1>'
-                . '<div class="error">対象実績が見つかりません。</div>'
+            $content = $errorHtml
+                . '<div class="page-header">'
+                . '<div><div class="page-title">実績詳細</div></div>'
                 . '<div class="actions"><a class="btn btn-secondary" href="' . Layout::escape($listUrl) . '">一覧へ戻る</a></div>'
-                . '</div>';
-
+                . '</div>'
+                . '<div class="card"><div class="error">対象実績が見つかりません。</div></div>';
             return Layout::render('実績詳細', $content, $layoutOptions);
         }
 
         $id = (int) ($record['id'] ?? 0);
-        $performanceDate = Layout::escape((string) ($record['performance_date'] ?? ''));
+        $pdRaw = (string) ($record['performance_date'] ?? '');
+        $performanceDate = Layout::escape($pdRaw);
         $performanceType = (string) ($record['performance_type'] ?? 'new');
         $sourceType = (string) ($record['source_type'] ?? '');
-        $customerName = Layout::escape((string) ($record['customer_name'] ?? ''));
+        $customerNameRaw = (string) ($record['customer_name'] ?? '');
+        $customerName = Layout::escape($customerNameRaw);
         $staffUserName = Layout::escape((string) ($record['staff_user_name'] ?? ''));
         $insurerNameRaw = (string) ($record['insurer_name'] ?? '');
         if ($insurerNameRaw === '') {
@@ -82,7 +85,8 @@ final class SalesPerformanceDetailView
         $applicationDate = Layout::escape((string) ($record['application_date'] ?? ''));
         $insuranceCategory = Layout::escape((string) ($record['insurance_category'] ?? ''));
         $productType = Layout::escape((string) ($record['product_type'] ?? ''));
-        $premiumAmount = Layout::escape((string) ($record['premium_amount'] ?? '0'));
+        $premiumInt = (int) ($record['premium_amount'] ?? 0);
+        $premiumAmountRaw = Layout::escape((string) $premiumInt);
         $installmentCount = Layout::escape((string) ($record['installment_count'] ?? ''));
         $receiptNo = Layout::escape((string) ($record['receipt_no'] ?? ''));
         $settlementMonth = Layout::escape((string) ($record['settlement_month'] ?? ''));
@@ -93,27 +97,35 @@ final class SalesPerformanceDetailView
         $selectedRenewalCaseId = (int) ($record['renewal_case_id'] ?? 0);
         $staffUserId = (int) ($record['staff_user_id'] ?? 0);
 
-        $customerOptions = '<option value="">選択してください</option>';
-        foreach ($customers as $row) {
-            $cid = (int) ($row['id'] ?? 0);
-            $selected = $cid === $customerId ? ' selected' : '';
-            $label = (string) ($row['customer_name'] ?? '');
-            $customerOptions .= '<option value="' . $cid . '"' . $selected . '>' . Layout::escape($label) . '</option>';
-        }
-
-        $staffOptions = '<option value="">未設定</option>';
-        foreach ($staffUsers as $row) {
-            $uid = (int) ($row['id'] ?? 0);
-            $name = trim((string) ($row['name'] ?? ''));
-            if ($uid <= 0 || $name === '') {
-                continue;
+        // Page title: 実績詳細 — 2026/4/1 上田 勇
+        $titleDate = '';
+        if ($pdRaw !== '') {
+            $ts = strtotime($pdRaw);
+            if ($ts !== false) {
+                $titleDate = date('Y', $ts) . '/' . (int) date('n', $ts) . '/' . (int) date('j', $ts);
             }
+        }
+        $pageHeadTitle = '実績詳細'
+            . ($titleDate !== '' ? ' — ' . $titleDate : '')
+            . ($customerNameRaw !== '' ? ' ' . $customerNameRaw : '');
 
-            $selected = $uid === $staffUserId ? ' selected' : '';
-            $staffOptions .= '<option value="' . $uid . '"' . $selected . '>' . Layout::escape($name) . '</option>';
+        // Premium display
+        if ($premiumInt < 0) {
+            $premiumFormatted = '<span style="color:var(--text-danger);">▲' . number_format(abs($premiumInt)) . '円</span>';
+        } else {
+            $premiumFormatted = number_format($premiumInt) . '円';
         }
 
+        // Source type badge
+        $sourceTypeLabel = self::sourceTypeLabel($sourceType);
+        $sourceBadgeClass = $sourceType === 'non_life' ? 'badge-info' : ($sourceType === 'life' ? 'badge-warn' : '');
+        $sourceBadgeHtml = $sourceTypeLabel !== ''
+            ? '<span class="badge ' . $sourceBadgeClass . '">' . Layout::escape($sourceTypeLabel) . '</span>'
+            : '<span class="muted">未設定</span>';
+
+        // Build option lists + resolve linked display values
         $linkedContractPolicyNo = '';
+        $linkedContractRenewalCaseId = 0;
         $contractOptions = '<option value="">未設定</option>';
         foreach ($contracts as $row) {
             $cid = (int) ($row['id'] ?? 0);
@@ -136,6 +148,7 @@ final class SalesPerformanceDetailView
         $renewalOptions = '<option value="">未設定</option>';
         foreach ($renewalCases as $row) {
             $rid = (int) ($row['id'] ?? 0);
+            $rowContractId = (int) ($row['contract_id'] ?? 0);
             $selected = $rid === $selectedRenewalCaseId ? ' selected' : '';
             $policyNoText = (string) ($row['policy_no'] ?? '');
             $maturityDate = (string) ($row['maturity_date'] ?? '');
@@ -143,10 +156,32 @@ final class SalesPerformanceDetailView
             if ($rid === $selectedRenewalCaseId && $label !== '') {
                 $linkedRenewalInfo = $label;
             }
+            if ($linkedContractRenewalCaseId === 0 && $rowContractId === $selectedContractId && $rid > 0) {
+                $linkedContractRenewalCaseId = $rid;
+            }
             $renewalOptions .= '<option value="' . $rid . '"' . $selected
-                . ' data-contract-id="' . (int) ($row['contract_id'] ?? 0) . '"'
+                . ' data-contract-id="' . $rowContractId . '"'
                 . ' data-customer-id="' . (int) ($row['customer_id'] ?? 0) . '"'
                 . '>' . Layout::escape($label) . '</option>';
+        }
+
+        $customerOptions = '<option value="">選択してください</option>';
+        foreach ($customers as $row) {
+            $cid = (int) ($row['id'] ?? 0);
+            $selected = $cid === $customerId ? ' selected' : '';
+            $label = (string) ($row['customer_name'] ?? '');
+            $customerOptions .= '<option value="' . $cid . '"' . $selected . '>' . Layout::escape($label) . '</option>';
+        }
+
+        $staffOptions = '<option value="">未設定</option>';
+        foreach ($staffUsers as $row) {
+            $uid = (int) ($row['id'] ?? 0);
+            $name = trim((string) ($row['name'] ?? ''));
+            if ($uid <= 0 || $name === '') {
+                continue;
+            }
+            $selected = $uid === $staffUserId ? ' selected' : '';
+            $staffOptions .= '<option value="' . $uid . '"' . $selected . '>' . Layout::escape($name) . '</option>';
         }
 
         $typeOptions = '';
@@ -161,82 +196,152 @@ final class SalesPerformanceDetailView
             $sourceOptions .= '<option value="' . $value . '"' . $selected . '>' . $label . '</option>';
         }
 
-        $content = ''
-            . '<div class="card">'
-            . '<div class="section-head">'
-            . '<div><h1 class="title">実績詳細</h1></div>'
-            . '<div class="actions"><a class="btn btn-secondary" href="' . Layout::escape($listUrl) . '">一覧へ戻る</a></div>'
-            . '</div>'
-            . $errorHtml
-            . $successHtml
-            . '<div class="split-columns">'
-            . '<div class="card">'
-            . '<h2>実績情報</h2>'
-            . '<dl class="kv-list">'
-            . '<dt>実績計上日</dt><dd>' . $performanceDate . '</dd>'
-            . '<dt>実績区分</dt><dd>' . Layout::escape(self::performanceTypeLabel($performanceType)) . '</dd>'
-            . '<dt>業務区分</dt><dd>' . Layout::escape(self::sourceTypeLabel($sourceType)) . '</dd>'
-            . '<dt>契約者名</dt><dd>' . $customerName . '</dd>'
-            . '<dt>担当者名</dt><dd>' . ($staffUserName === '' ? '<span class="muted">未設定</span>' : $staffUserName) . '</dd>'
-            . '<dt>保険会社名</dt><dd>' . ($insurerName === '' ? '<span class="muted">未設定</span>' : $insurerName) . '</dd>'
-            . '<dt>証券番号</dt><dd>' . $policyNo . '</dd>'
-            . '<dt>始期日</dt><dd>' . $policyStartDate . '</dd>'
-            . '<dt>申込日</dt><dd>' . ($applicationDate === '' ? '<span class="muted">未設定</span>' : $applicationDate) . '</dd>'
-            . '<dt>保険種類</dt><dd>' . $insuranceCategory . '</dd>'
-            . '<dt>種目</dt><dd>' . $productType . '</dd>'
-            . '<dt>保険料</dt><dd>' . $premiumAmount . '</dd>'
-            . '<dt>分割回数</dt><dd>' . ($installmentCount === '' ? '<span class="muted">未設定</span>' : $installmentCount) . '</dd>'
-            . '<dt>領収証番号</dt><dd>' . $receiptNo . '</dd>'
-            . '<dt>精算月</dt><dd>' . $settlementMonth . '</dd>'
-            . '<dt>備考</dt><dd>' . ($remark === '' ? '<span class="muted">未設定</span>' : $remark) . '</dd>'
-            . '<dt>関連契約</dt><dd>' . ($linkedContractPolicyNo !== '' ? Layout::escape($linkedContractPolicyNo) : '<span class="muted">未設定</span>') . '</dd>'
-            . '<dt>満期案件</dt><dd>' . ($linkedRenewalInfo !== '' ? Layout::escape($linkedRenewalInfo) : '<span class="muted">未設定</span>') . '</dd>'
-            . '</dl>'
-            . '</div>'
-            . '<div class="card">'
-            . '<h2>編集</h2>'
-            . '<form id="sales-detail-edit-form" method="post" action="' . Layout::escape($updateUrl) . '">'
+        // KV: 契約者名 link
+        $customerNameHtml = $customerName !== '' ? $customerName : '<span class="muted">未設定</span>';
+        if ($customerId > 0 && $customerName !== '') {
+            $customerNameHtml = '<a class="kv-link" href="' . Layout::escape($customerDetailBaseUrl . '&id=' . $customerId . '&return_to=' . urlencode('sales/detail?id=' . $id)) . '">' . $customerName . '</a>';
+        }
+
+        // KV: 関連契約 link (via renewal case matching the contract)
+        $linkedContractHtml = '<span class="muted">未設定</span>';
+        if ($linkedContractPolicyNo !== '') {
+            if ($linkedContractRenewalCaseId > 0) {
+                $linkedContractHtml = '<a class="kv-link" href="' . Layout::escape($renewalDetailBaseUrl) . '&amp;id=' . $linkedContractRenewalCaseId . '">' . Layout::escape($linkedContractPolicyNo) . '</a>';
+            } else {
+                $linkedContractHtml = Layout::escape($linkedContractPolicyNo);
+            }
+        }
+
+        // KV: 関連満期案件 link
+        $linkedRenewalHtml = '<span class="muted">未設定</span>';
+        if ($selectedRenewalCaseId > 0 && $linkedRenewalInfo !== '') {
+            $linkedRenewalHtml = '<a class="kv-link" href="' . Layout::escape($renewalDetailBaseUrl) . '&amp;id=' . $selectedRenewalCaseId . '">' . Layout::escape($linkedRenewalInfo) . '</a>';
+        }
+
+        // ─── KV display ──────────────────────────────────────────
+        $kvHtml = ''
+            . '<div class="kv"><span class="kv-key">業務区分</span><span class="kv-val">' . $sourceBadgeHtml . '</span></div>'
+            . '<div class="kv"><span class="kv-key">実績区分</span><span class="kv-val">' . Layout::escape(self::performanceTypeLabel($performanceType)) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">実績計上日</span><span class="kv-val">' . $performanceDate . '</span></div>'
+            . '<div class="kv"><span class="kv-key">契約者名</span><span class="kv-val">' . $customerNameHtml . '</span></div>'
+            . '<div class="kv"><span class="kv-key">担当者</span><span class="kv-val">' . ($staffUserName === '' ? '<span class="muted">未設定</span>' : $staffUserName) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">保険会社名</span><span class="kv-val">' . ($insurerName === '' ? '<span class="muted">未設定</span>' : $insurerName) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">保険種類</span><span class="kv-val">' . ($insuranceCategory === '' ? '<span class="muted">未設定</span>' : $insuranceCategory) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">種目</span><span class="kv-val">' . ($productType === '' ? '<span class="muted">未設定</span>' : $productType) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">保険料</span><span class="kv-val">' . $premiumFormatted . '</span></div>';
+
+        if ($sourceType !== 'life') {
+            $kvHtml .= '<div class="kv"><span class="kv-key">証券番号</span><span class="kv-val">' . ($policyNo === '' ? '<span class="muted">未設定</span>' : $policyNo) . '</span></div>'
+                . '<div class="kv"><span class="kv-key">始期日</span><span class="kv-val">' . ($policyStartDate === '' ? '<span class="muted">未設定</span>' : $policyStartDate) . '</span></div>'
+                . '<div class="kv"><span class="kv-key">領収証番号</span><span class="kv-val">' . ($receiptNo === '' ? '<span class="muted">未設定</span>' : $receiptNo) . '</span></div>'
+                . '<div class="kv"><span class="kv-key">精算月</span><span class="kv-val">' . ($settlementMonth === '' ? '<span class="muted">未設定</span>' : $settlementMonth) . '</span></div>';
+            if ($installmentCount !== '') {
+                $kvHtml .= '<div class="kv"><span class="kv-key">分割回数</span><span class="kv-val">' . $installmentCount . '</span></div>';
+            }
+        }
+
+        if ($sourceType === 'life') {
+            $kvHtml .= '<div class="kv"><span class="kv-key">申込日</span><span class="kv-val">' . ($applicationDate === '' ? '<span class="muted">未設定</span>' : $applicationDate) . '</span></div>'
+                . '<div class="kv"><span class="kv-key">始期日</span><span class="kv-val">' . ($policyStartDate === '' ? '<span class="muted">未設定</span>' : $policyStartDate) . '</span></div>';
+        }
+
+        $kvHtml .= '<div class="kv"><span class="kv-key">備考</span><span class="kv-val">' . ($remark === '' ? '<span class="muted">未設定</span>' : $remark) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">関連契約</span><span class="kv-val">' . $linkedContractHtml . '</span></div>'
+            . '<div class="kv"><span class="kv-key">関連満期案件</span><span class="kv-val">' . $linkedRenewalHtml . '</span></div>';
+
+        // ─── Dialog: edit form ────────────────────────────────────
+        $dialogHtml = '<dialog id="sales-edit-dialog" class="modal-dialog modal-dialog-wide">'
+            . '<form method="dialog" class="modal-close-form"><button type="submit" class="modal-close" aria-label="閉じる">×</button></form>'
+            . '<form method="post" action="' . Layout::escape($updateUrl) . '" id="sales-detail-edit-form">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($updateCsrf) . '">'
             . '<input type="hidden" name="id" value="' . $id . '">'
             . '<input type="hidden" name="return_to" value="' . Layout::escape($detailUrl) . '">'
-            . '<div class="list-filter-grid modal-form-grid">'
-            . '<label class="list-filter-field"><span>実績計上日 <strong class="required-mark">*</strong></span><input type="date" name="performance_date" value="' . $performanceDate . '" required></label>'
-            . '<label class="list-filter-field"><span>実績区分 <strong class="required-mark">*</strong></span><select name="performance_type" required>' . $typeOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>業務区分</span><select name="source_type" data-role="source-type">' . $sourceOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>契約者名 <strong class="required-mark">*</strong></span><select name="customer_id" required>' . $customerOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>担当者</span><select name="staff_user_id">' . $staffOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>契約</span><select name="contract_id">' . $contractOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>満期案件</span><select name="renewal_case_id">' . $renewalOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>保険会社名</span><input type="text" name="insurer_name" data-contract-fill="insurer_name" value="' . $insurerName . '"></label>'
-            . '<label class="list-filter-field"><span>証券番号</span><input type="text" name="policy_no" data-contract-fill="policy_no" value="' . $policyNo . '"></label>'
-            . '<label class="list-filter-field"><span>始期日</span><input type="date" name="policy_start_date" data-contract-fill="policy_start_date" value="' . $policyStartDate . '"></label>'
-            . '<label class="list-filter-field" data-role="application-date-field"><span>申込日</span><input type="date" name="application_date" value="' . $applicationDate . '"></label>'
-            . '<label class="list-filter-field"><span>保険種類</span><input type="text" name="insurance_category" data-contract-fill="insurance_category" value="' . $insuranceCategory . '"></label>'
-            . '<label class="list-filter-field"><span>種目</span><input type="text" name="product_type" data-contract-fill="product_type" value="' . $productType . '"></label>'
-            . '<label class="list-filter-field"><span>保険料 <strong class="required-mark">*</strong></span><input type="number" min="0" step="1" name="premium_amount" value="' . $premiumAmount . '" required></label>'
-            . '<label class="list-filter-field"><span>精算月</span><input type="month" name="settlement_month" value="' . $settlementMonth . '"></label>'
-            . '<label class="list-filter-field"><span>分割回数</span><input type="number" min="1" max="255" step="1" name="installment_count" value="' . $installmentCount . '"></label>'
-            . '<label class="list-filter-field"><span>領収証番号</span><input type="text" name="receipt_no" value="' . $receiptNo . '"></label>'
-            . '<label class="list-filter-field modal-form-wide"><span>備考</span><textarea name="remark" rows="4" style="width:100%;">' . $remark . '</textarea></label>'
-            . '</div>'
-            . '<div class="actions">'
-            . '<button class="btn" type="submit">更新する</button>'
+            . '<h2 class="modal-title">実績を編集</h2>'
+            . '<div class="form-row"><label class="form-label">業務区分</label><select class="form-select" name="source_type" data-role="source-type">' . $sourceOptions . '</select></div>'
+            . '<div class="form-row"><label class="form-label">実績区分 <strong class="required-mark">*</strong></label><select class="form-select" name="performance_type" required>' . $typeOptions . '</select></div>'
+            . '<div class="form-row"><label class="form-label">実績計上日 <strong class="required-mark">*</strong></label><input class="form-input" type="date" name="performance_date" value="' . $performanceDate . '" required></div>'
+            . '<div class="form-row"><label class="form-label">契約者名 <strong class="required-mark">*</strong></label><select class="form-select" name="customer_id" required>' . $customerOptions . '</select></div>'
+            . '<div class="form-row"><label class="form-label">担当者</label><select class="form-select" name="staff_user_id">' . $staffOptions . '</select></div>'
+            . '<div class="form-row"><label class="form-label">契約</label><select class="form-select" name="contract_id">' . $contractOptions . '</select></div>'
+            . '<div class="form-row"><label class="form-label">満期案件</label><select class="form-select" name="renewal_case_id">' . $renewalOptions . '</select></div>'
+            . '<div class="form-row"><label class="form-label">保険会社名</label><input class="form-input" type="text" name="insurer_name" data-contract-fill="insurer_name" value="' . $insurerName . '"></div>'
+            . '<div class="form-row"><label class="form-label">証券番号</label><input class="form-input" type="text" name="policy_no" data-contract-fill="policy_no" value="' . $policyNo . '"></div>'
+            . '<div class="form-row"><label class="form-label">始期日</label><input class="form-input" type="date" name="policy_start_date" data-contract-fill="policy_start_date" value="' . $policyStartDate . '"></div>'
+            . '<div class="form-row" data-role="application-date-field"><label class="form-label">申込日</label><input class="form-input" type="date" name="application_date" value="' . $applicationDate . '"></div>'
+            . '<div class="form-row"><label class="form-label">保険種類</label><input class="form-input" type="text" name="insurance_category" data-contract-fill="insurance_category" value="' . $insuranceCategory . '"></div>'
+            . '<div class="form-row"><label class="form-label">種目</label><input class="form-input" type="text" name="product_type" data-contract-fill="product_type" value="' . $productType . '"></div>'
+            . '<div class="form-row"><label class="form-label">保険料 <strong class="required-mark">*</strong></label><input class="form-input" type="number" step="1" name="premium_amount" value="' . $premiumAmountRaw . '" required></div>'
+            . '<div class="form-row"><label class="form-label">精算月</label><input class="form-input" type="month" name="settlement_month" value="' . $settlementMonth . '"></div>'
+            . '<div class="form-row"><label class="form-label">分割回数</label><input class="form-input" type="number" min="1" max="255" step="1" name="installment_count" value="' . $installmentCount . '"></div>'
+            . '<div class="form-row"><label class="form-label">領収証番号</label><input class="form-input" type="text" name="receipt_no" value="' . $receiptNo . '"></div>'
+            . '<div class="form-row"><label class="form-label">備考</label><textarea class="form-input" name="remark" rows="4" style="width:100%;">' . $remark . '</textarea></div>'
+            . '<div class="dialog-actions">'
+            . '<button type="button" class="btn btn-secondary" onclick="document.getElementById(\'sales-edit-dialog\').close()">キャンセル</button>'
+            . '<button type="submit" class="btn btn-primary">保存する</button>'
             . '</div>'
             . '</form>'
-            . '<hr style="border:none;border-top:1px solid #d9e2ec;margin:16px 0;">'
-            . '<h3>削除</h3>'
-            . '<form method="post" action="' . Layout::escape($deleteUrl) . '" onsubmit="return confirm(\'この実績を削除します。よろしいですか？\');">'
+            . '</dialog>';
+
+        // ─── Hidden delete form ───────────────────────────────────
+        $deleteFormHtml = '<form id="sales-delete-form" method="post" action="' . Layout::escape($deleteUrl) . '" style="display:none;">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($deleteCsrf) . '">'
             . '<input type="hidden" name="id" value="' . $id . '">'
             . '<input type="hidden" name="return_to" value="' . Layout::escape($listUrl) . '">'
-            . '<button class="btn btn-danger" type="submit">削除する</button>'
-            . '</form>'
+            . '</form>';
+
+        // ─── JS ──────────────────────────────────────────────────
+        $js = '<script>'
+            . '(function(){'
+            // Dialog backdrop click to close
+            . 'const dlg=document.getElementById("sales-edit-dialog");'
+            . 'if(!dlg){return;}'
+            . 'dlg.addEventListener("click",function(e){const r=dlg.getBoundingClientRect();const inside=r.left<=e.clientX&&e.clientX<=r.right&&r.top<=e.clientY&&e.clientY<=r.bottom;if(!inside&&dlg.open){dlg.close();}});'
+            // Form and field references (inside dialog)
+            . 'const form=document.getElementById("sales-detail-edit-form");'
+            . 'if(!form){return;}'
+            . 'const customer=form.querySelector("select[name=\"customer_id\"]");'
+            . 'const contract=form.querySelector("select[name=\"contract_id\"]");'
+            . 'const renewal=form.querySelector("select[name=\"renewal_case_id\"]");'
+            . 'const source=form.querySelector("select[name=\"source_type\"]");'
+            . 'const appField=form.querySelector("[data-role=\"application-date-field\"]");'
+            . 'const fillTargets={'
+            . 'insurer_name:form.querySelector("input[name=\"insurer_name\"]"),'
+            . 'policy_no:form.querySelector("input[name=\"policy_no\"]"),'
+            . 'policy_start_date:form.querySelector("input[name=\"policy_start_date\"]"),'
+            . 'insurance_category:form.querySelector("input[name=\"insurance_category\"]"),'
+            . 'product_type:form.querySelector("input[name=\"product_type\"]")'
+            . '};'
+            // Helpers
+            . 'const toggleLifeField=()=>{if(!source||!appField){return;}appField.style.display=source.value==="life"?"":"none";};'
+            . 'const filterContracts=()=>{if(!customer||!contract){return;}const cid=customer.value;Array.from(contract.options).forEach((opt,idx)=>{if(idx===0){opt.hidden=false;return;}const owner=opt.getAttribute("data-customer-id")||"";opt.hidden=(cid!==""&&owner!==cid);});if(contract.selectedOptions[0]&&contract.selectedOptions[0].hidden){contract.value="";}};'
+            . 'const filterRenewals=()=>{if(!renewal){return;}const cid=customer?customer.value:"";const contractId=contract?contract.value:"";Array.from(renewal.options).forEach((opt,idx)=>{if(idx===0){opt.hidden=false;return;}const ownerContract=opt.getAttribute("data-contract-id")||"";const ownerCustomer=opt.getAttribute("data-customer-id")||"";let visible=true;if(contractId!==""){visible=ownerContract===contractId;}else if(cid!==""){visible=ownerCustomer===cid;}opt.hidden=!visible;});if(renewal.selectedOptions[0]&&renewal.selectedOptions[0].hidden){renewal.value="";}};'
+            . 'const autofillFromContract=()=>{if(!contract){return;}const selected=contract.selectedOptions[0];if(!selected){return;}const map={insurer_name:selected.getAttribute("data-insurer-name")||"",policy_no:selected.getAttribute("data-policy-no")||"",policy_start_date:selected.getAttribute("data-policy-start-date")||"",insurance_category:selected.getAttribute("data-insurance-category")||"",product_type:selected.getAttribute("data-product-type")||""};Object.keys(map).forEach((key)=>{const target=fillTargets[key];if(!target){return;}if((target.value||"").trim()!==""){return;}target.value=map[key];});};'
+            // Event listeners
+            . 'if(customer){customer.addEventListener("change",()=>{filterContracts();filterRenewals();});}'
+            . 'if(contract){contract.addEventListener("change",()=>{filterRenewals();autofillFromContract();});}'
+            . 'if(source){source.addEventListener("change",toggleLifeField);}'
+            // Open button: run state before showing modal
+            . 'const openBtn=document.getElementById("sales-edit-open-btn");'
+            . 'if(openBtn){openBtn.addEventListener("click",function(){toggleLifeField();filterContracts();filterRenewals();if(typeof dlg.showModal==="function"){dlg.showModal();}});}'
+            . '})();'
+            . '</script>';
+
+        $content = $errorHtml . $successHtml
+            . '<div class="page-header">'
+            . '<div><div class="page-title">' . Layout::escape($pageHeadTitle) . '</div></div>'
+            . '<div class="actions">'
+            . '<a class="btn btn-secondary" href="' . Layout::escape($listUrl) . '">一覧へ戻る</a>'
+            . '<button class="btn" id="sales-edit-open-btn" type="button">編集</button>'
+            . '<button class="btn btn-danger" type="button" onclick="document.getElementById(\'sales-delete-form\').submit()">削除する</button>'
             . '</div>'
             . '</div>'
-            . '<script>'
-            . '(function(){const form=document.getElementById("sales-detail-edit-form");if(!form){return;}const customer=form.querySelector("select[name=\"customer_id\"]");const contract=form.querySelector("select[name=\"contract_id\"]");const renewal=form.querySelector("select[name=\"renewal_case_id\"]");const source=form.querySelector("select[name=\"source_type\"]");const appField=form.querySelector("[data-role=\"application-date-field\"]");const fillTargets={insurer_name:form.querySelector("input[name=\"insurer_name\"]"),policy_no:form.querySelector("input[name=\"policy_no\"]"),policy_start_date:form.querySelector("input[name=\"policy_start_date\"]"),insurance_category:form.querySelector("input[name=\"insurance_category\"]"),product_type:form.querySelector("input[name=\"product_type\"]")};const toggleLifeField=()=>{if(!source||!appField){return;}appField.style.display=source.value==="life"?"":"none";};const filterContracts=()=>{if(!customer||!contract){return;}const cid=customer.value;Array.from(contract.options).forEach((opt,idx)=>{if(idx===0){opt.hidden=false;return;}const owner=opt.getAttribute("data-customer-id")||"";opt.hidden=(cid!==""&&owner!==cid);});if(contract.selectedOptions[0]&&contract.selectedOptions[0].hidden){contract.value="";}};const filterRenewals=()=>{if(!renewal){return;}const cid=customer?customer.value:"";const contractId=contract?contract.value:"";Array.from(renewal.options).forEach((opt,idx)=>{if(idx===0){opt.hidden=false;return;}const ownerContract=opt.getAttribute("data-contract-id")||"";const ownerCustomer=opt.getAttribute("data-customer-id")||"";let visible=true;if(contractId!==""){visible=ownerContract===contractId;}else if(cid!==""){visible=ownerCustomer===cid;}opt.hidden=!visible;});if(renewal.selectedOptions[0]&&renewal.selectedOptions[0].hidden){renewal.value="";}};const autofillFromContract=()=>{if(!contract){return;}const selected=contract.selectedOptions[0];if(!selected){return;}const map={insurer_name:selected.getAttribute("data-insurer-name")||"",policy_no:selected.getAttribute("data-policy-no")||"",policy_start_date:selected.getAttribute("data-policy-start-date")||"",insurance_category:selected.getAttribute("data-insurance-category")||"",product_type:selected.getAttribute("data-product-type")||""};Object.keys(map).forEach((key)=>{const target=fillTargets[key];if(!target){return;}if((target.value||"").trim()!==""){return;}target.value=map[key];});};if(customer){customer.addEventListener("change",()=>{filterContracts();filterRenewals();});}if(contract){contract.addEventListener("change",()=>{filterRenewals();autofillFromContract();});}if(source){source.addEventListener("change",toggleLifeField);}toggleLifeField();filterContracts();filterRenewals();})();'
-            . '</script>'
-            . '</div>';
+            . '<div class="card" style="max-width:520px;">'
+            . '<div class="detail-section-title">実績情報</div>'
+            . $kvHtml
+            . '</div>'
+            . $deleteFormHtml
+            . $dialogHtml
+            . $js;
 
         return Layout::render('実績詳細', $content, $layoutOptions);
     }

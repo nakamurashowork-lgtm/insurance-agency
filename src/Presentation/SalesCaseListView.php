@@ -221,15 +221,15 @@ final class SalesCaseListView
     {
         $label = SalesCaseRepository::ALLOWED_STATUSES[$status] ?? $status;
         $class = match ($status) {
-            'won'         => 'status-done',
-            'lost'        => 'status-inactive',
-            'open'        => 'status-open',
-            'negotiating' => 'status-progress',
-            'on_hold'     => 'status-waiting',
+            'won'         => 'badge-success',
+            'lost'        => 'badge-gray',
+            'open'        => 'badge-danger',
+            'negotiating' => 'badge-info',
+            'on_hold'     => 'badge-gray',
             default       => '',
         };
 
-        return '<span class="status-badge ' . $class . '">' . Layout::escape($label) . '</span>';
+        return '<span class="badge ' . $class . '">' . Layout::escape($label) . '</span>';
     }
 
     /**

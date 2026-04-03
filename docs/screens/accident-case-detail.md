@@ -79,21 +79,31 @@ SCR-ACCIDENT-CASE-DETAIL
 
 ### 5-3. 案件基本情報エリア
 
+| 項目 | 内容 | 備考 |
+| --- | --- | --- |
+| 顧客 | customer_name | リンクで顧客詳細へ遷移 |
+| 関連契約 | policy_no | リンクで満期詳細へ遷移（renewal_case が存在する場合のみ） |
+| 受付日 | accepted_date | |
+| 事故発生日 | accident_date | |
+| 保険種類 | insurance_category | |
+| 種目 | product_type | |
+| 事故種別 | accident_type | |
+| 事故場所 | accident_location | |
+| 担当者 | assigned_user_id → ユーザー名 | |
+| 保険会社受付番号 | insurer_claim_no | |
+| 解決日 | resolved_date | |
+| 備考 | remark | |
+
+### 5-4. 対応状況更新エリア（同画面内フォーム）
+
 | 項目 | 内容 |
 | --- | --- |
-| 事故日 | accident_date |
-| 顧客名 | customer_name |
-| 種目 | product_type |
+| 状態 | 受付 / 対応開始 / 対応中 / 保留 / 解決 / クローズ |
+| 優先度 | 低 / 通常 / 高 / 急 |
 | 担当者 | テナント所属ユーザーから選択 |
-| 備考 | 必要に応じて補足情報 |
-
-### 5-4. 対応状況エリア
-
-| 項目 | 内容 |
-| --- | --- |
-| ステータス | 受付、対応中、解決、保留 など |
-| 最終更新日時 | 最後に更新された日時 |
-| 最終更新者 | 最後に更新したユーザー |
+| 解決日 | 日付入力 |
+| 保険会社受付番号 | テキスト入力 |
+| 備考 | テキストエリア |
 
 ### 5-5. コメントエリア
 
@@ -177,7 +187,8 @@ SCR-ACCIDENT-CASE-DETAIL
 | 遷移先 | 関係 |
 | --- | --- |
 | accident-case-list.md | 一覧へ戻るための遷移先 |
-| customer-detail.md | 顧客文脈を確認するために必要時遷移 |
+| customer-detail.md | 顧客名リンクから顧客詳細へ遷移 |
+| renewal-case-detail.md | 関連契約（policy_no）リンクから満期詳細へ遷移 |
 
 ---
 

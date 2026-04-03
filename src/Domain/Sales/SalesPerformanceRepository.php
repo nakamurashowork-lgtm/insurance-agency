@@ -279,6 +279,58 @@ final class SalesPerformanceRepository
     }
 
     /**
+     * 指定年月の集計指標を返す。
+     *
+     * @return array{non_life_month: int, non_life_ytd: int, general_month: int, total_count_month: int}
+     */
+    public function fetchMonthlyMetrics(int $year, int $month): array
+    {
+        // 会計年度開始（4月始まり）
+        $fyStartYear = $month >= 4 ? $year : $year - 1;
+        $fyStart     = sprintf('%04d-04-01', $fyStartYear);
+        $monthStart  = sprintf('%04d-%02d-01', $year, $month);
+        $monthEnd    = date('Y-m-t', (int) mktime(0, 0, 0, $month, 1, $year));
+
+        $stmt = $this->pdo->prepare(
+            "SELECT
+                SUM(CASE WHEN source_type = 'non_life'
+                         AND performance_date BETWEEN :ms1 AND :me1
+                    THEN premium_amount ELSE 0 END) AS non_life_month,
+                SUM(CASE WHEN source_type = 'non_life'
+                         AND performance_date >= :fy AND performance_date <= :me2
+                    THEN premium_amount ELSE 0 END) AS non_life_ytd,
+                SUM(CASE WHEN source_type = 'non_life'
+                         AND performance_date BETWEEN :ms2 AND :me3
+                         AND (insurance_category IS NULL OR insurance_category <> '自動車')
+                    THEN premium_amount ELSE 0 END) AS general_month,
+                COUNT(CASE WHEN performance_date BETWEEN :ms3 AND :me4 THEN 1 END) AS total_count_month
+             FROM t_sales_performance
+             WHERE is_deleted = 0"
+        );
+        $stmt->execute([
+            'ms1' => $monthStart,
+            'me1' => $monthEnd,
+            'fy'  => $fyStart,
+            'me2' => $monthEnd,
+            'ms2' => $monthStart,
+            'me3' => $monthEnd,
+            'ms3' => $monthStart,
+            'me4' => $monthEnd,
+        ]);
+        $row = $stmt->fetch();
+        if (!is_array($row)) {
+            return ['non_life_month' => 0, 'non_life_ytd' => 0, 'general_month' => 0, 'total_count_month' => 0];
+        }
+
+        return [
+            'non_life_month'    => (int) ($row['non_life_month'] ?? 0),
+            'non_life_ytd'      => (int) ($row['non_life_ytd'] ?? 0),
+            'general_month'     => (int) ($row['general_month'] ?? 0),
+            'total_count_month' => (int) ($row['total_count_month'] ?? 0),
+        ];
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public function fetchCustomers(int $limit = 500): array

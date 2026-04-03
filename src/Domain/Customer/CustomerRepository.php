@@ -10,7 +10,7 @@ final class CustomerRepository
     /**
      * @var array<int, string>
      */
-    public const SORTABLE_FIELDS = ['customer_name', 'phone', 'assigned_user_id', 'contract_count'];
+    public const SORTABLE_FIELDS = ['customer_name', 'phone', 'assigned_user_id', 'contract_count', 'updated_at'];
 
     public function __construct(private PDO $pdo)
     {
@@ -49,6 +49,7 @@ final class CustomerRepository
         $sql =
             'SELECT mc.id,
                     mc.customer_name,
+                    mc.customer_name_kana,
                     mc.phone,
                     mc.email,
                     mc.address1,
@@ -97,8 +98,15 @@ final class CustomerRepository
 
         $customerName = trim((string) ($criteria['customer_name'] ?? ''));
         if ($customerName !== '') {
-            $sql .= ' AND mc.customer_name LIKE :customer_name';
+            $sql .= ' AND (mc.customer_name LIKE :customer_name OR mc.customer_name_kana LIKE :customer_name_kana)';
             $params['customer_name'] = '%' . $customerName . '%';
+            $params['customer_name_kana'] = '%' . $customerName . '%';
+        }
+
+        $assignedUserId = (int) ($criteria['assigned_user_id'] ?? 0);
+        if ($assignedUserId > 0) {
+            $sql .= ' AND mc.assigned_user_id = :assigned_user_id';
+            $params['assigned_user_id'] = $assignedUserId;
         }
 
         $phone = trim((string) ($criteria['phone'] ?? ''));
@@ -141,6 +149,7 @@ final class CustomerRepository
             'phone' => 'mc.phone ' . $directionSql . ', mc.id ASC',
             'assigned_user_id' => 'mc.assigned_user_id ' . $directionSql . ', mc.id ASC',
             'contract_count' => 'COALESCE(cnt.contract_count, 0) ' . $directionSql . ', mc.id ASC',
+            'updated_at' => 'mc.updated_at ' . $directionSql . ', mc.id DESC',
             default => 'mc.updated_at DESC, mc.id DESC',
         };
     }
@@ -160,6 +169,7 @@ final class CustomerRepository
                     postal_code,
                     address1,
                     address2,
+                    assigned_user_id,
                     status,
                     note,
                     updated_at
@@ -288,6 +298,43 @@ final class CustomerRepository
             $this->pdo->rollBack();
             throw $e;
         }
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    public function update(int $customerId, array $input, int $userId): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE m_customer
+             SET customer_type      = :customer_type,
+                 customer_name      = :customer_name,
+                 customer_name_kana = :customer_name_kana,
+                 phone              = :phone,
+                 email              = :email,
+                 postal_code        = :postal_code,
+                 address1           = :address1,
+                 address2           = :address2,
+                 assigned_user_id   = :assigned_user_id,
+                 note               = :note,
+                 updated_by         = :updated_by
+             WHERE id = :id
+               AND is_deleted = 0'
+        );
+        $stmt->execute([
+            'customer_type'      => (string) ($input['customer_type'] ?? ''),
+            'customer_name'      => (string) ($input['customer_name'] ?? ''),
+            'customer_name_kana' => $input['customer_name_kana'] ?? null,
+            'phone'              => $input['phone'] ?? null,
+            'email'              => $input['email'] ?? null,
+            'postal_code'        => $input['postal_code'] ?? null,
+            'address1'           => $input['address1'] ?? null,
+            'address2'           => $input['address2'] ?? null,
+            'assigned_user_id'   => $input['assigned_user_id'] ?? null,
+            'note'               => $input['note'] ?? null,
+            'updated_by'         => $userId,
+            'id'                 => $customerId,
+        ]);
     }
 
     /**

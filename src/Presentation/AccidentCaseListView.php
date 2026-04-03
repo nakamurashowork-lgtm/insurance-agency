@@ -25,6 +25,7 @@ final class AccidentCaseListView
         ?array $createDraft,
         string $openModal,
         array $customerOptions,
+        array $staffUsers,
         array $currentUser,
         ?string $errorMessage,
         ?string $flashError,
@@ -51,6 +52,16 @@ final class AccidentCaseListView
         $policyNo = Layout::escape((string) ($criteria['policy_no'] ?? ''));
         $productType = Layout::escape((string) ($criteria['product_type'] ?? ''));
         $status = (string) ($criteria['status'] ?? '');
+        $filterUserId = (int) ($criteria['assigned_user_id'] ?? 0);
+
+        $userMap = [];
+        foreach ($staffUsers as $u) {
+            $uid = (int) ($u['id'] ?? 0);
+            if ($uid > 0) {
+                $userMap[$uid] = (string) ($u['name'] ?? '');
+            }
+        }
+
         $perPage = (int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE);
         $sort = (string) ($listState['sort'] ?? '');
         $direction = (string) ($listState['direction'] ?? 'asc');
@@ -78,20 +89,21 @@ final class AccidentCaseListView
         foreach ($rows as $row) {
             $id = (int) ($row['id'] ?? 0);
             $detailUrl = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, array_merge(['id' => (string) $id], $listQuery)));
+            $assignedId = (int) ($row['assigned_user_id'] ?? 0);
+            $assignedName = $assignedId > 0 ? ($userMap[$assignedId] ?? '-') : '-';
+            $reminderHtml = self::formatReminderDate((string) ($row['next_reminder_date'] ?? ''));
             $rowsHtml .= '<tr>'
-                . '<td data-label="事故管理番号"><span class="truncate" title="' . Layout::escape((string) ($row['accident_no'] ?? '')) . '">' . Layout::escape((string) ($row['accident_no'] ?? '')) . '</span></td>'
-                . '<td data-label="契約者名"><strong class="truncate list-row-primary" title="' . Layout::escape((string) ($row['customer_name'] ?? '')) . '">' . Layout::escape((string) ($row['customer_name'] ?? '')) . '</strong></td>'
-                . '<td data-label="証券番号"><span class="truncate" title="' . Layout::escape((string) ($row['policy_no'] ?? '')) . '">' . Layout::escape((string) ($row['policy_no'] ?? '')) . '</span></td>'
+                . '<td data-label="契約者名"><a class="text-link" href="' . $detailUrl . '"><strong class="truncate list-row-primary" title="' . Layout::escape((string) ($row['customer_name'] ?? '')) . '">' . Layout::escape((string) ($row['customer_name'] ?? '')) . '</strong></a></td>'
+                . '<td data-label="事故日">' . Layout::escape((string) ($row['accident_date'] ?? '')) . '</td>'
                 . '<td data-label="種目"><span class="truncate" title="' . Layout::escape((string) ($row['product_type'] ?? '')) . '">' . Layout::escape((string) ($row['product_type'] ?? '')) . '</span></td>'
-                . '<td data-label="事故受付日">' . Layout::escape((string) ($row['accepted_date'] ?? '')) . '</td>'
+                . '<td data-label="担当">' . Layout::escape($assignedName) . '</td>'
                 . '<td data-label="状態">' . self::renderStatusBadge((string) ($row['status'] ?? '')) . '</td>'
                 . '<td data-label="優先度">' . self::renderPriorityBadge((string) ($row['priority'] ?? '')) . '</td>'
-                . '<td data-label="完了日">' . Layout::escape((string) ($row['resolved_date'] ?? '')) . '</td>'
-                . '<td data-label="操作" class="cell-action"><a class="text-link" href="' . $detailUrl . '">詳細を開く</a></td>'
+                . '<td data-label="次回リマインド">' . $reminderHtml . '</td>'
                 . '</tr>';
         }
         if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="9">該当する事故案件はありません。</td></tr>';
+            $rowsHtml = '<tr><td colspan="7">該当する事故案件はありません。</td></tr>';
         }
 
         $sortSummary = self::renderSortSummary($sort, $direction);
@@ -115,12 +127,10 @@ final class AccidentCaseListView
             . '<input type="hidden" name="filter_open" value="1">'
             . self::renderHiddenInputs(self::buildListQueryParams([], $listState, false, true))
             . '<div class="list-filter-grid">'
-            . '<label class="list-filter-field"><span>事故受付日From</span><input type="date" name="accepted_date_from" value="' . $acceptedDateFrom . '"></label>'
-            . '<label class="list-filter-field"><span>事故受付日To</span><input type="date" name="accepted_date_to" value="' . $acceptedDateTo . '"></label>'
             . '<label class="list-filter-field"><span>契約者名</span><input type="text" name="customer_name" value="' . $customerName . '"></label>'
-            . '<label class="list-filter-field"><span>証券番号</span><input type="text" name="policy_no" value="' . $policyNo . '"></label>'
             . '<label class="list-filter-field"><span>種目</span><input type="text" name="product_type" value="' . $productType . '"></label>'
             . '<label class="list-filter-field"><span>状態</span><select name="status">' . $statusHtml . '</select></label>'
+            . '<label class="list-filter-field"><span>担当者</span>' . self::renderUserFilterSelect($staffUsers, $filterUserId) . '</label>'
             . '</div>'
             . '<div class="actions list-filter-actions">'
             . '<button class="btn" type="submit">検索</button> '
@@ -133,26 +143,22 @@ final class AccidentCaseListView
             . '<div class="table-wrap">'
             . '<table class="table-fixed table-card list-table list-table-accident">'
             . '<colgroup>'
-            . '<col class="list-col-policy">'
             . '<col class="list-col-customer">'
-            . '<col class="list-col-policy">'
-            . '<col class="list-col-product">'
             . '<col class="list-col-date">'
+            . '<col class="list-col-product">'
+            . '<col style="width:80px;">'
             . '<col class="list-col-status">'
             . '<col class="list-col-priority">'
-            . '<col class="list-col-date">'
-            . '<col class="list-col-action">'
+            . '<col style="width:100px;">'
             . '</colgroup>'
             . '<thead><tr>'
-            . '<th>' . self::renderSortLink('事故管理番号', 'accident_no', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>' . self::renderSortLink('契約者名', 'customer_name', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('証券番号', 'policy_no', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>事故日</th>'
             . '<th>種目</th>'
-            . '<th>' . self::renderSortLink('事故受付日', 'accepted_date', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>担当</th>'
             . '<th>' . self::renderSortLink('状態', 'status', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>' . self::renderSortLink('優先度', 'priority', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('完了日', 'resolved_date', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th class="align-right">操作</th>'
+            . '<th>次回リマインド</th>'
             . '</tr></thead>'
             . '<tbody>' . $rowsHtml . '</tbody>'
             . '</table>'
@@ -435,13 +441,13 @@ final class AccidentCaseListView
             default => '未設定',
         };
         $class = match ($status) {
-            'resolved', 'closed' => 'status-done',
-            'in_progress', 'linked' => 'status-progress',
-            'waiting_docs' => 'status-open',
-            default => 'status-inactive',
+            'resolved', 'closed' => 'badge-success',
+            'in_progress', 'linked' => 'badge-info',
+            'waiting_docs' => 'badge-danger',
+            default => 'badge-gray',
         };
 
-        return '<span class="status-badge ' . $class . '">' . Layout::escape($label) . '</span>';
+        return '<span class="badge ' . $class . '">' . Layout::escape($label) . '</span>';
     }
 
     private static function renderPriorityBadge(string $priority): string
@@ -462,6 +468,40 @@ final class AccidentCaseListView
         return '<span class="priority-badge ' . $class . '">' . Layout::escape($label) . '</span>';
     }
 
+    /**
+     * @param array<int, array{id: int, name: string}> $staffUsers
+     */
+    private static function renderUserFilterSelect(array $staffUsers, int $currentUserId): string
+    {
+        $html = '<select name="assigned_user_id"><option value="">全担当者</option>';
+        foreach ($staffUsers as $u) {
+            $uid = (int) ($u['id'] ?? 0);
+            $uname = Layout::escape((string) ($u['name'] ?? ''));
+            $selected = $currentUserId === $uid ? ' selected' : '';
+            $html .= '<option value="' . $uid . '"' . $selected . '>' . $uname . '</option>';
+        }
+        $html .= '</select>';
+        return $html;
+    }
+
+    private static function formatReminderDate(string $date): string
+    {
+        if ($date === '') {
+            return '<span class="muted">—</span>';
+        }
+
+        $ts = strtotime($date);
+        if ($ts === false) {
+            return '<span class="muted">—</span>';
+        }
+
+        $weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+        $w = (int) date('w', $ts);
+        $md = (int) date('n', $ts) . '/' . (int) date('j', $ts);
+
+        return Layout::escape($md . '（' . $weekdays[$w] . '）');
+    }
+
     private static function renderSortSummary(string $sort, string $direction): string
     {
         if ($sort === '') {
@@ -471,11 +511,8 @@ final class AccidentCaseListView
         $label = match ($sort) {
             'accident_no' => '事故管理番号',
             'customer_name' => '契約者名',
-            'policy_no' => '証券番号',
-            'accepted_date' => '事故受付日',
             'status' => '状態',
             'priority' => '優先度',
-            'resolved_date' => '完了日',
             default => '事故受付日',
         };
 

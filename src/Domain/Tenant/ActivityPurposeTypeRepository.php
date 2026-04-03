@@ -47,53 +47,37 @@ final class ActivityPurposeTypeRepository
 
     /**
      * m_activity_purpose_type には created_by / updated_by 列が存在しない。
+     * コードは呼び出し元で自動生成する。
      */
-    public function create(string $code, string $label, int $displayOrder): void
+    public function create(string $code, string $label): void
     {
         $stmt = $this->pdo->prepare(
             'INSERT INTO m_activity_purpose_type (code, label, display_order, is_active)
-             VALUES (:code, :label, :display_order, 1)'
+             VALUES (:code, :label, 0, 1)'
         );
         $stmt->bindValue(':code', $code);
         $stmt->bindValue(':label', $label);
-        $stmt->bindValue(':display_order', $displayOrder, PDO::PARAM_INT);
         $stmt->execute();
     }
 
-    public function update(string $code, string $label, int $displayOrder): int
+    public function update(string $code, string $label): int
     {
         $stmt = $this->pdo->prepare(
             'UPDATE m_activity_purpose_type
-             SET label = :label, display_order = :display_order
+             SET label = :label
              WHERE code = :code'
         );
         $stmt->bindValue(':label', $label);
-        $stmt->bindValue(':display_order', $displayOrder, PDO::PARAM_INT);
         $stmt->bindValue(':code', $code);
         $stmt->execute();
 
         return $stmt->rowCount();
     }
 
-    public function deactivate(string $code): int
+    public function delete(string $code): int
     {
         $stmt = $this->pdo->prepare(
-            'UPDATE m_activity_purpose_type
-             SET is_active = 0
-             WHERE code = :code AND is_active = 1'
-        );
-        $stmt->bindValue(':code', $code);
-        $stmt->execute();
-
-        return $stmt->rowCount();
-    }
-
-    public function activate(string $code): int
-    {
-        $stmt = $this->pdo->prepare(
-            'UPDATE m_activity_purpose_type
-             SET is_active = 1
-             WHERE code = :code AND is_active = 0'
+            'DELETE FROM m_activity_purpose_type WHERE code = :code'
         );
         $stmt->bindValue(':code', $code);
         $stmt->execute();

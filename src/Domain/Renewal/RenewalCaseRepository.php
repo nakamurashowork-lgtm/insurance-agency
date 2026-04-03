@@ -10,7 +10,7 @@ final class RenewalCaseRepository
     /**
      * @var array<int, string>
      */
-    public const SORTABLE_FIELDS = ['customer_name', 'policy_no', 'maturity_date', 'case_status', 'next_action_date'];
+    public const SORTABLE_FIELDS = ['customer_name', 'policy_no', 'maturity_date', 'case_status', 'next_action_date', 'product_type', 'early_renewal_deadline'];
 
     public function __construct(private PDO $pdo)
     {
@@ -54,8 +54,10 @@ final class RenewalCaseRepository
                     c.insurer_name,
                     c.product_type,
                     rc.maturity_date,
+                    rc.early_renewal_deadline,
                     rc.case_status,
                     rc.next_action_date,
+                    rc.assigned_user_id,
                     rc.updated_at'
             . $query['sql']
             . ' ORDER BY ' . $this->buildOrderBy($sort, $direction)
@@ -86,11 +88,14 @@ final class RenewalCaseRepository
             'SELECT rc.id AS renewal_case_id,
                     rc.contract_id,
                     rc.maturity_date,
+                    rc.early_renewal_deadline,
                     rc.case_status,
                     rc.next_action_date,
                     rc.renewal_result,
                     rc.lost_reason,
                     rc.remark,
+                    rc.office_user_id,
+                    rc.completed_date,
                     c.policy_no,
                     c.insurer_name,
                     c.product_type,
@@ -205,23 +210,32 @@ final class RenewalCaseRepository
                  SET case_status = :case_status,
                      next_action_date = :next_action_date,
                      renewal_result = :renewal_result,
+                     renewal_method = :renewal_method,
+                     procedure_method = :procedure_method,
                      lost_reason = :lost_reason,
                      remark = :remark,
+                     completed_date = :completed_date,
                      updated_by = :updated_by
                  WHERE id = :renewal_case_id
                    AND is_deleted = 0'
             );
 
             $nextActionDate = trim((string) ($input['next_action_date'] ?? ''));
-            $renewalResult = trim((string) ($input['renewal_result'] ?? ''));
-            $lostReason = trim((string) ($input['lost_reason'] ?? ''));
-            $remark = trim((string) ($input['remark'] ?? ''));
+            $renewalResult  = trim((string) ($input['renewal_result'] ?? ''));
+            $renewalMethod  = trim((string) ($input['renewal_method'] ?? ''));
+            $procedureMethod = trim((string) ($input['procedure_method'] ?? ''));
+            $lostReason     = trim((string) ($input['lost_reason'] ?? ''));
+            $remark         = trim((string) ($input['remark'] ?? ''));
+            $completedDate  = trim((string) ($input['completed_date'] ?? ''));
 
-            $stmt->bindValue(':case_status', (string) ($input['case_status'] ?? 'open'));
+            $stmt->bindValue(':case_status', (string) ($input['case_status'] ?? 'not_started'));
             $stmt->bindValue(':next_action_date', $nextActionDate !== '' ? $nextActionDate : null);
             $stmt->bindValue(':renewal_result', $renewalResult !== '' ? $renewalResult : null);
+            $stmt->bindValue(':renewal_method', $renewalMethod !== '' ? $renewalMethod : null);
+            $stmt->bindValue(':procedure_method', $procedureMethod !== '' ? $procedureMethod : null);
             $stmt->bindValue(':lost_reason', $lostReason !== '' ? $lostReason : null);
             $stmt->bindValue(':remark', $remark !== '' ? $remark : null);
+            $stmt->bindValue(':completed_date', $completedDate !== '' ? $completedDate : null);
             $stmt->bindValue(':updated_by', $updatedBy, PDO::PARAM_INT);
             $stmt->bindValue(':renewal_case_id', $renewalCaseId, PDO::PARAM_INT);
             $stmt->execute();
@@ -306,7 +320,7 @@ final class RenewalCaseRepository
     private function findRenewalCaseForAudit(int $renewalCaseId): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT case_status, next_action_date, renewal_result, lost_reason, remark
+            'SELECT case_status, next_action_date, renewal_result, renewal_method, procedure_method, lost_reason, remark, completed_date
              FROM t_renewal_case
              WHERE id = :renewal_case_id
                AND is_deleted = 0
@@ -320,11 +334,14 @@ final class RenewalCaseRepository
         }
 
         return [
-            'case_status' => $this->normalizeAuditValue($row['case_status'] ?? null),
+            'case_status'     => $this->normalizeAuditValue($row['case_status'] ?? null),
             'next_action_date' => $this->normalizeAuditValue($row['next_action_date'] ?? null),
-            'renewal_result' => $this->normalizeAuditValue($row['renewal_result'] ?? null),
-            'lost_reason' => $this->normalizeAuditValue($row['lost_reason'] ?? null),
-            'remark' => $this->normalizeAuditValue($row['remark'] ?? null),
+            'renewal_result'  => $this->normalizeAuditValue($row['renewal_result'] ?? null),
+            'renewal_method'  => $this->normalizeAuditValue($row['renewal_method'] ?? null),
+            'procedure_method' => $this->normalizeAuditValue($row['procedure_method'] ?? null),
+            'lost_reason'     => $this->normalizeAuditValue($row['lost_reason'] ?? null),
+            'remark'          => $this->normalizeAuditValue($row['remark'] ?? null),
+            'completed_date'  => $this->normalizeAuditValue($row['completed_date'] ?? null),
         ];
     }
 
@@ -346,11 +363,14 @@ final class RenewalCaseRepository
     private function buildAuditDetails(array $before, array $after): array
     {
         $fields = [
-            'case_status' => ['label' => '対応ステータス', 'value_type' => 'STRING'],
+            'case_status'     => ['label' => '対応ステータス', 'value_type' => 'STRING'],
             'next_action_date' => ['label' => '次回対応予定日', 'value_type' => 'DATE'],
-            'renewal_result' => ['label' => '更改結果', 'value_type' => 'STRING'],
-            'lost_reason' => ['label' => '失注理由', 'value_type' => 'STRING'],
-            'remark' => ['label' => '備考', 'value_type' => 'STRING'],
+            'renewal_result'  => ['label' => '更改結果', 'value_type' => 'STRING'],
+            'renewal_method'  => ['label' => '更改方法', 'value_type' => 'STRING'],
+            'procedure_method' => ['label' => '手続方法', 'value_type' => 'STRING'],
+            'lost_reason'     => ['label' => '失注理由', 'value_type' => 'STRING'],
+            'remark'          => ['label' => '備考', 'value_type' => 'STRING'],
+            'completed_date'  => ['label' => '完了日', 'value_type' => 'DATE'],
         ];
 
         $details = [];
@@ -495,16 +515,24 @@ final class RenewalCaseRepository
             $params['case_status'] = $status;
         }
 
-        $maturityDateFrom = trim((string) ($criteria['maturity_date_from'] ?? ''));
-        if ($maturityDateFrom !== '') {
-            $sql .= ' AND rc.maturity_date >= :maturity_date_from';
-            $params['maturity_date_from'] = $maturityDateFrom;
+        $maturityWindow = trim((string) ($criteria['maturity_window'] ?? '30'));
+        if (in_array($maturityWindow, ['30', '60', '90'], true)) {
+            // 値は in_array で検証済みのため安全に整数として埋め込む
+            $days = (int) $maturityWindow;
+            $sql .= ' AND rc.maturity_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL ' . $days . ' DAY)';
+        }
+        // 'all' の場合は絞り込みなし
+
+        $assignedUserId = trim((string) ($criteria['assigned_user_id'] ?? ''));
+        if ($assignedUserId !== '' && ctype_digit($assignedUserId)) {
+            $sql .= ' AND rc.assigned_user_id = :assigned_user_id';
+            $params['assigned_user_id'] = $assignedUserId;
         }
 
-        $maturityDateTo = trim((string) ($criteria['maturity_date_to'] ?? ''));
-        if ($maturityDateTo !== '') {
-            $sql .= ' AND rc.maturity_date <= :maturity_date_to';
-            $params['maturity_date_to'] = $maturityDateTo;
+        $productType = trim((string) ($criteria['product_type'] ?? ''));
+        if ($productType !== '') {
+            $sql .= ' AND c.product_type LIKE :product_type';
+            $params['product_type'] = '%' . $productType . '%';
         }
 
         return ['sql' => $sql, 'params' => $params];
@@ -533,19 +561,21 @@ final class RenewalCaseRepository
         $nextActionNulls = 'CASE WHEN rc.next_action_date IS NULL THEN 1 ELSE 0 END';
 
         return match ($sort) {
-            'customer_name' => 'mc.customer_name ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
-            'policy_no' => 'c.policy_no ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
-            'maturity_date' => 'rc.maturity_date ' . $directionSql . ', rc.id ASC',
-            'case_status' => $statusPriority . ' ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
-            'next_action_date' => $nextActionNulls . ' ASC, rc.next_action_date ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
+            'customer_name'         => 'mc.customer_name ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
+            'policy_no'             => 'c.policy_no ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
+            'maturity_date'         => 'rc.maturity_date ' . $directionSql . ', rc.id ASC',
+            'case_status'           => $statusPriority . ' ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
+            'next_action_date'      => $nextActionNulls . ' ASC, rc.next_action_date ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
+            'product_type'          => 'COALESCE(c.product_type,"") ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
+            'early_renewal_deadline' => 'CASE WHEN rc.early_renewal_deadline IS NULL THEN 1 ELSE 0 END ASC, rc.early_renewal_deadline ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
             default => $this->defaultOrderBy(),
         };
     }
 
     private function defaultOrderBy(): string
     {
-        $completedPriority = 'CASE WHEN rc.case_status = "renewed" THEN 1 ELSE 0 END';
-        $overduePriority = 'CASE WHEN rc.case_status <> "renewed" AND rc.next_action_date IS NOT NULL AND rc.next_action_date < CURDATE() THEN 0 ELSE 1 END';
+        $completedPriority = 'CASE WHEN rc.case_status = "completed" THEN 1 ELSE 0 END';
+        $overduePriority = 'CASE WHEN rc.case_status <> "completed" AND rc.next_action_date IS NOT NULL AND rc.next_action_date < CURDATE() THEN 0 ELSE 1 END';
         $nextActionNulls = 'CASE WHEN rc.next_action_date IS NULL THEN 1 ELSE 0 END';
 
         return $completedPriority . ' ASC, '
@@ -557,16 +587,56 @@ final class RenewalCaseRepository
             . 'rc.id ASC';
     }
 
+    /**
+     * 全件のステータス別件数を返す（フィルタ非依存）。
+     *
+     * @return array<string, int>
+     */
+    public function getStatusCounts(): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT case_status, COUNT(*) AS cnt
+             FROM t_renewal_case
+             WHERE is_deleted = 0
+             GROUP BY case_status'
+        );
+        $stmt->execute();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $counts = [];
+        if (is_array($rows)) {
+            foreach ($rows as $row) {
+                if (is_array($row)) {
+                    $counts[(string) ($row['case_status'] ?? '')] = (int) ($row['cnt'] ?? 0);
+                }
+            }
+        }
+        return $counts;
+    }
+
+    public function softDelete(int $renewalCaseId, int $updatedBy): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE t_renewal_case
+             SET is_deleted = 1, updated_by = :updated_by
+             WHERE id = :id
+               AND is_deleted = 0'
+        );
+        $stmt->bindValue(':updated_by', $updatedBy, PDO::PARAM_INT);
+        $stmt->bindValue(':id', $renewalCaseId, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->rowCount() > 0;
+    }
+
     private function statusPriorityExpression(): string
     {
         return 'CASE rc.case_status '
-            . 'WHEN "open" THEN 1 '
-            . 'WHEN "contacted" THEN 2 '
-            . 'WHEN "quoted" THEN 3 '
-            . 'WHEN "waiting" THEN 4 '
-            . 'WHEN "lost" THEN 5 '
-            . 'WHEN "closed" THEN 6 '
-            . 'WHEN "renewed" THEN 7 '
+            . 'WHEN "not_started" THEN 1 '
+            . 'WHEN "sj_requested" THEN 2 '
+            . 'WHEN "doc_prepared" THEN 3 '
+            . 'WHEN "waiting_return" THEN 4 '
+            . 'WHEN "quote_sent" THEN 5 '
+            . 'WHEN "waiting_payment" THEN 6 '
+            . 'WHEN "completed" THEN 7 '
             . 'ELSE 8 END';
     }
 }

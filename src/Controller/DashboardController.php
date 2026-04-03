@@ -36,9 +36,11 @@ final class DashboardController
             $showAdminHelpers,
             $flashError,
             $this->config->routeUrl('renewal/list'),
+            $this->config->routeUrl('renewal/detail'),
             $this->config->routeUrl('customer/list'),
             $this->config->routeUrl('sales/list'),
             $this->config->routeUrl('accident/list'),
+            $this->config->routeUrl('accident/detail'),
             $this->config->routeUrl('tenant/settings'),
             array_merge(
                 ControllerLayoutHelper::build($this->guard, $this->config, 'dashboard'),
@@ -49,22 +51,31 @@ final class DashboardController
 
     /**
      * @param array<string, mixed> $auth
-     * @return array<string, array<string, int>|int|null>
+     * @return array<string, mixed>
      */
     private function loadDashboardSummary(array $auth): array
     {
         $summary = [
-            'renewal' => null,
-            'accident' => null,
+            'renewal'              => null,
+            'accident'             => null,
             'salesMonthlyInputCount' => null,
+            'renewalRows'          => [],
+            'accidentRows'         => [],
+            'activityRows'         => [],
         ];
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
             $repository = new DashboardRepository($pdo);
-            $summary['renewal'] = $repository->getRenewalSummary();
-            $summary['accident'] = $repository->getAccidentSummary();
+            $summary['renewal']               = $repository->getRenewalSummary();
+            $summary['accident']              = $repository->getAccidentSummary();
             $summary['salesMonthlyInputCount'] = $repository->getSalesMonthlyInputCount(date('Y-m'));
+            $summary['renewalRows']           = $repository->getRenewalUpcomingRows(5);
+            $summary['accidentRows']          = $repository->getAccidentOpenRows(5);
+            $userId = (int) ($auth['user_id'] ?? 0);
+            if ($userId > 0) {
+                $summary['activityRows'] = $repository->getTodayActivityRows($userId, date('Y-m-d'), 10);
+            }
         } catch (Throwable) {
             // Home should remain available even when summary retrieval fails.
         }

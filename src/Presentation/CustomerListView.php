@@ -51,6 +51,7 @@ final class CustomerListView
         $customerName = Layout::escape((string) ($criteria['customer_name'] ?? ''));
         $phone = Layout::escape((string) ($criteria['phone'] ?? ''));
         $email = Layout::escape((string) ($criteria['email'] ?? ''));
+        $filterUserId = (int) ($criteria['assigned_user_id'] ?? 0);
         $perPage = (int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE);
         $sort = (string) ($listState['sort'] ?? '');
         $direction = (string) ($listState['direction'] ?? 'asc');
@@ -64,27 +65,38 @@ final class CustomerListView
             $activeModal = 'create';
         }
 
+        $userMap = [];
+        foreach ($staffUsers as $u) {
+            $uid = (int) ($u['id'] ?? 0);
+            if ($uid > 0) {
+                $userMap[$uid] = (string) ($u['name'] ?? '');
+            }
+        }
+
         $rowsHtml = '';
         foreach ($rows as $row) {
             $id = (int) ($row['id'] ?? 0);
             $detailUrl = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, array_merge(['id' => (string) $id], $listQuery)));
-            $assignedText = (string) ($row['assigned_user_id'] ?? '');
-            if ($assignedText === '' || $assignedText === '0') {
-                $assignedText = '-';
-            }
+            $assignedId = (int) ($row['assigned_user_id'] ?? 0);
+            $assignedText = $assignedId > 0 ? ($userMap[$assignedId] ?? '-') : '-';
+            $kana = Layout::escape((string) ($row['customer_name_kana'] ?? ''));
+            $updatedRaw = (string) ($row['updated_at'] ?? '');
+            $updatedTs = $updatedRaw !== '' ? strtotime($updatedRaw) : false;
+            $updatedDisplay = $updatedTs !== false ? date('Y/m/d', $updatedTs) : '';
 
             $rowsHtml .= '<tr>'
-                . '<td data-label="顧客名"><strong class="truncate list-row-primary" title="' . Layout::escape((string) ($row['customer_name'] ?? '')) . '">' . Layout::escape((string) ($row['customer_name'] ?? '')) . '</strong></td>'
+                . '<td data-label="顧客名"><a class="text-link" href="' . $detailUrl . '"><strong class="truncate list-row-primary" title="' . Layout::escape((string) ($row['customer_name'] ?? '')) . '">' . Layout::escape((string) ($row['customer_name'] ?? '')) . '</strong></a></td>'
+                . '<td data-label="よみがな"><span class="truncate muted">' . $kana . '</span></td>'
                 . '<td data-label="電話番号"><span class="truncate" title="' . Layout::escape((string) ($row['phone'] ?? '')) . '">' . Layout::escape((string) ($row['phone'] ?? '')) . '</span></td>'
                 . '<td data-label="メール"><span class="truncate" title="' . Layout::escape((string) ($row['email'] ?? '')) . '">' . Layout::escape((string) ($row['email'] ?? '')) . '</span></td>'
                 . '<td data-label="担当者">' . Layout::escape($assignedText) . '</td>'
                 . '<td data-label="契約件数">' . Layout::escape((string) ($row['contract_count'] ?? '0')) . '</td>'
-                . '<td data-label="操作" class="cell-action"><a class="text-link" href="' . $detailUrl . '">詳細を開く</a></td>'
+                . '<td data-label="最終更新">' . Layout::escape($updatedDisplay) . '</td>'
                 . '</tr>';
         }
 
         if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="6">該当データはありません。</td></tr>';
+            $rowsHtml = '<tr><td colspan="7">該当データはありません。</td></tr>';
         }
 
         $sortSummary = self::renderSortSummary($sort, $direction);
@@ -109,9 +121,10 @@ final class CustomerListView
             . '<input type="hidden" name="filter_open" value="1">'
             . self::renderHiddenInputs(self::buildListQueryParams([], $listState, false, true))
             . '<div class="list-filter-grid">'
-            . '<label class="list-filter-field"><span>顧客名</span><input type="text" name="customer_name" value="' . $customerName . '"></label>'
+            . '<label class="list-filter-field"><span>顧客名・よみがな</span><input type="text" name="customer_name" value="' . $customerName . '"></label>'
             . '<label class="list-filter-field"><span>電話番号</span><input type="text" name="phone" value="' . $phone . '"></label>'
             . '<label class="list-filter-field"><span>メール</span><input type="text" name="email" value="' . $email . '"></label>'
+            . '<label class="list-filter-field"><span>担当者</span>' . self::renderUserFilterSelect($staffUsers, $filterUserId) . '</label>'
             . '</div>'
             . '<div class="actions list-filter-actions">'
             . '<button class="btn" type="submit">検索</button>'
@@ -125,11 +138,12 @@ final class CustomerListView
             . '<table class="table-fixed table-card list-table">'
             . '<thead><tr>'
             . '<th>' . self::renderSortLink('顧客名', 'customer_name', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>よみがな</th>'
             . '<th>' . self::renderSortLink('電話番号', 'phone', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>メール</th>'
             . '<th>' . self::renderSortLink('担当者', 'assigned_user_id', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>' . self::renderSortLink('契約件数', 'contract_count', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th class="align-right">操作</th>'
+            . '<th>' . self::renderSortLink('最終更新', 'updated_at', $searchUrl, $criteria, $listState) . '</th>'
             . '</tr></thead>'
             . '<tbody>' . $rowsHtml . '</tbody>'
             . '</table>'
@@ -408,14 +422,31 @@ final class CustomerListView
         }
 
         $label = match ($sort) {
-            'customer_name' => '顧客名',
-            'phone' => '電話番号',
+            'customer_name'    => '顧客名',
+            'phone'            => '電話番号',
             'assigned_user_id' => '担当者',
-            'contract_count' => '契約件数',
-            default => '更新順',
+            'contract_count'   => '契約件数',
+            'updated_at'       => '最終更新',
+            default            => '更新順',
         };
 
         return '並び順: ' . $label . ' ' . ($direction === 'desc' ? '降順' : '昇順');
+    }
+
+    /**
+     * @param array<int, array{id: int, name: string}> $staffUsers
+     */
+    private static function renderUserFilterSelect(array $staffUsers, int $currentUserId): string
+    {
+        $html = '<select name="assigned_user_id"><option value="">全担当者</option>';
+        foreach ($staffUsers as $u) {
+            $uid = (int) ($u['id'] ?? 0);
+            $uname = Layout::escape((string) ($u['name'] ?? ''));
+            $selected = $currentUserId === $uid ? ' selected' : '';
+            $html .= '<option value="' . $uid . '"' . $selected . '>' . $uname . '</option>';
+        }
+        $html .= '</select>';
+        return $html;
     }
 
     private static function buildFormAction(string $url): string

@@ -332,7 +332,7 @@ final class ActivityRepository
         $stmt->bindValue(':contract_id', $nullableInt($input['contract_id'] ?? null), PDO::PARAM_INT);
         $stmt->bindValue(':renewal_case_id', $nullableInt($input['renewal_case_id'] ?? null), PDO::PARAM_INT);
         $stmt->bindValue(':accident_case_id', $nullableInt($input['accident_case_id'] ?? null), PDO::PARAM_INT);
-        $stmt->bindValue(':sales_case_id', $nullableInt($input['sales_case_id'] ?? null), PDO::PARAM_INT);
+        $stmt->bindValue(':sales_case_id', null, PDO::PARAM_NULL);
         $stmt->bindValue(':activity_date', trim((string) ($input['activity_date'] ?? '')));
         $stmt->bindValue(':start_time', $nullableStr($input['start_time'] ?? null));
         $stmt->bindValue(':end_time', $nullableStr($input['end_time'] ?? null));
