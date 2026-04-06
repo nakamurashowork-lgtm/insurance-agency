@@ -206,7 +206,7 @@ final class SalesCsvImportService
             'premium_amount' => (int) round((float) $premiumRaw),
             'receipt_no' => $receiptNo,
             'settlement_month' => $this->nullableText($settlementMonth),
-            'staff_user_id' => null,
+            'staff_id' => null,
             'remark' => $this->nullableText($payload['remark'] ?? ''),
         ];
     }

@@ -11,8 +11,8 @@ final class CustomerDetailView
      * @param array<string, mixed> $detail
      * @param array<int, array<string, mixed>> $contracts
      * @param array<int, array<string, mixed>> $activities
+     * @param array<int, array<string, mixed>> $accidentCases
      * @param array<int, array<string, mixed>> $salesCases
-     * @param array<int, array{id: int, name: string}> $staffUsers
      * @param array<string, mixed>|null $editDraft
      * @param array<int, string> $editErrors
      * @param array<string, mixed> $layoutOptions
@@ -21,6 +21,7 @@ final class CustomerDetailView
         array $detail,
         array $contracts,
         array $activities,
+        array $accidentCases,
         array $salesCases,
         string $listUrl,
         string $detailUrl,
@@ -31,7 +32,6 @@ final class CustomerDetailView
         string $salesCaseDetailBaseUrl,
         string $updateUrl,
         string $editCsrf,
-        array $staffUsers,
         ?array $editDraft,
         array $editErrors,
         ?string $errorMessage,
@@ -77,24 +77,30 @@ final class CustomerDetailView
             $contractsHtml = '<tr><td colspan="4">保有契約はありません。</td></tr>';
         }
 
+        // 事故案件テーブル
+        $accidentHtml = '';
+        foreach ($accidentCases as $row) {
+            $accidentHtml .= '<tr>'
+                . '<td>' . Layout::escape((string) ($row['accepted_date'] ?? '')) . '</td>'
+                . '<td>' . Layout::escape((string) ($row['accident_no'] ?? '')) . '</td>'
+                . '<td>' . Layout::escape((string) ($row['insurance_category'] ?? '')) . '</td>'
+                . '<td>' . self::renderAccidentStatus((string) ($row['status'] ?? '')) . '</td>'
+                . '</tr>';
+        }
+        if ($accidentHtml === '') {
+            $accidentHtml = '<tr><td colspan="4">事故案件はありません。</td></tr>';
+        }
+
         // 活動履歴タイムライン（直近5件）
         $timelineHtml = '';
         foreach ($activities as $row) {
             $subject = trim((string) ($row['subject'] ?? '')) ?: trim((string) ($row['activity_type'] ?? ''));
             $actDate = trim((string) ($row['activity_date'] ?? ''));
-            $staffId = (int) ($row['staff_user_id'] ?? 0);
-            $staffName = '';
-            foreach ($staffUsers as $u) {
-                if ((int) ($u['id'] ?? 0) === $staffId) {
-                    $staffName = (string) ($u['name'] ?? '');
-                    break;
-                }
-            }
             $timelineHtml .= '<div class="timeline-item">'
                 . '<div class="timeline-dot done"></div>'
                 . '<div class="timeline-body">'
                 . '<div style="font-size:12.5px;font-weight:500;">' . Layout::escape($subject) . '</div>'
-                . '<div class="timeline-time">' . Layout::escape($actDate) . ($staffName !== '' ? '&nbsp;&nbsp;' . Layout::escape($staffName) : '') . '</div>'
+                . '<div class="timeline-time">' . Layout::escape($actDate) . '</div>'
                 . '</div>'
                 . '</div>';
         }
@@ -103,8 +109,6 @@ final class CustomerDetailView
         }
         $activityListUrl = Layout::escape($activityListBaseUrl . '&customer_id=' . $customerId);
 
-        $address = trim((string) (($detail['address1'] ?? '') . ' ' . ($detail['address2'] ?? '')));
-
         // 編集フォーム初期値（draft があれば draft 優先）
         $d = $editDraft ?? $detail;
         $editErrorsHtml = '';
@@ -112,30 +116,7 @@ final class CustomerDetailView
             $editErrorsHtml = '<div class="error" style="margin-bottom:12px;">' . Layout::escape(implode(' ', $editErrors)) . '</div>';
         }
 
-        $draftType   = Layout::escape((string) ($d['customer_type'] ?? ''));
-        $draftName   = Layout::escape((string) ($d['customer_name'] ?? ''));
-        $draftKana   = Layout::escape((string) ($d['customer_name_kana'] ?? ''));
-        $draftPhone  = Layout::escape((string) ($d['phone'] ?? ''));
-        $draftEmail  = Layout::escape((string) ($d['email'] ?? ''));
-        $draftPostal = Layout::escape((string) ($d['postal_code'] ?? ''));
-        $draftAddr1  = Layout::escape((string) ($d['address1'] ?? ''));
-        $draftAddr2  = Layout::escape((string) ($d['address2'] ?? ''));
         $draftNote   = Layout::escape((string) ($d['note'] ?? ''));
-        $draftUserId = (int) ($d['assigned_user_id'] ?? 0);
-
-        $typeOptions = '';
-        foreach (['individual' => '個人', 'corporate' => '法人'] as $val => $label) {
-            $selected = $draftType === $val ? ' selected' : '';
-            $typeOptions .= '<option value="' . Layout::escape($val) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
-        }
-
-        $userOptions = '<option value="">（未設定）</option>';
-        foreach ($staffUsers as $u) {
-            $uid = (int) ($u['id'] ?? 0);
-            $uname = Layout::escape((string) ($u['name'] ?? ''));
-            $selected = $draftUserId === $uid ? ' selected' : '';
-            $userOptions .= '<option value="' . $uid . '"' . $selected . '>' . $uname . '</option>';
-        }
 
         $openModal = (string) ($_GET['open_modal'] ?? '');
         $openDialog = ($openModal === 'edit' || $editDraft !== null) ? 'true' : 'false';
@@ -146,38 +127,36 @@ final class CustomerDetailView
             . '<div><h1 class="title">顧客詳細</h1>' . self::renderCustomerStatus((string) ($detail['status'] ?? '')) . '</div>'
             . '<div class="actions">'
             . '<a class="btn btn-secondary" href="' . Layout::escape($returnTo) . '">' . Layout::escape(self::resolveBackLabel($returnTo)) . '</a>'
-            . '<button class="btn" type="button" onclick="document.getElementById(\'customer-edit-dialog\').showModal()">基本情報を編集</button>'
             . '</div>'
             . '</div>'
-            . '<div class="two-col">'
             // ── 左カラム ──
             . '<div>'
             . '<div class="card">'
-            . '<div class="detail-section-title">基本情報</div>'
+            . '<div class="detail-section-title" style="display:flex;justify-content:space-between;align-items:center;">基本情報<button type="button" class="btn btn-secondary" style="font-size:12px;padding:3px 10px;" onclick="(function(){var d=document.getElementById(\'customer-edit-dialog\');if(d&&typeof d.showModal===\'function\'&&!d.open){d.showModal();}})()">備考を編集</button></div>'
             . '<div class="kv"><span class="kv-key">顧客名</span><span class="kv-val">' . Layout::escape((string) ($detail['customer_name'] ?? '')) . '</span></div>'
-            . '<div class="kv"><span class="kv-key">よみがな</span><span class="kv-val">' . Layout::escape((string) ($detail['customer_name_kana'] ?? '')) . '</span></div>'
-            . '<div class="kv"><span class="kv-key">顧客種別</span><span class="kv-val">' . Layout::escape((string) ($detail['customer_type'] ?? '')) . '</span></div>'
-            . '<div class="kv"><span class="kv-key">担当者</span><span class="kv-val">' . (trim((string) ($detail['assigned_user_name'] ?? '')) !== '' ? Layout::escape((string) ($detail['assigned_user_name'] ?? '')) : '<span class="muted">未設定</span>') . '</span></div>'
-            . '<div class="kv"><span class="kv-key">電話</span><span class="kv-val">' . Layout::escape((string) ($detail['phone'] ?? '')) . '</span></div>'
-            . '<div class="kv"><span class="kv-key">メール</span><span class="kv-val">' . Layout::escape((string) ($detail['email'] ?? '')) . '</span></div>'
-            . '<div class="kv"><span class="kv-key">住所</span><span class="kv-val">' . Layout::escape($address) . '</span></div>'
-            . '<div class="kv"><span class="kv-key">備考</span><span class="kv-val">' . Layout::escape((string) ($detail['note'] ?? '')) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">顧客種別</span><span class="kv-val">' . Layout::escape(self::formatCustomerType((string) ($detail['customer_type'] ?? ''))) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">備考</span><span class="kv-val" style="white-space:pre-wrap;">' . Layout::escape((string) ($detail['note'] ?? '')) . '</span></div>'
+            . '</div>'
+            . '<div class="card">'
+            . '<div class="detail-section-title">保有契約 / 満期</div>'
+            . '<div class="table-wrap"><table class="table-fixed table-card list-table" style="margin:0;">'
+            . '<colgroup><col style="width:auto;"><col style="width:80px;"><col style="width:90px;"><col style="width:90px;"></colgroup>'
+            . '<thead><tr><th>証券番号</th><th>種目</th><th>満期日</th><th>状態</th></tr></thead>'
+            . '<tbody>' . $contractsHtml . '</tbody>'
+            . '</table></div>'
+            . '</div>'
+            . '<div class="card">'
+            . '<div class="detail-section-title">事故案件</div>'
+            . '<div class="table-wrap"><table class="table-fixed table-card list-table" style="margin:0;">'
+            . '<colgroup><col style="width:90px;"><col style="width:auto;"><col style="width:80px;"><col style="width:80px;"></colgroup>'
+            . '<thead><tr><th>受付日</th><th>事故番号</th><th>保険種類</th><th>状態</th></tr></thead>'
+            . '<tbody>' . $accidentHtml . '</tbody>'
+            . '</table></div>'
             . '</div>'
             . '<div class="card">'
             . '<div class="detail-section-title">対応履歴（直近）</div>'
             . '<div class="status-timeline">' . $timelineHtml . '</div>'
             . '<a class="btn" href="' . $activityListUrl . '" style="width:100%;display:block;margin-top:8px;text-align:center;">活動履歴を全て見る</a>'
-            . '</div>'
-            . '</div>'
-            // ── 右カラム ──
-            . '<div class="card">'
-            . '<div class="detail-section-title">保有契約一覧（クリックで満期詳細へ）</div>'
-            . '<div class="table-wrap">'
-            . '<table class="table-fixed">'
-            . '<thead><tr><th>証券番号</th><th>種目</th><th>満期日</th><th>対応状況</th></tr></thead>'
-            . '<tbody>' . $contractsHtml . '</tbody>'
-            . '</table>'
-            . '</div>'
             . '</div>'
             . '</div>'
             /* 見込案件セクション: H-5判断#8 により非表示（コードは保持）
@@ -193,33 +172,11 @@ final class CustomerDetailView
             . self::renderRouteInput($updateUrl)
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($editCsrf) . '">'
             . '<input type="hidden" name="id" value="' . $customerId . '">'
-            . '<h2 class="modal-title">基本情報を編集</h2>'
+            . '<h2 class="modal-title">備考を編集</h2>'
             . $editErrorsHtml
             . '<div class="customer-create-grid">'
-            . '<label class="form-field form-field--required"><span class="form-field-label">顧客区分</span>'
-            . '<select name="customer_type" required>'
-            . '<option value="">選択してください</option>'
-            . $typeOptions
-            . '</select></label>'
-            . '<label class="form-field form-field--required"><span class="form-field-label">顧客名</span>'
-            . '<input type="text" name="customer_name" value="' . $draftName . '" required maxlength="200"></label>'
-            . '<label class="form-field"><span class="form-field-label">顧客名カナ</span>'
-            . '<input type="text" name="customer_name_kana" value="' . $draftKana . '" maxlength="200"></label>'
-            . '<label class="form-field"><span class="form-field-label">電話番号</span>'
-            . '<input type="text" name="phone" value="' . $draftPhone . '" maxlength="30"></label>'
-            . '<label class="form-field"><span class="form-field-label">メールアドレス</span>'
-            . '<input type="email" name="email" value="' . $draftEmail . '" maxlength="255"></label>'
-            . '<label class="form-field"><span class="form-field-label">郵便番号</span>'
-            . '<input type="text" name="postal_code" value="' . $draftPostal . '" maxlength="20"></label>'
-            . '<label class="form-field"><span class="form-field-label">住所1</span>'
-            . '<input type="text" name="address1" value="' . $draftAddr1 . '" maxlength="255"></label>'
-            . '<label class="form-field"><span class="form-field-label">住所2</span>'
-            . '<input type="text" name="address2" value="' . $draftAddr2 . '" maxlength="255"></label>'
-            . '<label class="form-field"><span class="form-field-label">主担当者</span>'
-            . '<select name="assigned_user_id">' . $userOptions . '</select></label>'
-            . '<div class="form-field form-field--spacer" aria-hidden="true"></div>'
             . '<label class="form-field form-field--full"><span class="form-field-label">備考</span>'
-            . '<textarea name="note" rows="4" maxlength="2000">' . $draftNote . '</textarea></label>'
+            . '<textarea name="note" rows="6" maxlength="2000">' . $draftNote . '</textarea></label>'
             . '</div>'
             . '<div class="dialog-actions">'
             . '<button type="button" class="btn btn-secondary" onclick="document.getElementById(\'customer-edit-dialog\').close()">キャンセル</button>'
@@ -237,6 +194,15 @@ final class CustomerDetailView
             . '</script>';
 
         return Layout::render('顧客詳細', $content, $layoutOptions);
+    }
+
+    private static function formatCustomerType(string $type): string
+    {
+        return match ($type) {
+            'individual' => '個人',
+            'corporate'  => '法人',
+            default      => $type,
+        };
     }
 
     private static function renderCustomerStatus(string $status): string
@@ -273,6 +239,21 @@ final class CustomerDetailView
             'waiting_payment' => ['入金待ち', 'badge-info'],
             'completed'      => ['完了',      'badge-success'],
             default          => ['未設定',    'badge-danger'],
+        };
+
+        return '<span class="badge ' . $class . '">' . Layout::escape($label) . '</span>';
+    }
+
+    private static function renderAccidentStatus(string $status): string
+    {
+        [$label, $class] = match ($status) {
+            'accepted'     => ['受付済',   'badge-info'],
+            'linked'       => ['紐付済',   'badge-info'],
+            'in_progress'  => ['対応中',   'badge-warn'],
+            'waiting_docs' => ['書類待ち', 'badge-warn'],
+            'resolved'     => ['解決済',   'badge-success'],
+            'closed'       => ['完了',     'badge-gray'],
+            default        => [$status,    'badge-danger'],
         };
 
         return '<span class="badge ' . $class . '">' . Layout::escape($label) . '</span>';

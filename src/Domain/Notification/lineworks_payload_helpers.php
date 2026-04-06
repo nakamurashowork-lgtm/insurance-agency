@@ -66,10 +66,6 @@ function build_lineworks_renewal_alert_body_text(string $phaseName, array $targe
             $customerName
         );
 
-        $policyNo = trim((string) ($target['policy_no'] ?? ''));
-        if ($policyNo !== '') {
-            $lines[] = '  証券番号：' . $policyNo;
-        }
     }
 
     $remaining = count($targets) - count($displayTargets);

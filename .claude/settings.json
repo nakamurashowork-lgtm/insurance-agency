@@ -118,7 +118,18 @@
       "Bash(php tools/seed_staff_and_phases.php)",
       "Bash(/c/xampp/php/php tools/seed_staff_and_phases.php)",
       "Bash(php -r \"echo 'upload_max_filesize: ' . ini_get\\('upload_max_filesize'\\) . PHP_EOL; echo 'post_max_size: ' . ini_get\\('post_max_size'\\) . PHP_EOL; echo 'upload_tmp_dir: ' . ini_get\\('upload_tmp_dir'\\) . PHP_EOL;\")",
-      "Bash(php.exe -r ':*)"
+      "Bash(php.exe -r ':*)",
+      "Bash(mysql -u root -e \"SHOW DATABASES LIKE 'xs000001_te001';\")",
+      "Bash(/c/xampp/mysql/bin/mysql -u root xs000001_te001)",
+      "Bash(/c/xampp/mysql/bin/mysql -u root xs000001_te001 -e \"SHOW TABLES;\")",
+      "Bash(/c/xampp/php/php.exe tools/seed_staff_and_phases.php)",
+      "Bash(/c/xampp/mysql/bin/mysql -u root xs000001_te001 -e \"SELECT id, staff_name, sjnet_code, is_sales, is_office, is_active FROM m_staff;\")",
+      "Bash(/c/xampp/mysql/bin/mysql -u root xs000001_te001 -e \"SELECT COUNT\\(*\\) as renewal_cases FROM t_renewal_case; SELECT COUNT\\(*\\) as activities FROM t_activity; SELECT COUNT\\(*\\) as contracts FROM t_contract;\")",
+      "Bash(/c/xampp/php/php -l /c/xampp/htdocs/insurance-agency/src/Presentation/SalesCaseDetailView.php)",
+      "Bash(/c/xampp/php/php -l /c/xampp/htdocs/insurance-agency/src/Controller/SalesCaseController.php)",
+      "Bash(/c/xampp/php/php -l /c/xampp/htdocs/insurance-agency/src/Presentation/View/Layout.php)",
+      "Bash(/c/xampp/php/php -l /c/xampp/htdocs/insurance-agency/src/Controller/ControllerLayoutHelper.php)",
+      "Bash(/c/xampp/mysql/bin/mysql -u root xs000001_admin -e \"ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR\\(100\\) NULL COMMENT '業務上の表示名。NULLの場合はnameにフォールバック' AFTER name;\")"
     ],
     "additionalDirectories": [
       "C:\\xampp\\mysql\\data\\xs000001_admin",

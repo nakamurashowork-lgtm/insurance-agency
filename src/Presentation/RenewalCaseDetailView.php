@@ -14,6 +14,8 @@ final class RenewalCaseDetailView
      * @param array<string, string> $listStateParams
      * @param array<string, string> $fieldErrors
      * @param array<string, mixed> $layoutOptions
+     * @param array<int, array<string, mixed>> $renewalStatuses
+     * @param array<int, array<string, mixed>> $procedureMethods
      */
     public static function render(
         array $detail,
@@ -30,7 +32,10 @@ final class RenewalCaseDetailView
         ?string $errorMessage,
         ?string $successMessage,
         array $fieldErrors,
-        array $layoutOptions
+        array $layoutOptions,
+        array $officeStaffList = [],
+        array $renewalStatuses = [],
+        array $procedureMethods = []
     ): string {
         $errorHtml = '';
         if (is_string($errorMessage) && $errorMessage !== '') {
@@ -42,21 +47,25 @@ final class RenewalCaseDetailView
             $successHtml = '<div class="notice">' . Layout::escape($successMessage) . '</div>';
         }
 
-        $statusOptions = ['not_started', 'sj_requested', 'doc_prepared', 'waiting_return', 'quote_sent', 'waiting_payment', 'completed'];
-        $statusHtml = '';
         $currentStatus = (string) ($detail['case_status'] ?? 'not_started');
-        foreach ($statusOptions as $status) {
-            $selected = $status === $currentStatus ? ' selected' : '';
-            $statusHtml .= '<option value="' . Layout::escape($status) . '"' . $selected . '>' . Layout::escape(self::statusLabel($status)) . '</option>';
+        // Build status map from master data or fallback to static method
+        $statusNameMap = [];
+        foreach ($renewalStatuses as $sRow) {
+            $statusNameMap[(string) ($sRow['code'] ?? '')] = (string) ($sRow['display_name'] ?? '');
         }
-
-        $resultOptions = ['', 'pending', 'renewed', 'cancelled', 'lost'];
-        $resultHtml = '';
-        $currentResult = (string) ($detail['renewal_result'] ?? '');
-        foreach ($resultOptions as $result) {
-            $selected = $result === $currentResult ? ' selected' : '';
-            $label = self::resultLabel($result);
-            $resultHtml .= '<option value="' . Layout::escape($result) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
+        $statusHtml = '';
+        if ($renewalStatuses !== []) {
+            foreach ($renewalStatuses as $sRow) {
+                $code = (string) ($sRow['code'] ?? '');
+                $label = (string) ($sRow['display_name'] ?? $code);
+                $selected = $code === $currentStatus ? ' selected' : '';
+                $statusHtml .= '<option value="' . Layout::escape($code) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
+            }
+        } else {
+            foreach (['not_started', 'sj_requested', 'doc_prepared', 'waiting_return', 'quote_sent', 'waiting_payment', 'completed'] as $status) {
+                $selected = $status === $currentStatus ? ' selected' : '';
+                $statusHtml .= '<option value="' . Layout::escape($status) . '"' . $selected . '>' . Layout::escape(self::statusLabel($status)) . '</option>';
+            }
         }
 
         $renewalMethodOptions = ['', '対面', '郵送', '電話募集'];
@@ -67,13 +76,43 @@ final class RenewalCaseDetailView
             $renewalMethodHtml .= '<option value="' . Layout::escape($method) . '"' . $selected . '>' . Layout::escape($method === '' ? '未設定' : $method) . '</option>';
         }
 
-        $procedureMethodOptions = ['', '対面', '対面ナビ', '電話ナビ', '電話募集', '署名・捺印', 'ケータイOR', 'マイページ'];
-        $procedureMethodHtml = '';
         $currentProcedureMethod = (string) ($detail['procedure_method'] ?? '');
-        foreach ($procedureMethodOptions as $method) {
-            $selected = $method === $currentProcedureMethod ? ' selected' : '';
-            $procedureMethodHtml .= '<option value="' . Layout::escape($method) . '"' . $selected . '>' . Layout::escape($method === '' ? '未設定' : $method) . '</option>';
+        $pmActiveOptions = '';
+        $pmCurrentOption = '';
+        $foundInMaster   = false;
+
+        foreach ($procedureMethods as $pmRow) {
+            $pmLabel     = (string) ($pmRow['label'] ?? '');
+            $pmActive    = (int) ($pmRow['is_active'] ?? 1);
+            $isCurrentValue = $pmLabel === $currentProcedureMethod;
+
+            if ($pmActive === 1) {
+                $selected = $isCurrentValue ? ' selected' : '';
+                $pmActiveOptions .= '<option value="' . Layout::escape($pmLabel) . '"' . $selected . '>' . Layout::escape($pmLabel) . '</option>';
+                if ($isCurrentValue) {
+                    $foundInMaster = true;
+                }
+            } elseif ($isCurrentValue) {
+                $pmCurrentOption = '<option value="' . Layout::escape($pmLabel) . '" selected>' . Layout::escape($pmLabel) . '（無効）</option>';
+                $foundInMaster   = true;
+            }
         }
+
+        if (!$foundInMaster && $currentProcedureMethod !== '') {
+            $pmCurrentOption = '<option value="' . Layout::escape($currentProcedureMethod) . '" selected>' . Layout::escape($currentProcedureMethod) . '（不明）</option>';
+        }
+
+        // Fallback: if no master data at all, use hardcoded list
+        if ($procedureMethods === [] && $pmActiveOptions === '') {
+            foreach (['対面', '対面ナビ', '電話ナビ', '電話募集', '署名・捺印', 'ケータイOR', 'マイページ'] as $method) {
+                $selected = $method === $currentProcedureMethod ? ' selected' : '';
+                $pmActiveOptions .= '<option value="' . Layout::escape($method) . '"' . $selected . '>' . Layout::escape($method) . '</option>';
+            }
+        }
+
+        $procedureMethodHtml = '<option value=""' . ($currentProcedureMethod === '' ? ' selected' : '') . '>未設定</option>'
+            . $pmCurrentOption
+            . $pmActiveOptions;
 
         $commentsHtml = '';
         foreach ($comments as $row) {
@@ -92,7 +131,7 @@ final class RenewalCaseDetailView
             $commentsHtml = '<li class="muted">0件</li>';
         }
 
-        $auditsHtml = '';
+        $auditItems = [];
         foreach ($audits as $row) {
             $changedAt = self::formatAuditDate((string) ($row['changed_at'] ?? ''));
             $changedBy = trim((string) ($row['changed_by_name'] ?? ''));
@@ -100,67 +139,65 @@ final class RenewalCaseDetailView
                 $changedBy = '不明なユーザー';
             }
 
-            $detailsHtml = '';
             $details = $row['details'] ?? [];
+            $diffItems = [];
+            $eventCategory = 'other'; // 'status' | 'staff' | 'other'
+
             if (is_array($details)) {
                 foreach ($details as $detailRow) {
                     if (!is_array($detailRow)) {
                         continue;
                     }
-
+                    $fieldKey   = trim((string) ($detailRow['field_key'] ?? ''));
                     $fieldLabel = trim((string) ($detailRow['field_label'] ?? ''));
                     if ($fieldLabel === '') {
-                        $fieldLabel = (string) ($detailRow['field_key'] ?? '');
+                        $fieldLabel = $fieldKey;
                     }
 
                     $valueType = strtoupper(trim((string) ($detailRow['value_type'] ?? '')));
                     if ($valueType === 'JSON') {
-                        $beforeRaw = $detailRow['before_value_json'] ?? null;
-                        $afterRaw  = $detailRow['after_value_json'] ?? null;
-                        $beforeValue = $beforeRaw !== null ? (string) json_encode(json_decode((string) $beforeRaw), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) : '';
-                        $afterValue  = $afterRaw  !== null ? (string) json_encode(json_decode((string) $afterRaw),  JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) : '';
+                        $beforeRaw   = $detailRow['before_value_json'] ?? null;
+                        $afterRaw    = $detailRow['after_value_json'] ?? null;
+                        $beforeValue = $beforeRaw !== null ? (string) json_encode(json_decode((string) $beforeRaw), JSON_UNESCAPED_UNICODE) : '';
+                        $afterValue  = $afterRaw  !== null ? (string) json_encode(json_decode((string) $afterRaw),  JSON_UNESCAPED_UNICODE) : '';
                     } else {
                         $beforeValue = trim((string) ($detailRow['before_value_text'] ?? ''));
                         $afterValue  = trim((string) ($detailRow['after_value_text'] ?? ''));
                     }
-                    if ($beforeValue === '') {
-                        $beforeValue = '未設定';
-                    }
-                    if ($afterValue === '') {
-                        $afterValue = '未設定';
+
+                    // 値を日本語ラベルに変換
+                    $beforeValue = self::translateFieldValue($fieldKey, $beforeValue, $statusNameMap);
+                    $afterValue  = self::translateFieldValue($fieldKey, $afterValue, $statusNameMap);
+
+                    if ($beforeValue === '') { $beforeValue = '未設定'; }
+                    if ($afterValue  === '') { $afterValue  = '未設定'; }
+
+                    // カテゴリ判定
+                    if ($fieldKey === 'case_status') {
+                        $eventCategory = 'status';
+                    } elseif (in_array($fieldKey, ['office_staff_id', 'assigned_staff_id'], true) && $eventCategory !== 'status') {
+                        $eventCategory = 'staff';
                     }
 
-                    $detailsHtml .= '<tr>'
-                        . '<td>' . Layout::escape($fieldLabel) . '</td>'
-                        . '<td>' . Layout::escape($beforeValue) . '</td>'
-                        . '<td>' . Layout::escape($afterValue) . '</td>'
-                        . '</tr>';
+                    $diffItems[] = [
+                        'label'  => $fieldLabel,
+                        'key'    => $fieldKey,
+                        'before' => $beforeValue,
+                        'after'  => $afterValue,
+                    ];
                 }
             }
 
-            if ($detailsHtml !== '') {
-                $detailsHtml = '<div class="history-detail-table-wrap"><table class="history-detail-table"><thead><tr><th>変更項目</th><th>変更前</th><th>変更後</th></tr></thead><tbody>' . $detailsHtml . '</tbody></table></div>';
-            }
-
-            $summary = trim((string) ($row['note'] ?? ''));
-            if ($summary === '') {
-                $summary = '満期対応情報を更新';
-            }
-
-            $auditsHtml .= '<li class="history-item">'
-                . '<div class="history-meta">'
-                . '<span>' . Layout::escape($changedAt) . '</span>'
-                . '<span>変更者: ' . Layout::escape($changedBy) . '</span>'
-                . '<span>変更種別: ' . Layout::escape(self::auditActionLabel((string) ($row['action_type'] ?? ''))) . '</span>'
-                . '<span>変更元: ' . Layout::escape(self::auditSourceLabel((string) ($row['change_source'] ?? ''))) . '</span>'
-                . '</div>'
-                . '<div class="history-summary">変更内容: ' . Layout::escape($summary) . '</div>'
-                . $detailsHtml
-                . '</li>';
+            $auditItems[] = [
+                'changed_at' => $changedAt,
+                'changed_by' => $changedBy,
+                'category'   => $eventCategory,
+                'diff_items' => $diffItems,
+            ];
         }
-        if ($auditsHtml === '') {
-            $auditsHtml = '<li class="muted">0件</li>';
-        }
+
+        // タイムラインHTML生成（全件・ステータスのみ・担当者のみ）
+        $auditsHtml = self::renderTimeline($auditItems, 'all');
 
         $renewalCaseId = (int) ($detail['renewal_case_id'] ?? 0);
         $customerUrl = Layout::escape(
@@ -168,11 +205,11 @@ final class RenewalCaseDetailView
             . '&id=' . (string) ($detail['customer_id'] ?? '0')
             . '&return_to=' . urlencode('renewal/detail?id=' . $renewalCaseId)
         );
-        $statusBadge = self::renderStatusBadge((string) ($detail['case_status'] ?? 'open'));
+        $statusBadge = self::renderStatusBadge((string) ($detail['case_status'] ?? 'open'), $statusNameMap);
         $nextActionHtml = self::renderNextAction((string) ($detail['next_action_date'] ?? ''), (string) ($detail['case_status'] ?? 'open'));
         $address = trim((string) (($detail['address1'] ?? '') . ' ' . ($detail['address2'] ?? '')));
         $contractStatus = self::contractStatusLabel((string) ($detail['contract_status'] ?? ''));
-        $assignedUserId = trim((string) ($detail['assigned_user_id'] ?? ''));
+        $assignedUserId = trim((string) ($detail['assigned_staff_id'] ?? ''));
         $assignedUserName = trim((string) ($detail['assigned_user_name'] ?? ''));
 
         $premiumRaw = (string) ($detail['premium_amount'] ?? '');
@@ -182,10 +219,8 @@ final class RenewalCaseDetailView
 
         $statusClass = isset($fieldErrors['case_status']) ? ' input-error' : '';
         $nextActionClass = isset($fieldErrors['next_action_date']) ? ' input-error' : '';
-        $resultClass = isset($fieldErrors['renewal_result']) ? ' input-error' : '';
         $renewalMethodClass = isset($fieldErrors['renewal_method']) ? ' input-error' : '';
         $procedureMethodClass = isset($fieldErrors['procedure_method']) ? ' input-error' : '';
-        $lostReasonClass = isset($fieldErrors['lost_reason']) ? ' input-error' : '';
         $completedDateClass = isset($fieldErrors['completed_date']) ? ' input-error' : '';
 
         $today = date('Y-m-d');
@@ -198,9 +233,13 @@ final class RenewalCaseDetailView
         $earlyDeadlineHtml = $earlyDeadline !== ''
             ? ($earlyDeadline < $today ? '<span style="color:var(--text-danger);font-weight:500;">' . Layout::escape($earlyDeadline) . '</span>' : Layout::escape($earlyDeadline))
             : '未設定';
-        $officeUserName = trim((string) ($detail['office_user_name'] ?? ''));
-        $officeUserId   = trim((string) ($detail['office_user_id'] ?? ''));
-        $officeUserHtml = $officeUserName !== '' ? Layout::escape($officeUserName) : ($officeUserId !== '' ? Layout::escape($officeUserId) : '<span class="muted">未設定</span>');
+        $currentOfficeStaffId = (string) ($detail['office_staff_id'] ?? '');
+        $officeStaffOptions = '<option value="">未設定</option>';
+        foreach ($officeStaffList as $s) {
+            $sid = (string) ($s['id'] ?? '');
+            $sel = $sid === $currentOfficeStaffId ? ' selected' : '';
+            $officeStaffOptions .= '<option value="' . Layout::escape($sid) . '"' . $sel . '>' . Layout::escape((string) ($s['staff_name'] ?? '')) . '</option>';
+        }
 
         $customerName = Layout::escape(trim((string) ($detail['customer_name'] ?? '')));
         $productType  = Layout::escape(trim((string) ($detail['product_type'] ?? '')));
@@ -216,7 +255,6 @@ final class RenewalCaseDetailView
             . '</div>'
             . '<div class="actions">'
             . '<a class="btn btn-secondary" href="' . Layout::escape($listUrl) . '">一覧へ戻る</a>'
-            . '<a class="btn btn-ghost" href="' . $customerUrl . '">顧客詳細を見る</a>'
             . '<button class="btn btn-primary" type="submit" form="renewal-update-form">保存</button>'
             . '</div>'
             . '</div>'
@@ -227,16 +265,14 @@ final class RenewalCaseDetailView
             . '<div class="card">'
             . '<div class="detail-section-title">契約情報</div>'
             . '<div class="kv"><span class="kv-key">証券番号</span><span class="kv-val">' . Layout::escape((string) ($detail['policy_no'] ?? '')) . '</span></div>'
-            . '<div class="kv"><span class="kv-key">種目</span><span class="kv-val">' . $productType . '</span></div>'
             . '<div class="kv"><span class="kv-key">満期日</span><span class="kv-val"' . $maturityDateStyle . '>' . Layout::escape($maturityDate) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">契約者名</span><span class="kv-val"><a class="kv-link" href="' . $customerUrl . '">' . $customerName . '</a></span></div>'
+            . '<div class="kv"><span class="kv-key">種目</span><span class="kv-val">' . $productType . '</span></div>'
             . '<div class="kv"><span class="kv-key">早期更改締切</span><span class="kv-val">' . $earlyDeadlineHtml . '</span></div>'
             . '<div class="kv"><span class="kv-key">始期日</span><span class="kv-val">' . Layout::escape((string) ($detail['policy_start_date'] ?? '')) . '</span></div>'
             . '<div class="kv"><span class="kv-key">保険料</span><span class="kv-val">' . Layout::escape($premiumText) . '</span></div>'
             . '<div class="kv"><span class="kv-key">保険会社</span><span class="kv-val">' . Layout::escape((string) ($detail['insurer_name'] ?? '')) . '</span></div>'
-            . '<div class="kv"><span class="kv-key">契約状態</span><span class="kv-val">' . Layout::escape($contractStatus) . '</span></div>'
             . '<div class="kv"><span class="kv-key">営業担当</span><span class="kv-val">' . ($assignedUserName !== '' ? Layout::escape($assignedUserName) : ($assignedUserId !== '' ? Layout::escape($assignedUserId) : '<span class="muted">未設定</span>')) . '</span></div>'
-            . '<div class="kv"><span class="kv-key">事務担当</span><span class="kv-val">' . $officeUserHtml . '</span></div>'
-            . '<div class="kv"><span class="kv-key">備考</span><span class="kv-val">' . Layout::escape((string) ($detail['remark'] ?? '')) . '</span></div>'
             . '</div>'
             . '<div class="card">'
             . '<div class="detail-section-title">対応状況の更新</div>'
@@ -244,6 +280,10 @@ final class RenewalCaseDetailView
             . '<input type="hidden" name="id" value="' . Layout::escape((string) ($detail['renewal_case_id'] ?? '')) . '">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfToken) . '">'
             . self::renderHiddenInputs($listStateParams)
+            . '<div class="form-row">'
+            . '<div class="form-label">事務担当</div>'
+            . '<select name="office_staff_id" class="form-select">' . $officeStaffOptions . '</select>'
+            . '</div>'
             . '<div class="form-row">'
             . '<div class="form-label">対応状況 <span class="req">*</span></div>'
             . '<select id="renewal-case-status" class="form-select' . $statusClass . '" name="case_status" required>' . $statusHtml . '</select>'
@@ -260,11 +300,6 @@ final class RenewalCaseDetailView
             . self::renderFieldError($fieldErrors, 'procedure_method')
             . '</div>'
             . '<div class="form-row">'
-            . '<div class="form-label">更改結果</div>'
-            . '<select id="renewal-result-field" class="form-select' . $resultClass . '" name="renewal_result">' . $resultHtml . '</select>'
-            . self::renderFieldError($fieldErrors, 'renewal_result')
-            . '</div>'
-            . '<div class="form-row">'
             . '<div class="form-label">完了日</div>'
             . '<input type="date" id="renewal-completed-date" class="form-input' . $completedDateClass . '" name="completed_date" value="' . Layout::escape((string) ($detail['completed_date'] ?? '')) . '">'
             . self::renderFieldError($fieldErrors, 'completed_date')
@@ -274,30 +309,12 @@ final class RenewalCaseDetailView
             . '<input type="date" id="renewal-next-action-date" class="form-input' . $nextActionClass . '" name="next_action_date" value="' . Layout::escape((string) ($detail['next_action_date'] ?? '')) . '">'
             . self::renderFieldError($fieldErrors, 'next_action_date')
             . '</div>'
-            . '<div class="form-row">'
-            . '<div class="form-label">失注理由</div>'
-            . '<input type="text" id="renewal-lost-reason" class="form-input' . $lostReasonClass . '" name="lost_reason" value="' . Layout::escape((string) ($detail['lost_reason'] ?? '')) . '">'
-            . self::renderFieldError($fieldErrors, 'lost_reason')
-            . '</div>'
-            . '<div class="form-row">'
-            . '<div class="form-label">備考</div>'
-            . '<textarea id="renewal-remark" class="form-input" name="remark" rows="4">' . Layout::escape((string) ($detail['remark'] ?? '')) . '</textarea>'
-            . '</div>'
             . '<button class="btn btn-primary" type="submit" style="width:100%;">更新を保存</button>'
             . '</form>'
             . '</div>'
             . '</div>'
             // ── 右カラム ──
             . '<div>'
-            . '<div class="card">'
-            . '<div class="detail-section-title">顧客情報（参照）</div>'
-            . '<div class="kv"><span class="kv-key">氏名</span><span class="kv-val"><a class="kv-link" href="' . $customerUrl . '">' . $customerName . '</a></span></div>'
-            . '<div class="kv"><span class="kv-key">主担当者</span><span class="kv-val">' . ($assignedUserName !== '' ? Layout::escape($assignedUserName) : ($assignedUserId !== '' ? Layout::escape($assignedUserId) : '<span class="muted">未設定</span>')) . '</span></div>'
-            . '<div class="kv"><span class="kv-key">電話</span><span class="kv-val">' . Layout::escape((string) ($detail['phone'] ?? '')) . '</span></div>'
-            . '<div class="kv"><span class="kv-key">メール</span><span class="kv-val">' . Layout::escape((string) ($detail['email'] ?? '')) . '</span></div>'
-            . '<div class="kv"><span class="kv-key">住所</span><span class="kv-val">' . Layout::escape($address) . '</span></div>'
-            . '<div class="card-footer-link"><a class="kv-link" href="' . $customerUrl . '">顧客詳細を見る →</a></div>'
-            . '</div>'
             . '<details class="card details-panel details-compact" open>'
             . '<summary><span>コメント</span><span class="muted">' . count($comments) . '件</span></summary>'
             . '<div class="details-compact-body">'
@@ -314,7 +331,9 @@ final class RenewalCaseDetailView
             . '</details>'
             . '<details class="card details-panel details-compact" open>'
             . '<summary><span>変更履歴</span><span class="muted">' . count($audits) . '件</span></summary>'
-            . '<div class="details-compact-body"><ul class="panel-list">' . $auditsHtml . '</ul></div>'
+            . '<div class="details-compact-body">'
+            . $auditsHtml
+            . '</div>'
             . '</details>'
             . '</div>'
             . '</div>';
@@ -359,15 +378,21 @@ final class RenewalCaseDetailView
         };
     }
 
-    private static function renderStatusBadge(string $status): string
+    /**
+     * @param array<string, string> $statusNameMap  code => display_name from master (may be empty)
+     */
+    private static function renderStatusBadge(string $status, array $statusNameMap = []): string
     {
+        // Badge CSS class mapping (visual, hardcoded fallback)
         $class = match ($status) {
             'completed' => 'badge-success',
             'sj_requested', 'doc_prepared', 'waiting_return', 'quote_sent', 'waiting_payment' => 'badge-info',
             default => 'badge-danger',
         };
 
-        return '<span class="badge ' . $class . '">' . Layout::escape(self::statusLabel($status)) . '</span>';
+        $label = $statusNameMap[$status] ?? self::statusLabel($status);
+
+        return '<span class="badge ' . $class . '">' . Layout::escape($label) . '</span>';
     }
 
     /**
@@ -413,26 +438,97 @@ final class RenewalCaseDetailView
         return date('Y-m-d H:i', $ts);
     }
 
-    private static function auditActionLabel(string $actionType): string
+    /**
+     * @param array<int, array<string, mixed>> $items
+     */
+    private static function renderTimeline(array $items, string $filterCategory): string
     {
-        return match ($actionType) {
-            'INSERT' => '登録',
-            'UPDATE' => '更新',
-            'DELETE' => '削除',
-            'IMPORT' => '取込',
-            'SYSTEM_UPDATE' => 'システム更新',
-            default => $actionType,
-        };
+        $html = '';
+        foreach ($items as $item) {
+            $cat = (string) ($item['category'] ?? 'other');
+            if ($filterCategory !== 'all' && $cat !== $filterCategory) {
+                continue;
+            }
+
+            $diffItems = $item['diff_items'] ?? [];
+            if ($diffItems === []) {
+                continue;
+            }
+
+            // カテゴリ別スタイル
+            $borderColor = match ($cat) {
+                'status' => 'var(--color-primary, #2563eb)',
+                'staff'  => 'var(--color-info, #0891b2)',
+                default  => 'var(--border-color, #d1d5db)',
+            };
+
+            $diffHtml = '';
+            foreach ($diffItems as $d) {
+                $key    = (string) ($d['key'] ?? '');
+                $label  = Layout::escape((string) ($d['label'] ?? ''));
+                $before = Layout::escape((string) ($d['before'] ?? ''));
+                $after  = Layout::escape((string) ($d['after'] ?? ''));
+
+                $isStatus = $key === 'case_status';
+                $isStaff  = in_array($key, ['office_staff_id', 'assigned_staff_id'], true);
+
+                $afterStyle = $isStatus
+                    ? 'font-weight:700;color:var(--color-primary,#2563eb);'
+                    : ($isStaff ? 'font-weight:600;color:var(--color-info,#0891b2);' : 'font-weight:600;');
+
+                $diffHtml .= '<div style="display:flex;align-items:baseline;gap:6px;margin:3px 0;font-size:12.5px;">'
+                    . '<span style="min-width:90px;color:var(--text-muted,#6b7280);">' . $label . '</span>'
+                    . '<span style="color:var(--text-muted,#9ca3af);text-decoration:line-through;">' . $before . '</span>'
+                    . '<span style="color:var(--text-muted,#9ca3af);">→</span>'
+                    . '<span style="' . $afterStyle . '">' . $after . '</span>'
+                    . '</div>';
+            }
+
+            $html .= '<div style="border-left:3px solid ' . $borderColor . ';padding:8px 10px 8px 12px;margin-bottom:10px;background:var(--bg-card,#fff);border-radius:0 4px 4px 0;">'
+                . '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'
+                . '<span style="font-size:12px;color:var(--text-muted,#6b7280);">' . Layout::escape((string) ($item['changed_at'] ?? '')) . '</span>'
+                . '<span style="font-size:12px;color:var(--text-muted,#6b7280);">' . Layout::escape((string) ($item['changed_by'] ?? '')) . '</span>'
+                . '</div>'
+                . $diffHtml
+                . '</div>';
+        }
+
+        if ($html === '') {
+            $html = '<div class="muted" style="font-size:12.5px;">該当する変更履歴はありません。</div>';
+        }
+
+        return $html;
     }
 
-    private static function auditSourceLabel(string $source): string
+    /**
+     * @param array<string, string> $statusNameMap  code => display_name from master (may be empty)
+     */
+    private static function translateFieldValue(string $fieldKey, string $value, array $statusNameMap = []): string
     {
-        return match ($source) {
-            'SCREEN' => '画面',
-            'SJNET_IMPORT' => 'SJNET取込',
-            'BATCH' => 'バッチ',
-            'API' => 'API',
-            default => $source,
+        if ($value === '') {
+            return '';
+        }
+
+        return match ($fieldKey) {
+            'case_status' => $statusNameMap[$value] ?? match ($value) {
+                'not_started'    => '未対応',
+                'sj_requested'   => 'SJ依頼中',
+                'doc_prepared'   => '書類作成済',
+                'waiting_return' => '返送待ち',
+                'quote_sent'     => '見積送付済',
+                'waiting_payment' => '入金待ち',
+                'completed'      => '完了',
+                default => $value,
+            },
+            'renewal_method' => match ($value) {
+                '対面', '郵送', '電話募集' => $value,
+                default => $value,
+            },
+            'procedure_method' => match ($value) {
+                '対面', '対面ナビ', '電話ナビ', '電話募集', '署名・捺印', 'ケータイOR', 'マイページ' => $value,
+                default => $value,
+            },
+            default => $value,
         };
     }
 

@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS t_accident_case (
   priority            VARCHAR(20)     NOT NULL DEFAULT 'normal' COMMENT '優先度(low/normal/high/urgent)',
   insurer_claim_no    VARCHAR(100)    NULL     COMMENT '保険会社事故受付番号',
   resolved_date       DATE            NULL     COMMENT '解決日',
-  assigned_user_id    BIGINT UNSIGNED NULL     COMMENT '主担当者(common.users.id)',
+  assigned_staff_id   BIGINT UNSIGNED NULL     COMMENT '主担当者(m_staff.id)',
+  office_staff_id     BIGINT UNSIGNED NULL     COMMENT '事務担当者(m_staff.id)',
   remark              TEXT            NULL     COMMENT '備考',
   is_deleted          TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '削除フラグ',
 
@@ -29,7 +30,8 @@ CREATE TABLE IF NOT EXISTS t_accident_case (
   KEY idx_t_accident_case_02 (contract_id),
   KEY idx_t_accident_case_03 (accepted_date),
   KEY idx_t_accident_case_04 (status),
-  KEY idx_t_accident_case_05 (assigned_user_id),
+  KEY idx_t_accident_case_05 (assigned_staff_id),
+  KEY idx_t_accident_case_09 (office_staff_id),
   KEY idx_t_accident_case_06 (is_deleted),
   KEY idx_t_accident_case_07 (accident_no),
 

@@ -6,9 +6,10 @@ namespace App\Controller;
 use App\AppConfig;
 use App\Domain\Activity\ActivityRepository;
 use App\Domain\Activity\DailyReportRepository;
+use App\Domain\SalesCase\SalesCaseRepository;
 use App\Domain\Tenant\ActivityPurposeTypeRepository;
+use App\Domain\Tenant\StaffRepository;
 use App\Http\Responses;
-use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
 use App\Presentation\ActivityDailyView;
 use App\Presentation\ActivityDetailView;
@@ -32,7 +33,6 @@ final class ActivityController
     public function __construct(
         private AuthGuard $guard,
         private TenantConnectionFactory $tenantConnectionFactory,
-        private CommonConnectionFactory $commonConnectionFactory,
         private AppConfig $config
     ) {
     }
@@ -41,11 +41,12 @@ final class ActivityController
     {
         $auth = $this->guard->requireAuthenticated();
 
-        $today   = (new DateTimeImmutable())->format('Y-m-d');
-        $isAdmin = $this->isAdmin($auth);
-        $criteria  = $this->extractCriteria($_GET, (int) ($auth['user_id'] ?? 0), $today, $isAdmin);
-        $listState = $this->extractListState($_GET);
-        $listUrl = $this->listUrl($criteria, $listState);
+        $today       = (new DateTimeImmutable())->format('Y-m-d');
+        $isAdmin     = $this->isAdmin($auth);
+        $loginUserId = (int) ($auth['user_id'] ?? 0);
+        $criteria    = $this->extractCriteria($_GET, $loginUserId, $today, $isAdmin);
+        $listState   = $this->extractListState($_GET);
+        $listUrl     = $this->listUrl($criteria, $listState);
 
         $rows = [];
         $total = 0;
@@ -55,6 +56,17 @@ final class ActivityController
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+
+            // staff_id が未指定（デフォルト）の場合: loginUserId に紐づく m_staff.id で補正する
+            // t_activity.staff_id は m_staff.id を格納するため、common.users.id での比較は誤り
+            if (($this->rawGetStaffId()) === '') {
+                $loginStaffMstId = (new StaffRepository($pdo))->findIdByUserId($loginUserId);
+                if ($loginStaffMstId !== null) {
+                    $criteria['staff_id'] = (string) $loginStaffMstId;
+                }
+                // m_staff レコードがない場合は loginUserId のまま（後方互換）
+            }
+
             $repository = new ActivityRepository($pdo);
             $result = $repository->searchPage(
                 $criteria,
@@ -68,7 +80,7 @@ final class ActivityController
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
             $listUrl = $this->listUrl($criteria, $listState);
             $customers = $repository->fetchCustomers(500);
-            $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
+            $staffUsers = (new StaffRepository($pdo))->findActive();
             $staffUserNames = $this->buildUserNameMap($staffUsers);
             $rows = $this->attachStaffNamesToRows($rows, $staffUserNames);
         } catch (Throwable) {
@@ -85,7 +97,6 @@ final class ActivityController
             $listState,
             $staffUsers,
             $listUrl,
-            $this->config->routeUrl('activity/new'),
             $this->config->routeUrl('activity/detail'),
             $this->config->routeUrl('activity/daily'),
             $this->config->routeUrl('customer/detail'),
@@ -96,64 +107,6 @@ final class ActivityController
             $isAdmin,
             (string) ($_GET['filter_open'] ?? '') === '1',
             ControllerLayoutHelper::build($this->guard, $this->config, 'activity')
-        ));
-    }
-
-    public function newForm(): void
-    {
-        $auth = $this->guard->requireAuthenticated();
-
-        $listUrl = $this->listUrlFromGet();
-        $customers    = [];
-        $staffUsers   = [];
-        $purposeTypes = [];
-        $error        = null;
-
-        $prefill = [
-            'customer_id'    => trim((string) ($_GET['customer_id'] ?? '')),
-            'activity_date'  => (new DateTimeImmutable())->format('Y-m-d'),
-            'staff_user_id'  => (string) ($auth['user_id'] ?? ''),
-        ];
-
-        $draft = $this->consumeCreateDraft();
-        if ($draft !== null) {
-            $prefill = array_merge($prefill, (array) $draft);
-        }
-
-        try {
-            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $repository = new ActivityRepository($pdo);
-            $customers    = $repository->fetchCustomers(500);
-            $staffUsers   = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
-            $purposeTypes = (new ActivityPurposeTypeRepository($pdo))->findAll();
-        } catch (Throwable) {
-            $error = '顧客・担当者情報の取得に失敗しました。';
-        }
-
-        $flashError = $this->guard->session()->consumeFlash('error');
-
-        Responses::html(ActivityDetailView::renderNew(
-            $prefill,
-            $customers,
-            $staffUsers,
-            [],
-            $listUrl,
-            $this->config->routeUrl('activity/store'),
-            $this->guard->session()->issueCsrfToken('activity_store'),
-            $flashError,
-            $error,
-            self::ALLOWED_ACTIVITY_TYPES,
-            ControllerLayoutHelper::build(
-                $this->guard,
-                $this->config,
-                'activity',
-                [
-                    ['label' => 'ホーム', 'url' => $this->config->routeUrl('dashboard')],
-                    ['label' => '活動一覧', 'url' => $listUrl],
-                    ['label' => '活動登録'],
-                ]
-            ),
-            $purposeTypes
         ));
     }
 
@@ -184,9 +137,9 @@ final class ActivityController
                 Responses::redirect($listUrl);
             }
             $customers    = $repository->fetchCustomers(500);
-            $staffUsers   = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
+            $staffUsers   = (new StaffRepository($pdo))->findActive();
             $staffUserNames = $this->buildUserNameMap($staffUsers);
-            $record['staff_name'] = $staffUserNames[(int) ($record['staff_user_id'] ?? 0)] ?? '';
+            $record['staff_name'] = $staffUserNames[(int) ($record['staff_id'] ?? 0)] ?? '';
             $purposeTypes = (new ActivityPurposeTypeRepository($pdo))->findAll();
 
             $editDraft = $this->consumeEditDraft();
@@ -245,7 +198,6 @@ final class ActivityController
         $errors = $this->validateInput($input);
         if ($errors !== []) {
             $this->guard->session()->setFlash('error', implode(' ', $errors));
-            $this->storeCreateDraft($input);
             Responses::redirect($returnTo);
         }
 
@@ -256,11 +208,10 @@ final class ActivityController
             $this->guard->session()->setFlash('success', '活動を登録しました。');
         } catch (Throwable) {
             $this->guard->session()->setFlash('error', '活動の登録に失敗しました。');
-            $this->storeCreateDraft($input);
             Responses::redirect($returnTo);
         }
 
-        Responses::redirect($this->config->routeUrl('activity/list'));
+        Responses::redirect($returnTo);
     }
 
     public function update(): void
@@ -334,7 +285,7 @@ final class ActivityController
             $this->guard->session()->setFlash('error', '活動の削除に失敗しました。');
         }
 
-        Responses::redirect($this->config->routeUrl('activity/list'));
+        Responses::redirect($returnTo);
     }
 
     public function daily(): void
@@ -342,13 +293,11 @@ final class ActivityController
         $auth = $this->guard->requireAuthenticated();
 
         $loginUserId = (int) ($auth['user_id'] ?? 0);
+        $displayName = (string) ($auth['display_name'] ?? '');
         $today = (new DateTimeImmutable())->format('Y-m-d');
 
         $date        = trim((string) ($_GET['date'] ?? $today));
-        $staffUserId = (int) ($_GET['staff'] ?? $loginUserId);
-        if ($staffUserId <= 0) {
-            $staffUserId = $loginUserId;
-        }
+        $staffUserId = $loginUserId;
 
         // date検証
         $parsedDate = DateTimeImmutable::createFromFormat('Y-m-d', $date);
@@ -359,32 +308,46 @@ final class ActivityController
         $prevDate = (new DateTimeImmutable($date))->modify('-1 day')->format('Y-m-d');
         $nextDate = (new DateTimeImmutable($date))->modify('+1 day')->format('Y-m-d');
 
-        $activities  = [];
-        $dailyReport = null;
-        $staffUsers  = [];
-        $error       = null;
+        $activities   = [];
+        $dailyReport  = null;
+        $staffUsers   = [];
+        $customers    = [];
+        $salesCases   = [];
+        $purposeTypes = [];
+        $error        = null;
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $dailyRepo = new DailyReportRepository($pdo);
-            $activities  = $dailyRepo->findActivitiesForDay($date, $staffUserId);
-            $dailyReport = $dailyRepo->findByDateAndStaff($date, $staffUserId);
-            $staffUsers  = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
+            $staffRepo    = new StaffRepository($pdo);
+            $dailyRepo    = new DailyReportRepository($pdo);
+            $actRepo      = new ActivityRepository($pdo);
+
+            // t_activity.staff_id = m_staff.id のため、loginUserId ではなく m_staff.id でフィルタする
+            $loginStaffMstId = $staffRepo->findIdByUserId($loginUserId);
+            $filterStaffId   = $loginStaffMstId ?? $loginUserId; // m_staff なければ後方互換で loginUserId
+
+            $activities   = $dailyRepo->findActivitiesForDay($date, $filterStaffId);
+            $dailyReport  = $dailyRepo->findByDateAndStaff($date, $staffUserId);
+            $staffUsers   = $staffRepo->findActive();
+            $customers    = $actRepo->fetchCustomers(500);
+            $salesCases   = (new SalesCaseRepository($pdo))->fetchForDropdown(500);
+            $purposeTypes = (new ActivityPurposeTypeRepository($pdo))->findAll();
+
+            // フォームのプレフィル用に m_staff.id を保持
+            $staffUserId = $loginStaffMstId ?? 0;
         } catch (Throwable) {
             $error = '日報データの取得に失敗しました。';
         }
 
-        $staffUserNames = $this->buildUserNameMap($staffUsers);
-        $displayName    = $staffUserNames[$staffUserId] ?? '';
 
         $flashError   = $this->guard->session()->consumeFlash('error');
         $flashSuccess = $this->guard->session()->consumeFlash('success');
         $listUrl      = $this->config->routeUrl('activity/list');
 
-        $isOwnReport = ($staffUserId === $loginUserId);
-        $submitCsrf  = $isOwnReport
-            ? $this->guard->session()->issueCsrfToken('activity_submit')
-            : '';
+        $dailyUrl = ListViewHelper::buildUrl(
+            $this->config->routeUrl('activity/daily'),
+            ['date' => $date]
+        );
 
         Responses::html(ActivityDailyView::render(
             $date,
@@ -401,23 +364,30 @@ final class ActivityController
             $this->config->routeUrl('activity/detail'),
             $this->config->routeUrl('customer/detail'),
             $this->guard->session()->issueCsrfToken('activity_comment'),
-            $loginUserId,
-            $this->config->routeUrl('activity/submit'),
-            $submitCsrf,
             $flashError,
             $flashSuccess,
             $error,
             self::ALLOWED_ACTIVITY_TYPES,
+            $this->config->routeUrl('activity/store'),
+            $this->guard->session()->issueCsrfToken('activity_store'),
+            $dailyUrl,
+            $customers,
+            $salesCases,
+            $purposeTypes,
             ControllerLayoutHelper::build(
                 $this->guard,
                 $this->config,
                 'activity',
                 [
                     ['label' => 'ホーム', 'url' => $this->config->routeUrl('dashboard')],
-                    ['label' => '活動一覧', 'url' => $listUrl],
-                    ['label' => '日報ビュー（' . $date . '）'],
+                    ['label' => '営業日報（' . $date . '）'],
                 ]
-            )
+            ),
+            $this->config->routeUrl('activity/submit'),
+            $this->guard->session()->issueCsrfToken('activity_submit'),
+            $loginUserId,
+            $this->config->routeUrl('activity/delete'),
+            $this->guard->session()->issueCsrfToken('activity_delete')
         ));
     }
 
@@ -433,7 +403,7 @@ final class ActivityController
         }
 
         $date        = trim((string) ($_POST['report_date'] ?? ''));
-        $staffUserId = (int) ($_POST['staff_user_id'] ?? $loginUserId);
+        $staffUserId = (int) ($_POST['staff_id'] ?? $loginUserId);
 
         $parsedDate = DateTimeImmutable::createFromFormat('Y-m-d', $date);
         if ($parsedDate === false || $parsedDate->format('Y-m-d') !== $date) {
@@ -479,7 +449,7 @@ final class ActivityController
         }
 
         $date        = trim((string) ($_POST['report_date'] ?? ''));
-        $staffUserId = (int) ($_POST['staff_user_id'] ?? $loginUserId);
+        $staffUserId = (int) ($_POST['staff_id'] ?? $loginUserId);
         $comment     = trim((string) ($_POST['comment'] ?? ''));
 
         $parsedDate = DateTimeImmutable::createFromFormat('Y-m-d', $date);
@@ -513,7 +483,7 @@ final class ActivityController
      */
     private function extractCriteria(array $source, int $loginUserId, string $today, bool $isAdmin = false): array
     {
-        $staffUserId = trim((string) ($source['staff_user_id'] ?? ''));
+        $staffUserId = trim((string) ($source['staff_id'] ?? ''));
         if ($staffUserId === '') {
             $staffUserId = (string) $loginUserId;
         }
@@ -530,7 +500,7 @@ final class ActivityController
             'activity_date_to'    => $dateTo,
             'customer_name'       => trim((string) ($source['customer_name'] ?? '')),
             'activity_type'       => trim((string) ($source['activity_type'] ?? '')),
-            'staff_user_id'       => $staffUserId,
+            'staff_id'       => $staffUserId,
             'daily_report_status' => $isAdmin ? trim((string) ($source['daily_report_status'] ?? '')) : '',
         ];
     }
@@ -595,8 +565,16 @@ final class ActivityController
             return $default;
         }
         $parsed = parse_url($returnTo);
-        if (!is_array($parsed) || isset($parsed['host'])) {
+        if (!is_array($parsed)) {
             return $default;
+        }
+        // 外部ホストへのオープンリダイレクトを防ぐ。
+        // appUrl 設定時は routeUrl() が絶対 URL を返すため、同一ホストは許可する。
+        if (isset($parsed['host'])) {
+            $serverHost = $_SERVER['HTTP_HOST'] ?? '';
+            if ($parsed['host'] !== $serverHost) {
+                return $default;
+            }
         }
 
         return $returnTo;
@@ -610,6 +588,7 @@ final class ActivityController
         return [
             'customer_id'       => trim((string) ($_POST['customer_id'] ?? '')),
             'contract_id'       => trim((string) ($_POST['contract_id'] ?? '')),
+            'sales_case_id'     => trim((string) ($_POST['sales_case_id'] ?? '')),
             'renewal_case_id'   => trim((string) ($_POST['renewal_case_id'] ?? '')),
             'accident_case_id'  => trim((string) ($_POST['accident_case_id'] ?? '')),
             'activity_date'     => trim((string) ($_POST['activity_date'] ?? '')),
@@ -625,7 +604,7 @@ final class ActivityController
             'next_action_date'  => trim((string) ($_POST['next_action_date'] ?? '')),
             'next_action_note'  => trim((string) ($_POST['next_action_note'] ?? '')),
             'result_type'       => trim((string) ($_POST['result_type'] ?? '')),
-            'staff_user_id'     => trim((string) ($_POST['staff_user_id'] ?? '')),
+            'staff_id'     => trim((string) ($_POST['staff_id'] ?? '')),
         ];
     }
 
@@ -638,8 +617,9 @@ final class ActivityController
         $errors = [];
 
         $customerId = trim((string) ($input['customer_id'] ?? ''));
-        if ($customerId === '' || !ctype_digit($customerId) || (int) $customerId <= 0) {
-            $errors[] = '顧客を選択してください。';
+        // 空文字は「顧客なし」（NULL保存）として許容。値がある場合は正整数であること
+        if ($customerId !== '' && (!ctype_digit($customerId) || (int) $customerId <= 0)) {
+            $errors[] = '顧客の選択が不正です。';
         }
 
         $activityDate = trim((string) ($input['activity_date'] ?? ''));
@@ -668,21 +648,6 @@ final class ActivityController
         return $date !== false && $date->format('Y-m-d') === $value;
     }
 
-    private function storeCreateDraft(mixed $input): void
-    {
-        $this->guard->session()->setFlash('activity_create_draft', serialize($input));
-    }
-
-    private function consumeCreateDraft(): ?array
-    {
-        $raw = $this->guard->session()->consumeFlash('activity_create_draft');
-        if (!is_string($raw) || $raw === '') {
-            return null;
-        }
-        $data = @unserialize($raw);
-        return is_array($data) ? $data : null;
-    }
-
     private function storeEditDraft(int $id, mixed $input): void
     {
         $this->guard->session()->setFlash('activity_edit_draft', serialize(['id' => $id, 'input' => $input]));
@@ -699,52 +664,7 @@ final class ActivityController
     }
 
     /**
-     * @return array<int, array{id: int, name: string}>
-     */
-    private function fetchAssignableUsers(string $tenantCode): array
-    {
-        $tenantCode = trim($tenantCode);
-        if ($tenantCode === '') {
-            return [];
-        }
-
-        $pdo = $this->commonConnectionFactory->create();
-        $stmt = $pdo->prepare(
-            'SELECT u.id, u.name
-             FROM user_tenants ut
-             INNER JOIN users u ON u.id = ut.user_id
-             WHERE ut.tenant_code = :tenant_code
-               AND ut.status = 1
-               AND ut.is_deleted = 0
-               AND u.status = 1
-               AND u.is_deleted = 0
-             ORDER BY u.name ASC, u.id ASC'
-        );
-        $stmt->bindValue(':tenant_code', $tenantCode);
-        $stmt->execute();
-
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        if (!is_array($rows)) {
-            return [];
-        }
-
-        $result = [];
-        foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            $id   = (int) ($row['id'] ?? 0);
-            $name = trim((string) ($row['name'] ?? ''));
-            if ($id > 0 && $name !== '') {
-                $result[] = ['id' => $id, 'name' => $name];
-            }
-        }
-
-        return $result;
-    }
-
-    /**
-     * @param array<int, array{id:int, name:string}> $users
+     * @param array<int, array<string, mixed>> $users
      * @return array<int, string>
      */
     private function buildUserNameMap(array $users): array
@@ -752,7 +672,7 @@ final class ActivityController
         $map = [];
         foreach ($users as $user) {
             $id   = (int) ($user['id'] ?? 0);
-            $name = trim((string) ($user['name'] ?? ''));
+            $name = trim((string) ($user['staff_name'] ?? $user['name'] ?? ''));
             if ($id > 0 && $name !== '') {
                 $map[$id] = $name;
             }
@@ -783,10 +703,16 @@ final class ActivityController
     private function attachStaffNamesToRows(array $rows, array $nameMap): array
     {
         foreach ($rows as &$row) {
-            $row['staff_name'] = $nameMap[(int) ($row['staff_user_id'] ?? 0)] ?? '';
+            $row['staff_name'] = $nameMap[(int) ($row['staff_id'] ?? 0)] ?? '';
         }
         unset($row);
 
         return $rows;
+    }
+
+    /** GETパラメータの staff_id 生値（未指定判定用） */
+    private function rawGetStaffId(): string
+    {
+        return trim((string) ($_GET['staff_id'] ?? ''));
     }
 }

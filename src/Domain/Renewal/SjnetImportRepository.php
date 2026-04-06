@@ -100,7 +100,7 @@ final class SjnetImportRepository
                (sjnet_import_batch_id, row_no, raw_payload_json,
                 policy_no, customer_name, maturity_date,
                 sjnet_agency_code, sjnet_staff_name,
-                resolved_staff_user_id, staff_mapping_status,
+                resolved_staff_id, staff_mapping_status,
                 matched_contract_id, matched_renewal_case_id,
                 row_status, error_message)
              VALUES
@@ -114,8 +114,8 @@ final class SjnetImportRepository
 
         $rawJson = json_encode($data['raw'] ?? [], JSON_UNESCAPED_UNICODE) ?: '{}';
         $maturityDate = $data['maturity_date'] ?? null;
-        $resolvedUid  = isset($data['resolved_staff_user_id']) && $data['resolved_staff_user_id'] > 0
-            ? (int) $data['resolved_staff_user_id'] : null;
+        $resolvedUid  = isset($data['resolved_staff_id']) && $data['resolved_staff_id'] > 0
+            ? (int) $data['resolved_staff_id'] : null;
         $contractId   = isset($data['matched_contract_id']) && $data['matched_contract_id'] > 0
             ? (int) $data['matched_contract_id'] : null;
         $renewalId    = isset($data['matched_renewal_case_id']) && $data['matched_renewal_case_id'] > 0
@@ -166,7 +166,7 @@ final class SjnetImportRepository
         $stmt = $this->pdo->prepare(
             'SELECT row_no, policy_no, customer_name, maturity_date,
                     sjnet_agency_code, sjnet_staff_name,
-                    resolved_staff_user_id, staff_mapping_status,
+                    resolved_staff_id, staff_mapping_status,
                     matched_contract_id, matched_renewal_case_id,
                     row_status, error_message
              FROM t_sjnet_import_row

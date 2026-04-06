@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS t_sales_performance (
   receipt_no          VARCHAR(50)      NULL     COMMENT '領収証番号',
   settlement_month    VARCHAR(7)       NULL     COMMENT '精算月(YYYY-MM)',
 
-  staff_user_id       BIGINT UNSIGNED  NULL     COMMENT '担当者(common.users.id)',
+  staff_id            BIGINT UNSIGNED  NULL     COMMENT '担当者(m_staff.id)',
   sales_channel       VARCHAR(20)      NULL     COMMENT '販売チャネル(direct/motor_dealer/agency_referral/customer_referral/group/other)',
   referral_source     VARCHAR(100)     NULL     COMMENT '紹介元名称(ディーラー名・紹介者名等。sales_channel が direct 以外の場合に入力)',
   remark              TEXT             NULL     COMMENT '備考',
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS t_sales_performance (
   KEY idx_t_sales_performance_01 (customer_id, performance_date),
   KEY idx_t_sales_performance_02 (contract_id),
   KEY idx_t_sales_performance_03 (renewal_case_id),
-  KEY idx_t_sales_performance_04 (staff_user_id),
+  KEY idx_t_sales_performance_04 (staff_id),
   KEY idx_t_sales_performance_05 (settlement_month),
   KEY idx_t_sales_performance_06 (is_deleted),
   KEY idx_t_sales_performance_07 (policy_no),

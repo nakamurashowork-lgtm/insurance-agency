@@ -23,7 +23,7 @@ final class ControllerLayoutHelper
             'renewal'    => $config->routeUrl('renewal/list'),
             'sales'      => $config->routeUrl('sales/list'),
             'customer'   => $config->routeUrl('customer/list'),
-            'activity'   => $config->routeUrl('activity/list'),
+            'activity'   => $config->routeUrl('activity/daily'),
             'sales_case' => $config->routeUrl('sales-case/list'),
             'accident'   => $config->routeUrl('accident/list'),
             'settings'   => $config->routeUrl('tenant/settings'),

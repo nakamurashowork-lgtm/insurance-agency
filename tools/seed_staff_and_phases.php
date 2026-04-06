@@ -96,8 +96,8 @@ if ((int) ($existing['cnt'] ?? 0) > 0) {
     echo "3件 挿入しました。\n\n";
 }
 
-// ---- m_staff_sjnet_mapping ----
-echo "=== m_staff_sjnet_mapping ===\n";
+// ---- m_staff ----
+echo "=== m_staff ===\n";
 
 $staffData = [
     ['code' => 'N8559007', 'name' => '飯田 光男'],
@@ -106,8 +106,8 @@ $staffData = [
 ];
 
 $insertStmt = $tenant->prepare(
-    "INSERT IGNORE INTO m_staff_sjnet_mapping (sjnet_code, staff_name, created_by, updated_by)
-     VALUES (:code, :name, :uid, :uid)"
+    "INSERT IGNORE INTO m_staff (sjnet_code, staff_name, is_sales, is_office, is_active, sort_order, created_by, updated_by)
+     VALUES (:code, :name, 1, 0, 1, 0, :uid, :uid)"
 );
 
 $inserted = 0;

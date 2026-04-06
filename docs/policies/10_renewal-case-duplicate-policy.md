@@ -68,3 +68,17 @@ KEY idx_t_renewal_case_08 (contract_id, maturity_date),
 | `t_renewal_case.sql` | UNIQUE KEY 削除、複合インデックス追加 |
 | `RenewalCaseRepository.php` | 新規作成時の重複チェックロジック追加 |
 | SJNET取込バッチ | 同一証券番号・同一満期日の既存案件チェックとUPDATE処理の確認 |
+
+## 5. t_contract 年度別複数レコード設計との整合
+
+`t_contract` の UNIQUE KEY を `(policy_no)` から `(policy_no, policy_end_date)` に変更したことにより、
+同一証券番号で終期日が異なる複数の契約レコードが存在するようになった（`docs/policies/sjnet-csv-import-spec.md` 参照）。
+
+この設計変更と本方針の整合は以下のとおり。
+
+- SJNET 取込時の `t_renewal_case` 重複チェックは `contract_id + maturity_date` で行う
+  → 新年度は新しい `contract_id` で INSERT されるため、重複は発生しない
+- 同一年度の再取込（contract UPDATE）では、`contract_id` が変わらないため、
+  既存の `t_renewal_case` レコードがそのまま UPDATE される（本方針の 2-3 と一致する）
+- 旧年度の完了済み案件（renewed / lost）は、新年度契約 INSERT 時に `closed` へ自動遷移する
+  これにより、満期一覧のデフォルト表示（未完了案件のみ）で旧年度案件が混入しない

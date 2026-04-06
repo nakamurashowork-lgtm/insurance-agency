@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS t_sjnet_import_row (
     COMMENT 'SJNETの担当者名(満期一覧列43)。マッピング解決の参考情報として保持',
 
   -- マッピング解決結果
-  resolved_staff_user_id  BIGINT UNSIGNED NULL
-    COMMENT 'マッピング解決後のユーザーID(common.users.id)。m_sjnet_staff_mappingで解決。未解決はNULL',
+  resolved_staff_id       BIGINT UNSIGNED NULL
+    COMMENT 'マッピング解決後のスタッフID(m_staff.id)。未解決はNULL',
   staff_mapping_status    VARCHAR(20)     NULL
     COMMENT 'マッピング解決状態(resolved/unresolved/inactive)。NULLは生保等のコード非対象行',
 
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS t_sjnet_import_row (
   KEY idx_t_sjnet_import_row_04 (matched_contract_id),
   KEY idx_t_sjnet_import_row_05 (matched_renewal_case_id),
   KEY idx_t_sjnet_import_row_06 (sjnet_agency_code),
-  KEY idx_t_sjnet_import_row_07 (resolved_staff_user_id),
+  KEY idx_t_sjnet_import_row_07 (resolved_staff_id),
   KEY idx_t_sjnet_import_row_08 (staff_mapping_status),
 
   CONSTRAINT fk_t_sjnet_import_row_01

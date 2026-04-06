@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Renewal;
 
-use App\Domain\Tenant\StaffSjnetMappingRepository;
+use App\Domain\Tenant\StaffRepository;
 use DateTimeImmutable;
 use PDO;
 use Throwable;
@@ -27,11 +27,10 @@ final class SjnetCsvImportService
     private const COL_PAYMENT_CYCLE   = 19;  // T: 払込方法
     private const COL_PREMIUM_AMOUNT  = 22;  // W: 合計保険料
     private const COL_SJNET_STAFF_NAME = 42; // AQ: 担当者
-    private const COL_SJNET_AGENCY_CODE = 43; // AR: 代理店コード
+    private const COL_SJNET_AGENCY_CODE = 43; // AR: 代理店ｺｰﾄﾞ（実際のCSVヘッダは半角カタカナ）
 
     public function __construct(
         private PDO $pdo,
-        private PDO $commonPdo,
         private int $executedBy,
         private DateTimeImmutable $importDate
     ) {
@@ -132,6 +131,7 @@ final class SjnetCsvImportService
             if ($row === false) {
                 continue;
             }
+            // CSVヘッダ・値の前後空白を除去（実際のCSVにはヘッダ末尾スペースが含まれる場合がある）
             $lines[] = array_map('trim', $row);
         }
         fclose($stream);
@@ -243,7 +243,8 @@ final class SjnetCsvImportService
             $productType,
             $paymentCycle,
             $premiumAmount,
-            $resolvedUserId
+            $resolvedUserId,
+            $maturityDate
         );
 
         if ($contractWasInserted) {
@@ -274,7 +275,7 @@ final class SjnetCsvImportService
             'maturity_date'          => $maturityDate,
             'sjnet_agency_code'      => $agencyCode ?: null,
             'sjnet_staff_name'       => $sjnetStaffName ?: null,
-            'resolved_staff_user_id' => $resolvedUserId,
+            'resolved_staff_id' => $resolvedUserId,
             'staff_mapping_status'   => $mappingStatus,
             'matched_contract_id'    => $contractId,
             'matched_renewal_case_id' => $renewalCaseId,
@@ -376,42 +377,27 @@ final class SjnetCsvImportService
             return [null, null];
         }
 
-        $repo = new StaffSjnetMappingRepository($this->pdo);
-        $mapping = $repo->findByAgencyCode($agencyCode);
+        $repo = new StaffRepository($this->pdo);
+        $staff = $repo->findBySjnetCode($agencyCode);
 
-        if ($mapping === null) {
+        if ($staff === null) {
             return [null, 'unresolved'];
         }
 
-        $isActive = (int) ($mapping['is_active'] ?? 0);
+        $isActive = (int) ($staff['is_active'] ?? 0);
         if ($isActive === 0) {
             return [null, 'inactive'];
         }
 
-        // 担当者名でシステムユーザーを検索して紐づけ（存在しなくてもOK）
-        $staffName = trim((string) ($mapping['staff_name'] ?? ''));
-        $resolvedUserId = null;
-        if ($staffName !== '') {
-            $stmt = $this->commonPdo->prepare(
-                'SELECT id FROM users
-                 WHERE name = :name
-                   AND status = 1
-                   AND is_deleted = 0
-                 LIMIT 1'
-            );
-            $stmt->bindValue(':name', $staffName);
-            $stmt->execute();
-            $found = $stmt->fetch(PDO::FETCH_ASSOC);
-            if (is_array($found)) {
-                $resolvedUserId = (int) $found['id'];
-            }
-        }
-
-        return [$resolvedUserId, 'resolved'];
+        return [(int) $staff['id'], 'resolved'];
     }
 
     /**
      * 契約をINSERT or UPDATE し、contract_id と was_inserted を返す
+     *
+     * 検索キー: policy_no + policy_end_date（同一証券番号・同一終期 = 同一年度の契約）
+     * ヒット → UPDATE（同年度の再取込）
+     * ミス   → INSERT（新年度の契約として新規作成）
      *
      * @return array{0: int, 1: bool}  [contract_id, was_inserted]
      */
@@ -424,16 +410,33 @@ final class SjnetCsvImportService
         string $productType,
         string $paymentCycle,
         ?int $premiumAmount,
-        ?int $resolvedUserId
+        ?int $resolvedUserId,
+        string $maturityDate
     ): array {
-        $stmt = $this->pdo->prepare(
-            'SELECT id, sales_user_id
-             FROM t_contract
-             WHERE policy_no = :policy_no
-               AND is_deleted = 0
-             LIMIT 1'
-        );
-        $stmt->bindValue(':policy_no', $policyNo);
+        // 証券番号 + 終期日（policy_end_date）で同一年度の契約を検索する。
+        // policy_end_date が CSV に存在しない（null）の場合は IS NULL で照合する。
+        if ($endDate !== null) {
+            $stmt = $this->pdo->prepare(
+                'SELECT id, sales_staff_id
+                 FROM t_contract
+                 WHERE policy_no = :policy_no
+                   AND policy_end_date = :end_date
+                   AND is_deleted = 0
+                 LIMIT 1'
+            );
+            $stmt->bindValue(':policy_no', $policyNo);
+            $stmt->bindValue(':end_date', $endDate);
+        } else {
+            $stmt = $this->pdo->prepare(
+                'SELECT id, sales_staff_id
+                 FROM t_contract
+                 WHERE policy_no = :policy_no
+                   AND policy_end_date IS NULL
+                   AND is_deleted = 0
+                 LIMIT 1'
+            );
+            $stmt->bindValue(':policy_no', $policyNo);
+        }
         $stmt->execute();
         $existing = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -441,9 +444,9 @@ final class SjnetCsvImportService
 
         if (is_array($existing)) {
             $contractId     = (int) $existing['id'];
-            $existingUserId = $existing['sales_user_id'] !== null ? (int) $existing['sales_user_id'] : null;
+            $existingUserId = $existing['sales_staff_id'] !== null ? (int) $existing['sales_staff_id'] : null;
 
-            // sales_user_id は未設定の場合のみ上書き
+            // sales_staff_id は未設定の場合のみ上書き
             $newSalesUserId = $existingUserId === null ? $resolvedUserId : $existingUserId;
 
             $stmt = $this->pdo->prepare(
@@ -454,7 +457,7 @@ final class SjnetCsvImportService
                      product_type            = :product_type,
                      payment_cycle           = :payment_cycle,
                      premium_amount          = :premium,
-                     sales_user_id           = :sales_user_id,
+                     sales_staff_id           = :sales_staff_id,
                      last_sjnet_imported_at  = :imported_at,
                      updated_by              = :updated_by
                  WHERE id = :id'
@@ -465,7 +468,7 @@ final class SjnetCsvImportService
             $stmt->bindValue(':product_type', $productType !== '' ? $productType : null);
             $stmt->bindValue(':payment_cycle', $paymentCycle !== '' ? $paymentCycle : null);
             $stmt->bindValue(':premium', $premiumAmount ?? 0, PDO::PARAM_INT);
-            $stmt->bindValue(':sales_user_id', $newSalesUserId, $newSalesUserId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+            $stmt->bindValue(':sales_staff_id', $newSalesUserId, $newSalesUserId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
             $stmt->bindValue(':imported_at', $now);
             $stmt->bindValue(':updated_by', $this->executedBy, PDO::PARAM_INT);
             $stmt->bindValue(':id', $contractId, PDO::PARAM_INT);
@@ -480,13 +483,13 @@ final class SjnetCsvImportService
                (customer_id, policy_no, insurer_name,
                 policy_start_date, policy_end_date,
                 product_type, payment_cycle, premium_amount,
-                status, sales_user_id, last_sjnet_imported_at,
+                status, sales_staff_id, last_sjnet_imported_at,
                 is_deleted, created_by, updated_by)
              VALUES
                (:customer_id, :policy_no, :insurer,
                 :start_date, :end_date,
                 :product_type, :payment_cycle, :premium,
-                \'active\', :sales_user_id, :imported_at,
+                \'active\', :sales_staff_id, :imported_at,
                 0, :created_by, :updated_by)'
         );
         $stmt->bindValue(':customer_id', $customerId, PDO::PARAM_INT);
@@ -497,13 +500,45 @@ final class SjnetCsvImportService
         $stmt->bindValue(':product_type', $productType !== '' ? $productType : null);
         $stmt->bindValue(':payment_cycle', $paymentCycle !== '' ? $paymentCycle : null);
         $stmt->bindValue(':premium', $premiumAmount ?? 0, PDO::PARAM_INT);
-        $stmt->bindValue(':sales_user_id', $resolvedUserId, $resolvedUserId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(':sales_staff_id', $resolvedUserId, $resolvedUserId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
         $stmt->bindValue(':imported_at', $now);
         $stmt->bindValue(':created_by', $this->executedBy, PDO::PARAM_INT);
         $stmt->bindValue(':updated_by', $this->executedBy, PDO::PARAM_INT);
         $stmt->execute();
 
-        return [(int) $this->pdo->lastInsertId(), true];
+        $newContractId = (int) $this->pdo->lastInsertId();
+
+        // 新年度契約を INSERT した場合、同一証券番号の旧案件を自動クローズする
+        $this->closeOldRenewalCases($policyNo, $newContractId, $maturityDate);
+
+        return [$newContractId, true];
+    }
+
+    /**
+     * 新年度契約の INSERT 時に、同一証券番号の旧満期案件を自動クローズする
+     *
+     * 対象: 同一 policy_no の旧契約に紐づく満期案件のうち
+     *       case_status IN ('renewed', 'lost') かつ maturity_date < 新案件の maturity_date
+     * 対応途中（not_started/sj_requested 等）の旧案件はクローズしない。
+     */
+    private function closeOldRenewalCases(string $policyNo, int $newContractId, string $newMaturityDate): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE t_renewal_case rc
+               JOIN t_contract c ON c.id = rc.contract_id
+             SET rc.case_status = \'closed\',
+                 rc.updated_by  = :updated_by
+             WHERE c.policy_no         = :policy_no
+               AND c.id               != :new_contract_id
+               AND rc.maturity_date    < :new_maturity_date
+               AND rc.case_status     IN (\'renewed\', \'lost\')
+               AND rc.is_deleted       = 0'
+        );
+        $stmt->bindValue(':updated_by', $this->executedBy, PDO::PARAM_INT);
+        $stmt->bindValue(':policy_no', $policyNo);
+        $stmt->bindValue(':new_contract_id', $newContractId, PDO::PARAM_INT);
+        $stmt->bindValue(':new_maturity_date', $newMaturityDate);
+        $stmt->execute();
     }
 
     /**
@@ -514,7 +549,7 @@ final class SjnetCsvImportService
     private function upsertRenewalCase(int $contractId, string $maturityDate, ?int $resolvedUserId): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT id, assigned_user_id
+            'SELECT id, assigned_staff_id
              FROM t_renewal_case
              WHERE contract_id = :contract_id
                AND maturity_date = :maturity_date
@@ -528,13 +563,13 @@ final class SjnetCsvImportService
 
         if (is_array($existing)) {
             $renewalId      = (int) $existing['id'];
-            $existingUserId = $existing['assigned_user_id'] !== null ? (int) $existing['assigned_user_id'] : null;
+            $existingUserId = $existing['assigned_staff_id'] !== null ? (int) $existing['assigned_staff_id'] : null;
 
-            // assigned_user_id は未設定の場合のみ上書き
+            // assigned_staff_id は未設定の場合のみ上書き
             if ($existingUserId === null && $resolvedUserId !== null) {
                 $stmt = $this->pdo->prepare(
                     'UPDATE t_renewal_case
-                     SET assigned_user_id = :uid, updated_by = :updated_by
+                     SET assigned_staff_id = :uid, updated_by = :updated_by
                      WHERE id = :id'
                 );
                 $stmt->bindValue(':uid', $resolvedUserId, PDO::PARAM_INT);
@@ -546,20 +581,20 @@ final class SjnetCsvImportService
             return [$renewalId, false];
         }
 
-        // office_user_id を t_contract から引き継ぐ
+        // office_staff_id を t_contract から引き継ぐ
         $contractStmt = $this->pdo->prepare(
-            'SELECT office_user_id FROM t_contract WHERE id = :id LIMIT 1'
+            'SELECT office_staff_id FROM t_contract WHERE id = :id LIMIT 1'
         );
         $contractStmt->bindValue(':id', $contractId, PDO::PARAM_INT);
         $contractStmt->execute();
         $contractRow = $contractStmt->fetch(PDO::FETCH_ASSOC);
-        $officeUserId = is_array($contractRow) && $contractRow['office_user_id'] !== null
-            ? (int) $contractRow['office_user_id'] : null;
+        $officeUserId = is_array($contractRow) && $contractRow['office_staff_id'] !== null
+            ? (int) $contractRow['office_staff_id'] : null;
 
         $stmt = $this->pdo->prepare(
             'INSERT INTO t_renewal_case
                (contract_id, maturity_date, case_status,
-                assigned_user_id, office_user_id,
+                assigned_staff_id, office_staff_id,
                 is_deleted, created_by, updated_by)
              VALUES
                (:contract_id, :maturity_date, \'not_started\',

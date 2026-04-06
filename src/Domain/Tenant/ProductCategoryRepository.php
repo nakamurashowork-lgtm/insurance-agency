@@ -19,9 +19,9 @@ final class ProductCategoryRepository
     public function findAll(): array
     {
         $rows = $this->pdo->query(
-            'SELECT id, csv_value, display_name, created_at, updated_at
+            'SELECT id, csv_value, display_name, is_active, created_at, updated_at
              FROM m_product_category
-             ORDER BY id ASC'
+             ORDER BY is_active DESC, id ASC'
         )->fetchAll();
 
         return is_array($rows) ? $rows : [];
@@ -53,9 +53,12 @@ final class ProductCategoryRepository
         $stmt->execute();
     }
 
-    public function delete(int $id): int
+    public function setActive(int $id, int $active): int
     {
-        $stmt = $this->pdo->prepare('DELETE FROM m_product_category WHERE id = :id');
+        $stmt = $this->pdo->prepare(
+            'UPDATE m_product_category SET is_active = :active WHERE id = :id'
+        );
+        $stmt->bindValue(':active', $active, PDO::PARAM_INT);
         $stmt->bindValue(':id', $id, PDO::PARAM_INT);
         $stmt->execute();
 

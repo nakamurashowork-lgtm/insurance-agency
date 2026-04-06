@@ -62,7 +62,7 @@ final class AccidentCaseRepository
                     ac.priority,
                     ac.resolved_date,
                     ac.updated_at,
-                    ac.assigned_user_id,
+                    ac.assigned_staff_id,
                     mc.customer_name,
                     c.policy_no
              FROM t_accident_case ac
@@ -138,10 +138,10 @@ final class AccidentCaseRepository
             $params['status'] = $status;
         }
 
-        $assignedUserId = (int) ($criteria['assigned_user_id'] ?? 0);
+        $assignedUserId = (int) ($criteria['assigned_staff_id'] ?? 0);
         if ($assignedUserId > 0) {
-            $sql .= ' AND ac.assigned_user_id = :assigned_user_id';
-            $params['assigned_user_id'] = $assignedUserId;
+            $sql .= ' AND ac.assigned_staff_id = :assigned_staff_id';
+            $params['assigned_staff_id'] = $assignedUserId;
         }
 
         return $sql;
@@ -212,12 +212,15 @@ final class AccidentCaseRepository
                     ac.priority,
                     ac.insurer_claim_no,
                     ac.resolved_date,
-                    ac.assigned_user_id,
+                    ac.assigned_staff_id,
                     ac.remark,
                     ac.updated_at,
                     mc.customer_name,
                     mc.phone,
                     mc.email,
+                    mc.postal_code,
+                    mc.address1,
+                    mc.address2,
                     c.policy_no,
                     (SELECT rc.id
                        FROM t_renewal_case rc
@@ -359,31 +362,189 @@ final class AccidentCaseRepository
      */
     public function updateAccidentCase(int $id, array $input, int $updatedBy): int
     {
-        $stmt = $this->pdo->prepare(
-            'UPDATE t_accident_case
-             SET status = :status,
-                 priority = :priority,
-                 assigned_user_id = :assigned_user_id,
-                 resolved_date = :resolved_date,
-                 insurer_claim_no = :insurer_claim_no,
-                 remark = :remark,
-                 updated_by = :updated_by
-             WHERE id = :id
-               AND is_deleted = 0'
-        );
+        $before = $this->findAccidentCaseForAudit($id);
+        if ($before === null) {
+            return 0;
+        }
 
+        $this->pdo->beginTransaction();
+
+        try {
+            $stmt = $this->pdo->prepare(
+                'UPDATE t_accident_case
+                 SET status = :status,
+                     priority = :priority,
+                     assigned_staff_id = :assigned_staff_id,
+                     resolved_date = :resolved_date,
+                     updated_by = :updated_by
+                 WHERE id = :id
+                   AND is_deleted = 0'
+            );
+
+            $stmt->execute([
+                'id' => $id,
+                'status' => $input['status'],
+                'priority' => $input['priority'],
+                'assigned_staff_id' => $input['assigned_staff_id'],
+                'resolved_date' => $input['resolved_date'],
+                'updated_by' => $updatedBy,
+            ]);
+
+            $affected = $stmt->rowCount();
+            if ($affected === 0) {
+                $this->pdo->rollBack();
+                return 0;
+            }
+
+            $after = $this->findAccidentCaseForAudit($id);
+            if ($after === null) {
+                $this->pdo->rollBack();
+                return 0;
+            }
+
+            $details = $this->buildAccidentAuditDetails($before, $after);
+            $eventId = $this->insertAccidentAuditEvent($id, $updatedBy, '事故案件対応情報を更新');
+            if ($details !== []) {
+                $this->insertAccidentAuditEventDetails($eventId, $details);
+            }
+
+            $this->pdo->commit();
+            return $affected;
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    private function findAccidentCaseForAudit(int $id): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT status, priority, assigned_staff_id, resolved_date
+             FROM t_accident_case
+             WHERE id = :id
+               AND is_deleted = 0
+             LIMIT 1'
+        );
+        $stmt->execute(['id' => $id]);
+        $row = $stmt->fetch();
+
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'status'           => $this->normalizeAuditValue($row['status'] ?? null),
+            'priority'         => $this->normalizeAuditValue($row['priority'] ?? null),
+            'assigned_staff_id' => $this->normalizeAuditValue($row['assigned_staff_id'] ?? null),
+            'resolved_date'    => $this->normalizeAuditValue($row['resolved_date'] ?? null),
+        ];
+    }
+
+    private function normalizeAuditValue(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $normalized = trim((string) $value);
+        return $normalized === '' ? null : $normalized;
+    }
+
+    /**
+     * @param array<string, string|null> $before
+     * @param array<string, string|null> $after
+     * @return array<int, array<string, string|null>>
+     */
+    private function buildAccidentAuditDetails(array $before, array $after): array
+    {
+        $fields = [
+            'status'           => ['label' => '対応状況', 'value_type' => 'STRING'],
+            'priority'         => ['label' => '優先度',   'value_type' => 'STRING'],
+            'assigned_staff_id' => ['label' => '担当者',   'value_type' => 'STRING'],
+            'resolved_date'    => ['label' => '解決日',   'value_type' => 'DATE'],
+        ];
+
+        $details = [];
+        foreach ($fields as $fieldKey => $meta) {
+            $beforeValue = $before[$fieldKey] ?? null;
+            $afterValue  = $after[$fieldKey]  ?? null;
+            if ($beforeValue === $afterValue) {
+                continue;
+            }
+            $details[] = [
+                'field_key'         => $fieldKey,
+                'field_label'       => (string) $meta['label'],
+                'value_type'        => (string) $meta['value_type'],
+                'before_value_text' => $beforeValue,
+                'after_value_text'  => $afterValue,
+            ];
+        }
+
+        return $details;
+    }
+
+    private function insertAccidentAuditEvent(int $accidentCaseId, int $updatedBy, string $note): int
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO t_audit_event (
+                entity_type,
+                entity_id,
+                action_type,
+                change_source,
+                changed_by,
+                note
+            ) VALUES (
+                "accident_case",
+                :entity_id,
+                "UPDATE",
+                "SCREEN",
+                :changed_by,
+                :note
+            )'
+        );
         $stmt->execute([
-            'id' => $id,
-            'status' => $input['status'],
-            'priority' => $input['priority'],
-            'assigned_user_id' => $input['assigned_user_id'],
-            'resolved_date' => $input['resolved_date'],
-            'insurer_claim_no' => $input['insurer_claim_no'],
-            'remark' => $input['remark'],
-            'updated_by' => $updatedBy,
+            'entity_id'   => $accidentCaseId,
+            'changed_by'  => $updatedBy,
+            'note'        => $note,
         ]);
 
-        return $stmt->rowCount();
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    /**
+     * @param array<int, array<string, string|null>> $details
+     */
+    private function insertAccidentAuditEventDetails(int $auditEventId, array $details): void
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO t_audit_event_detail (
+                audit_event_id,
+                field_key,
+                field_label,
+                value_type,
+                before_value_text,
+                after_value_text
+             ) VALUES (
+                :audit_event_id,
+                :field_key,
+                :field_label,
+                :value_type,
+                :before_value_text,
+                :after_value_text
+             )'
+        );
+
+        foreach ($details as $detail) {
+            $stmt->execute([
+                'audit_event_id'    => $auditEventId,
+                'field_key'         => (string) ($detail['field_key'] ?? ''),
+                'field_label'       => (string) ($detail['field_label'] ?? ''),
+                'value_type'        => (string) ($detail['value_type'] ?? 'STRING'),
+                'before_value_text' => $detail['before_value_text'] ?? null,
+                'after_value_text'  => $detail['after_value_text'] ?? null,
+            ]);
+        }
     }
 
     /**
@@ -400,7 +561,7 @@ final class AccidentCaseRepository
                  accident_location,
                  status,
                  priority,
-                 assigned_user_id,
+                 assigned_staff_id,
                  remark,
                  created_by,
                  updated_by
@@ -412,7 +573,7 @@ final class AccidentCaseRepository
                  :accident_location,
                  :status,
                  :priority,
-                 :assigned_user_id,
+                 :assigned_staff_id,
                  :remark,
                  :created_by,
                  :updated_by
@@ -426,7 +587,7 @@ final class AccidentCaseRepository
             'accident_location' => $input['accident_location'],
             'status' => $input['status'],
             'priority' => $input['priority'],
-            'assigned_user_id' => $input['assigned_user_id'],
+            'assigned_staff_id' => $input['assigned_staff_id'],
             'remark' => $input['remark'],
             'created_by' => $createdBy,
             'updated_by' => $createdBy,

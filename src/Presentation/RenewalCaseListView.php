@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Presentation;
 
 use App\Presentation\View\Layout;
+use App\Presentation\View\ListPageRenderer as LP;
 use App\Presentation\View\ListViewHelper;
 
 final class RenewalCaseListView
@@ -12,8 +13,9 @@ final class RenewalCaseListView
      * @param array<int, array<string, mixed>> $rows
      * @param array<string, string> $criteria
      * @param array<string, string> $listState
-     * @param array<int, string> $allUsers
+     * @param array<int, array<string, mixed>> $allUsers
      * @param array<string, mixed> $layoutOptions
+     * @param array<int, array<string, mixed>> $allStatuses
      */
     public static function render(
         array $rows,
@@ -35,35 +37,41 @@ final class RenewalCaseListView
         bool $forceFilterOpen,
         array $allUsers,
         array $layoutOptions,
-        ?string $pageSuccessMessage = null
-    ): string
-    {
+        ?string $pageSuccessMessage = null,
+        array $allStatuses = []
+    ): string {
         $errorHtml = '';
         if (is_string($errorMessage) && $errorMessage !== '') {
             $errorHtml = '<div class="error">' . Layout::escape($errorMessage) . '</div>';
         }
 
-        $pageSuccessHtml = '';
+        $noticeHtml = '';
         if (is_string($pageSuccessMessage) && $pageSuccessMessage !== '') {
-            $pageSuccessHtml = '<div class="notice">' . Layout::escape($pageSuccessMessage) . '</div>';
+            $noticeHtml = '<div class="notice">' . Layout::escape($pageSuccessMessage) . '</div>';
         }
 
         $customerName      = Layout::escape((string) ($criteria['customer_name'] ?? ''));
         $policyNo          = Layout::escape((string) ($criteria['policy_no'] ?? ''));
         $caseStatus        = (string) ($criteria['case_status'] ?? '');
         $maturityWindow    = (string) ($criteria['maturity_window'] ?? '30');
-        $filterUserId      = (string) ($criteria['assigned_user_id'] ?? '');
+        $filterUserId      = (string) ($criteria['assigned_staff_id'] ?? '');
         $filterProductType = Layout::escape((string) ($criteria['product_type'] ?? ''));
-        $perPage = (int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE);
-        $sort = (string) ($listState['sort'] ?? '');
-        $direction = (string) ($listState['direction'] ?? 'asc');
-        $filterOpen = $forceFilterOpen || ListViewHelper::hasActiveFilters(array_diff_key($criteria, ['maturity_window' => true])) || $errorHtml !== '';
-        $pager = ListViewHelper::buildPager((int) ($listState['page'] ?? '1'), $perPage, $totalCount);
+        $perPage           = (int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE);
+        $sort              = (string) ($listState['sort'] ?? '');
+        $direction         = (string) ($listState['direction'] ?? 'asc');
+        $filterOpen        = $forceFilterOpen || ListViewHelper::hasActiveFilters(array_diff_key($criteria, ['maturity_window' => true])) || $errorHtml !== '';
+        $pager             = ListViewHelper::buildPager((int) ($listState['page'] ?? '1'), $perPage, $totalCount);
         $listState['page'] = (string) ($pager['currentPage'] ?? 1);
-        $listQuery = self::buildListQueryParams($criteria, $listState);
+        $listQuery         = LP::queryParams($criteria, $listState);
+
+        // バッジ用ラベルマップ
+        $badgeLabelMap = [];
+        foreach ($allStatuses as $sRow) {
+            $badgeLabelMap[(string) ($sRow['code'] ?? '')] = (string) ($sRow['display_name'] ?? '');
+        }
 
         $rowsHtml = '';
-        $today = date('Y-m-d');
+        $today    = date('Y-m-d');
         foreach ($rows as $row) {
             $id               = (int) ($row['renewal_case_id'] ?? 0);
             $status           = (string) ($row['case_status'] ?? '');
@@ -76,96 +84,80 @@ final class RenewalCaseListView
             $detailUrl        = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, array_merge(['id' => (string) $id], $listQuery)));
             $rowClass         = self::isCompletedStatus($status) ? ' class="is-completed-row"' : '';
 
-            $deleteForm = '<form method="post" action="' . Layout::escape($deleteActionUrl) . '" style="display:inline;">'
-                . self::renderRouteInput($deleteActionUrl)
+            $deleteFormId = 'form-del-renewal-' . $id;
+            $deleteLabel  = $policyText !== '' ? $policyText : ('ID: ' . $id);
+            $deleteForm = '<form id="' . $deleteFormId . '" method="post" action="' . Layout::escape($deleteActionUrl) . '" style="display:inline;">'
+                . LP::routeInput($deleteActionUrl)
                 . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($deleteCsrfToken) . '">'
                 . '<input type="hidden" name="id" value="' . $id . '">'
-                . self::renderHiddenInputs(self::buildListQueryParams($criteria, $listState))
-                . '<button type="submit" class="btn-icon-delete" title="削除" onclick="return confirm(\'この満期案件を削除しますか？\')">🗑</button>'
+                . LP::hiddenInputs(LP::queryParams($criteria, $listState))
+                . '<button type="button" class="btn-icon-delete" title="削除"'
+                . ' data-delete-form="' . $deleteFormId . '"'
+                . ' data-delete-label="' . Layout::escape($deleteLabel) . '">'
+                . '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>'
+                . '</button>'
                 . '</form>';
 
             $rowsHtml .= '<tr' . $rowClass . '>'
                 . '<td data-label="証券番号"><a class="text-link list-policy-text" href="' . $detailUrl . '" title="' . Layout::escape($policyText) . '">' . Layout::escape($policyText) . '</a></td>'
+                . '<td data-label="満期日">' . self::renderMaturityDate($maturityDate, $status, $today) . '</td>'
                 . '<td data-label="顧客名"><strong class="truncate list-row-primary" title="' . Layout::escape($customerText) . '">' . Layout::escape($customerText) . '</strong></td>'
                 . '<td data-label="種目">' . Layout::escape($productType) . '</td>'
-                . '<td data-label="満期日">' . self::renderMaturityDate($maturityDate, $status, $today) . '</td>'
-                . '<td data-label="残日数">' . self::renderDaysRemaining($maturityDate, $status, $today) . '</td>'
                 . '<td data-label="早期更改締切">' . self::renderEarlyDeadline($earlyDeadline, $status, $today) . '</td>'
                 . '<td data-label="営業担当">' . ($assignedUserName !== '' ? Layout::escape($assignedUserName) : '<span class="muted">−</span>') . '</td>'
-                . '<td data-label="対応状況">' . self::renderStatusBadge($status) . '</td>'
+                . '<td data-label="対応状況">' . self::renderStatusBadge($status, $badgeLabelMap) . '</td>'
                 . '<td>' . $deleteForm . '</td>'
                 . '</tr>';
         }
 
         if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="9">該当データはありません。</td></tr>';
+            $rowsHtml = '<tr><td colspan="8">該当データはありません。</td></tr>';
         }
 
-        $statuses = ['' => 'すべて', 'not_started' => '未対応', 'sj_requested' => 'SJ依頼中', 'doc_prepared' => '書類作成済', 'waiting_return' => '返送待ち', 'quote_sent' => '見積送付済', 'waiting_payment' => '入金待ち', 'completed' => '完了'];
+        // ステータスフィルター選択肢
+        if ($allStatuses !== []) {
+            $statuses = ['' => 'すべて'];
+            foreach ($allStatuses as $sRow) {
+                $statuses[(string) ($sRow['code'] ?? '')] = (string) ($sRow['display_name'] ?? '');
+            }
+        } else {
+            $statuses = ['' => 'すべて', 'not_started' => '未対応', 'sj_requested' => 'SJ依頼中', 'doc_prepared' => '書類作成済', 'waiting_return' => '返送待ち', 'quote_sent' => '見積送付済', 'waiting_payment' => '入金待ち', 'completed' => '完了'];
+        }
         $statusOptions = '';
         foreach ($statuses as $value => $label) {
-            $selected = $caseStatus === $value ? ' selected' : '';
+            $selected      = $caseStatus === $value ? ' selected' : '';
             $statusOptions .= '<option value="' . Layout::escape($value) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
         }
 
         $userOptions = '<option value="">全担当者</option>';
-        foreach ($allUsers as $uid => $uname) {
-            $selected = $filterUserId === (string) $uid ? ' selected' : '';
+        foreach ($allUsers as $staffRow) {
+            $uid         = (int) ($staffRow['id'] ?? 0);
+            $uname       = (string) ($staffRow['staff_name'] ?? '');
+            $selected    = $filterUserId === (string) $uid ? ' selected' : '';
             $userOptions .= '<option value="' . Layout::escape((string) $uid) . '"' . $selected . '>' . Layout::escape($uname) . '</option>';
         }
 
         $sortSummary = self::renderSortSummary($sort, $direction);
-        $topToolbar = self::renderToolbar($searchUrl, $criteria, $listState, $pager, $totalCount, $perPage, $sortSummary);
-        $bottomPager = self::renderBottomPager($searchUrl, $criteria, $listState, $pager);
-        $importResultHtml = self::renderImportResult($importBatch, $importRows);
-        $importErrorHtml = '';
-        if (is_string($importFlashError) && $importFlashError !== '') {
-            $importErrorHtml = '<div class="error">' . Layout::escape($importFlashError) . '</div>';
-        }
-        $importSuccessHtml = '';
-        if (is_string($importFlashSuccess) && $importFlashSuccess !== '') {
-            $importSuccessHtml = '<div class="notice">' . Layout::escape($importFlashSuccess) . '</div>';
-        }
+        $topToolbar  = LP::toolbar($searchUrl, $criteria, $listState, $pager, $totalCount, $perPage, $sortSummary);
+        $bottomPager = LP::bottomPager($searchUrl, $criteria, $listState, $pager);
+
         $importReturnToUrl = ListViewHelper::buildUrl($searchUrl, array_merge($listQuery, ['import_dialog' => '1']));
+        $importErrorHtml   = is_string($importFlashError) && $importFlashError !== ''
+            ? '<div class="error">' . Layout::escape($importFlashError) . '</div>'
+            : '';
+        $importSuccessHtml = is_string($importFlashSuccess) && $importFlashSuccess !== ''
+            ? '<div class="notice">' . Layout::escape($importFlashSuccess) . '</div>'
+            : '';
 
-
-        $content = ''
-            . $pageSuccessHtml
-            . '<div class="list-page-frame">'
-            . '<div class="list-page-header">'
-            . '<h1 class="title">満期一覧</h1>'
-            . '<div class="list-page-header-actions">'
-            . '<button class="btn btn-primary" type="button" data-open-dialog="renewal-import-dialog">+ CSV取込</button>'
-            . '</div>'
-            . '</div>'
-            . '<dialog id="renewal-import-dialog" class="modal-dialog modal-dialog-wide">'
-            . '<form method="dialog" class="modal-close-form"><button type="submit" class="modal-close" aria-label="閉じる">×</button></form>'
-            . '<div class="modal-head"><h2>SJNET満期データ取込</h2></div>'
-            . $importErrorHtml
-            . $importSuccessHtml
-            . $importResultHtml
-            . '<form method="post" action="' . Layout::escape($csvImportActionUrl) . '" enctype="multipart/form-data">'
-            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csvImportCsrfToken) . '">'
-            . '<input type="hidden" name="return_to" value="' . Layout::escape($importReturnToUrl) . '">'
-            . '<p class="muted" style="margin-bottom:10px;font-size:12.5px;">SJ-NET「満期進捗管理」→「契約一覧表」からダウンロードしたCSVを選択してください。文字コードはShift-JIS・UTF-8どちらも対応しています。</p>'
-            . '<label class="list-filter-field"><span>CSVファイル（44列）</span><input type="file" name="csv_file" accept=".csv,text/csv" required></label>'
-            . '<div class="actions" style="margin-top:12px;">'
-            . '<button class="btn btn-primary" type="submit">取込を実行する</button>'
-            . '<button class="btn btn-secondary" type="button" data-close-dialog="renewal-import-dialog">閉じる</button>'
-            . '</div>'
-            . '</form>'
-            . '</dialog>'
-            . '<details class="card details-panel list-filter-card"' . ($filterOpen ? ' open' : '') . '>'
-            . '<summary class="list-filter-toggle"><span class="list-filter-toggle-label is-closed">検索条件を開く</span><span class="list-filter-toggle-label is-open">検索条件を閉じる</span></summary>'
-            . $errorHtml
-            . '<form method="get" action="' . Layout::escape(self::buildFormAction($searchUrl)) . '">'
-            . self::renderRouteInput($searchUrl)
+        $filterFormHtml =
+            '<form method="get" action="' . Layout::escape(LP::formAction($searchUrl)) . '">'
+            . LP::routeInput($searchUrl)
             . '<input type="hidden" name="filter_open" value="1">'
-            . self::renderHiddenInputs(self::buildListQueryParams([], $listState, false, true))
+            . LP::hiddenInputs(LP::queryParams([], $listState, false, true))
             . '<div class="list-filter-grid">'
             . '<label class="list-filter-field"><span>顧客名</span><input type="text" name="customer_name" value="' . $customerName . '"></label>'
             . '<label class="list-filter-field"><span>証券番号</span><input type="text" name="policy_no" value="' . $policyNo . '"></label>'
-            . '<label class="list-filter-field"><span>担当者</span><select name="assigned_user_id">' . $userOptions . '</select></label>'
+            . '<label class="list-filter-field"><span>担当者</span><select name="assigned_staff_id">' . $userOptions . '</select></label>'
             . '<label class="list-filter-field"><span>種目</span><input type="text" name="product_type" value="' . $filterProductType . '"></label>'
             . '<label class="list-filter-field"><span>対応状況</span><select name="case_status">' . $statusOptions . '</select></label>'
             . '<label class="list-filter-field"><span>満期日</span><select name="maturity_window">'
@@ -176,40 +168,105 @@ final class RenewalCaseListView
             . '<button class="btn" type="submit">検索</button>'
             . '<a class="btn btn-secondary" href="' . Layout::escape(ListViewHelper::buildUrl($searchUrl, ['filter_open' => '1'])) . '">条件クリア</a>'
             . '</div>'
-            . '</form>'
-            . '</details>'
-            . '<div class="card">'
-            . $topToolbar
-            . '<div class="table-wrap">'
+            . '</form>';
+
+        $tableHtml =
+            '<div class="table-wrap">'
             . '<table class="table-fixed table-card list-table list-table-renewal">'
             . '<colgroup>'
             . '<col class="list-col-policy">'
+            . '<col class="list-col-date">'
             . '<col class="list-col-customer">'
             . '<col class="list-col-product">'
-            . '<col class="list-col-date">'
-            . '<col class="list-col-days">'
             . '<col class="list-col-early">'
             . '<col class="list-col-user">'
             . '<col class="list-col-status">'
-            . '<col style="width:40px;">'
+            . '<col class="list-col-action">'
             . '</colgroup>'
             . '<thead><tr>'
-            . '<th>' . self::renderSortLink('証券番号', 'policy_no', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('顧客名', 'customer_name', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('種目', 'product_type', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('満期日', 'maturity_date', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th>残日数</th>'
-            . '<th>' . self::renderSortLink('早期更改締切', 'early_renewal_deadline', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('証券番号', 'policy_no', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('満期日', 'maturity_date', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('顧客名', 'customer_name', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('種目', 'product_type', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('早期更改締切', 'early_renewal_deadline', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>営業担当</th>'
-            . '<th>' . self::renderSortLink('対応状況', 'case_status', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('対応状況', 'case_status', $searchUrl, $criteria, $listState) . '</th>'
             . '<th></th>'
             . '</tr></thead>'
             . '<tbody>' . $rowsHtml . '</tbody>'
             . '</table>'
+            . '</div>';
+
+        $deleteConfirmDialog =
+            '<dialog id="dlg-delete-renewal-confirm" class="modal-dialog">'
+            . '<div class="modal-head"><h2>削除の確認</h2>'
+            . '<button type="button" class="modal-close" id="dlg-delete-renewal-close">×</button>'
             . '</div>'
-            . $bottomPager
+            . '<p id="dlg-delete-renewal-msg" style="margin:16px 0;"></p>'
+            . '<div class="dialog-actions">'
+            . '<button type="button" id="dlg-delete-renewal-ok" class="btn btn-danger">削除する</button>'
+            . '<button type="button" id="dlg-delete-renewal-cancel" class="btn btn-ghost">キャンセル</button>'
             . '</div>'
+            . '</dialog>'
+            . '<script>(function(){'
+            . 'var dlg=document.getElementById("dlg-delete-renewal-confirm");'
+            . 'if(!dlg||typeof dlg.showModal!=="function"){return;}'
+            . 'var msg=document.getElementById("dlg-delete-renewal-msg");'
+            . 'var pendingId=null;'
+            . 'document.querySelectorAll("[data-delete-form]").forEach(function(btn){'
+            . 'btn.addEventListener("click",function(){'
+            . 'pendingId=btn.getAttribute("data-delete-form");'
+            . 'var label=btn.getAttribute("data-delete-label")||"この件";'
+            . 'msg.textContent="「"+label+"」を削除しますか？この操作は取り消せません。";'
+            . 'if(!dlg.open){dlg.showModal();}});});'
+            . 'function closeDlg(){if(dlg.open){dlg.close();}pendingId=null;}'
+            . 'document.getElementById("dlg-delete-renewal-ok").addEventListener("click",function(){'
+            . 'if(pendingId){var f=document.getElementById(pendingId);if(f){f.submit();}}'
+            . 'closeDlg();});'
+            . 'document.getElementById("dlg-delete-renewal-cancel").addEventListener("click",closeDlg);'
+            . 'document.getElementById("dlg-delete-renewal-close").addEventListener("click",closeDlg);'
+            . '})();</script>';
+
+        $content =
+            '<div class="list-page-frame">'
+            . LP::pageHeader('満期一覧', '<button class="btn btn-primary" type="button" data-open-dialog="renewal-import-dialog">+ CSV取込</button>')
+            . $noticeHtml
+            . LP::filterCard($filterFormHtml, $filterOpen, $errorHtml)
+            . LP::tableCard($topToolbar, $tableHtml, $bottomPager)
             . '</div>'
+            . $deleteConfirmDialog
+            . '<dialog id="renewal-import-dialog" class="modal-dialog modal-dialog-wide">'
+            . '<form method="dialog" class="modal-close-form"><button type="submit" class="modal-close" aria-label="閉じる">×</button></form>'
+            . '<div class="modal-head"><h2>SJNET満期データ取込</h2></div>'
+            . $importErrorHtml
+            . $importSuccessHtml
+            . self::renderImportResult($importBatch, $importRows)
+            . '<form method="post" action="' . Layout::escape($csvImportActionUrl) . '" enctype="multipart/form-data">'
+            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csvImportCsrfToken) . '">'
+            . '<input type="hidden" name="return_to" value="' . Layout::escape($importReturnToUrl) . '">'
+            . '<p class="muted" style="margin-bottom:12px;font-size:12.5px;">SJ-NETからダウンロードしたCSVを選択してください。</p>'
+            . '<div style="font-size:12.5px;line-height:1.7;margin-bottom:16px;">'
+            . '<p style="margin:0 0 4px;font-weight:600;">■ 必須カラム</p>'
+            . '<p style="margin:0 0 2px;padding-left:1em;">証券番号 / 満期日（月）/ 満期日（日）/ 顧客名 / 保険会社 / 保険始期 / 保険終期 / 種目種類 / 合計保険料 / 代理店ｺｰﾄﾞ</p>'
+            . '<p style="margin:0 0 10px;padding-left:1em;" class="muted">1つでも欠けていると取込できません。</p>'
+            . '<p style="margin:0 0 4px;font-weight:600;">■ 任意カラム（あれば取り込みます）</p>'
+            . '<p style="margin:0 0 2px;padding-left:1em;">郵便番号 / 住所 / ＴＥＬ　<span class="muted">→ 新規顧客の自動登録時のみ使用。既存顧客は不変。</span></p>'
+            . '<p style="margin:0 0 2px;padding-left:1em;">払込方法　<span class="muted">→ 契約情報として登録。</span></p>'
+            . '<p style="margin:0 0 10px;padding-left:1em;">担当者　<span class="muted">→ 取込履歴に参考記録。担当者設定は代理店コードを使用。</span></p>'
+            . '<p style="margin:0 0 4px;font-weight:600;">■ 満期年の判定</p>'
+            . '<p style="margin:0 0 2px;padding-left:1em;">CSVには満期の「月」「日」のみ含まれ、「年」は取込実行日から自動判定します。</p>'
+            . '<p style="margin:0 0 2px;padding-left:1em;" class="muted">取込日以降の月日 → 当年　／　取込日より過去の月日 → 翌年</p>'
+            . '<p style="margin:0 0 10px;"></p>'
+            . '<p style="margin:0 0 4px;font-weight:600;">■ 文字コード</p>'
+            . '<p style="margin:0;padding-left:1em;" class="muted">Shift-JIS・UTF-8 どちらも対応。</p>'
+            . '</div>'
+            . '<label class="list-filter-field"><span>CSVファイル</span><input type="file" name="csv_file" accept=".csv,text/csv" required></label>'
+            . '<div class="actions" style="margin-top:12px;">'
+            . '<button class="btn btn-primary" type="submit">取込を実行する</button>'
+            . '<button class="btn btn-secondary" type="button" data-close-dialog="renewal-import-dialog">閉じる</button>'
+            . '</div>'
+            . '</form>'
+            . '</dialog>'
             . '<script>'
             . '(function(){const id="renewal-import-dialog";const dlg=document.getElementById(id);if(!dlg||typeof dlg.showModal!=="function"){return;}const openBtns=document.querySelectorAll("[data-open-dialog=\""+id+"\"]");openBtns.forEach((btn)=>{btn.addEventListener("click",()=>{if(!dlg.open){dlg.showModal();}});});const closeBtns=dlg.querySelectorAll("[data-close-dialog=\""+id+"\"]");closeBtns.forEach((btn)=>{btn.addEventListener("click",()=>{if(dlg.open){dlg.close();}});});dlg.addEventListener("click",(e)=>{const rect=dlg.getBoundingClientRect();const inside=rect.left<=e.clientX&&e.clientX<=rect.right&&rect.top<=e.clientY&&e.clientY<=rect.bottom;if(!inside&&dlg.open){dlg.close();}});if(' . ($openImportDialog ? 'true' : 'false') . '){dlg.showModal();}})();'
             . '</script>';
@@ -217,203 +274,38 @@ final class RenewalCaseListView
         return Layout::render('満期一覧', $content, $layoutOptions);
     }
 
-    private static function renderStatusBadge(string $status): string
+    /**
+     * @param array<string, string> $labelMap  code => display_name from master (may be empty)
+     */
+    private static function renderStatusBadge(string $status, array $labelMap = []): string
     {
-        [$label, $badgeClass] = match ($status) {
-            'not_started'    => ['未対応',    'badge-gray'],
-            'sj_requested'   => ['SJ依頼中',  'badge-info'],
-            'doc_prepared'   => ['書類作成済', 'badge-info'],
-            'waiting_return' => ['返送待ち',  'badge-warn'],
-            'quote_sent'     => ['見積送付済', 'badge-info'],
-            'waiting_payment' => ['入金待ち', 'badge-warn'],
-            'completed'      => ['完了',      'badge-success'],
-            default          => ['未設定',    'badge-gray'],
+        $badgeClass = match ($status) {
+            'not_started'     => 'badge-gray',
+            'sj_requested'    => 'badge-info',
+            'doc_prepared'    => 'badge-info',
+            'waiting_return'  => 'badge-warn',
+            'quote_sent'      => 'badge-info',
+            'waiting_payment' => 'badge-warn',
+            'completed'       => 'badge-success',
+            default           => 'badge-gray',
         };
 
+        if (isset($labelMap[$status])) {
+            $label = $labelMap[$status];
+        } else {
+            $label = match ($status) {
+                'not_started'     => '未対応',
+                'sj_requested'    => 'SJ依頼中',
+                'doc_prepared'    => '書類作成済',
+                'waiting_return'  => '返送待ち',
+                'quote_sent'      => '見積送付済',
+                'waiting_payment' => '入金待ち',
+                'completed'       => '完了',
+                default           => '未設定',
+            };
+        }
+
         return '<span class="badge ' . $badgeClass . '">' . Layout::escape($label) . '</span>';
-    }
-
-    private static function renderNextActionDate(string $nextActionDate, string $status, string $today): string
-    {
-        $normalized = trim($nextActionDate);
-        if ($normalized === '') {
-            return '<span class="muted">未設定</span>';
-        }
-
-        $isClosed = $status === 'completed';
-        if (!$isClosed && $normalized < $today) {
-            return '<div class="cell-stack"><span class="badge badge-danger">期限超過</span><span class="warning-text">' . Layout::escape($normalized) . '</span></div>';
-        }
-
-        return Layout::escape($normalized);
-    }
-
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     * @return array<string, string>
-     */
-    private static function buildListQueryParams(array $criteria, array $listState, bool $includePage = true, bool $includeSort = true): array
-    {
-        $params = $criteria;
-
-        if ($includePage && (int) ($listState['page'] ?? '1') > 1) {
-            $params['page'] = (string) $listState['page'];
-        }
-
-        if ((int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE) !== ListViewHelper::DEFAULT_PER_PAGE) {
-            $params['per_page'] = (string) $listState['per_page'];
-        }
-
-        if ($includeSort && ($listState['sort'] ?? '') !== '') {
-            $params['sort'] = (string) $listState['sort'];
-            $params['direction'] = (string) ($listState['direction'] ?? 'asc');
-        }
-
-        return $params;
-    }
-
-    /**
-     * @param array<string, string> $params
-     */
-    private static function renderHiddenInputs(array $params): string
-    {
-        $html = '';
-        foreach ($params as $name => $value) {
-            if (trim($value) === '') {
-                continue;
-            }
-
-            $html .= '<input type="hidden" name="' . Layout::escape($name) . '" value="' . Layout::escape($value) . '">';
-        }
-
-        return $html;
-    }
-
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     * @param array<string, mixed> $pager
-     */
-    private static function renderToolbar(string $searchUrl, array $criteria, array $listState, array $pager, int $totalCount, int $perPage, string $sortSummary): string
-    {
-        return '<div class="list-toolbar">'
-            . '<div class="list-summary">'
-            . '<p class="summary-count">' . Layout::escape(self::renderSummaryText($totalCount, $pager)) . '</p>'
-            . '</div>'
-            . '<div class="list-toolbar-actions">'
-            . '<p class="muted list-sort-summary">' . Layout::escape($sortSummary) . '</p>'
-            . self::renderPerPageForm($searchUrl, $criteria, $listState, $perPage)
-            . self::renderPager($searchUrl, $criteria, $listState, $pager)
-            . '</div>'
-            . '</div>';
-    }
-
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     * @param array<string, mixed> $pager
-     */
-    private static function renderBottomPager(string $searchUrl, array $criteria, array $listState, array $pager): string
-    {
-        $pagerHtml = self::renderPager($searchUrl, $criteria, $listState, $pager);
-        if ($pagerHtml === '') {
-            return '';
-        }
-
-        return '<div class="list-toolbar list-toolbar-bottom"><div class="list-toolbar-actions">' . $pagerHtml . '</div></div>';
-    }
-
-    private static function renderSummaryText(int $totalCount, array $pager): string
-    {
-        if ($totalCount <= 0) {
-            return '0件';
-        }
-
-        return $totalCount . '件中 ' . (int) ($pager['start'] ?? 0) . '-' . (int) ($pager['end'] ?? 0) . '件を表示';
-    }
-
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     */
-    private static function renderPerPageForm(string $searchUrl, array $criteria, array $listState, int $perPage): string
-    {
-        $optionsHtml = '';
-        foreach ([10, 50, 100] as $option) {
-            $selected = $perPage === $option ? ' selected' : '';
-            $optionsHtml .= '<option value="' . $option . '"' . $selected . '>' . $option . '</option>';
-        }
-
-        return '<form method="get" action="' . Layout::escape(self::buildFormAction($searchUrl)) . '" class="list-per-page-form">'
-            . self::renderRouteInput($searchUrl)
-            . self::renderHiddenInputs(self::buildListQueryParams($criteria, $listState, false))
-            . '<label class="list-select-inline"><span>表示件数</span><select name="per_page" onchange="this.form.submit()">' . $optionsHtml . '</select></label>'
-            . '<noscript><button class="btn btn-ghost btn-small" type="submit">更新</button></noscript>'
-            . '</form>';
-    }
-
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     * @param array<string, mixed> $pager
-     */
-    private static function renderPager(string $searchUrl, array $criteria, array $listState, array $pager): string
-    {
-        if ((int) ($pager['totalPages'] ?? 0) <= 1) {
-            return '';
-        }
-
-        $links = '';
-        if (!empty($pager['hasPrevious'])) {
-            $links .= self::renderPagerLink('前へ', (int) ($pager['previousPage'] ?? 1), $searchUrl, $criteria, $listState);
-        }
-
-        foreach ((array) ($pager['pages'] ?? []) as $pageNumber) {
-            $page = (int) $pageNumber;
-            if ($page === (int) ($pager['currentPage'] ?? 1)) {
-                $links .= '<span class="list-pager-link is-current">' . $page . '</span>';
-                continue;
-            }
-
-            $links .= self::renderPagerLink((string) $page, $page, $searchUrl, $criteria, $listState);
-        }
-
-        if (!empty($pager['hasNext'])) {
-            $links .= self::renderPagerLink('次へ', (int) ($pager['nextPage'] ?? 1), $searchUrl, $criteria, $listState);
-        }
-
-        return '<nav class="list-pager" aria-label="ページャー">' . $links . '</nav>';
-    }
-
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     */
-    private static function renderPagerLink(string $label, int $page, string $searchUrl, array $criteria, array $listState): string
-    {
-        $params = self::buildListQueryParams($criteria, array_merge($listState, ['page' => (string) $page]));
-        $url = Layout::escape(ListViewHelper::buildUrl($searchUrl, $params));
-
-        return '<a class="list-pager-link" href="' . $url . '">' . Layout::escape($label) . '</a>';
-    }
-
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     */
-    private static function renderSortLink(string $label, string $column, string $searchUrl, array $criteria, array $listState): string
-    {
-        $isCurrent = ($listState['sort'] ?? '') === $column;
-        $nextDirection = $isCurrent && ($listState['direction'] ?? 'asc') === 'asc' ? 'desc' : 'asc';
-        $params = self::buildListQueryParams($criteria, array_merge($listState, ['sort' => $column, 'direction' => $nextDirection]));
-        $url = Layout::escape(ListViewHelper::buildUrl($searchUrl, $params));
-        $indicator = '';
-        if ($isCurrent) {
-            $indicator = '<span class="list-sort-indicator">' . (($listState['direction'] ?? 'asc') === 'asc' ? '&#9650;' : '&#9660;') . '</span>';
-        }
-
-        return '<a class="list-sort-link' . ($isCurrent ? ' is-active' : '') . '" href="' . $url . '">' . Layout::escape($label) . $indicator . '</a>';
     }
 
     private static function renderSortSummary(string $sort, string $direction): string
@@ -430,7 +322,7 @@ final class RenewalCaseListView
             'next_action_date'       => '次回対応予定日',
             'product_type'           => '種目',
             'early_renewal_deadline' => '早期更改締切',
-            default => '業務優先順',
+            default                  => '業務優先順',
         };
 
         return '並び順: ' . $label . ' ' . ($direction === 'desc' ? '降順' : '昇順');
@@ -452,21 +344,6 @@ final class RenewalCaseListView
         return Layout::escape($maturityDate);
     }
 
-    private static function renderDaysRemaining(string $maturityDate, string $status, string $today): string
-    {
-        if ($maturityDate === '') {
-            return '<span class="muted">−</span>';
-        }
-        $diff = (int) round((strtotime($maturityDate) - strtotime($today)) / 86400);
-        if ($status === 'completed') {
-            return Layout::escape((string) $diff . '日');
-        }
-        if ($diff < 0) {
-            return '<span style="color:var(--text-danger);">' . Layout::escape((string) $diff . '日') . '</span>';
-        }
-        return Layout::escape((string) $diff . '日');
-    }
-
     private static function renderEarlyDeadline(string $earlyDeadline, string $status, string $today): string
     {
         if ($earlyDeadline === '') {
@@ -484,43 +361,12 @@ final class RenewalCaseListView
     private static function renderWindowOptions(string $current): string
     {
         $options = ['30' => '満期：今後30日', '60' => '今後60日', '90' => '今後90日', 'all' => '全期間'];
-        $html = '';
+        $html    = '';
         foreach ($options as $value => $label) {
-            $valueStr = (string) $value;
-            $selected = $current === $valueStr ? ' selected' : '';
-            $html .= '<option value="' . Layout::escape($valueStr) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
+            $selected = $current === (string) $value ? ' selected' : '';
+            $html .= '<option value="' . Layout::escape((string) $value) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
         }
         return $html;
-    }
-
-    private static function renderStatusMetric(string $label, int $count): string
-    {
-        return '<div class="metric">'
-            . '<div class="metric-label">' . Layout::escape($label) . '</div>'
-            . '<div class="metric-value" style="font-size:20px;">' . $count . '</div>'
-            . '</div>';
-    }
-
-    private static function buildFormAction(string $url): string
-    {
-        $path = (string) parse_url($url, PHP_URL_PATH);
-        return $path !== '' ? $path : '';
-    }
-
-    private static function renderRouteInput(string $url): string
-    {
-        $query = (string) parse_url($url, PHP_URL_QUERY);
-        if ($query === '') {
-            return '';
-        }
-
-        parse_str($query, $params);
-        $route = trim((string) ($params['route'] ?? ''));
-        if ($route === '') {
-            return '';
-        }
-
-        return '<input type="hidden" name="route" value="' . Layout::escape($route) . '">';
     }
 
     /**
@@ -533,13 +379,13 @@ final class RenewalCaseListView
             return '';
         }
 
-        $status           = (string) ($importBatch['import_status'] ?? '-');
-        $totalRows        = (int) ($importBatch['total_row_count'] ?? 0);
-        $insertCount      = (int) ($importBatch['insert_count'] ?? 0);
-        $updateCount      = (int) ($importBatch['update_count'] ?? 0);
-        $customerInsert   = (int) ($importBatch['customer_insert_count'] ?? 0);
-        $skipCount        = (int) ($importBatch['duplicate_skip_count'] ?? 0);
-        $errorCount       = (int) ($importBatch['error_count'] ?? 0);
+        $status         = (string) ($importBatch['import_status'] ?? '-');
+        $totalRows      = (int) ($importBatch['total_row_count'] ?? 0);
+        $insertCount    = (int) ($importBatch['insert_count'] ?? 0);
+        $updateCount    = (int) ($importBatch['update_count'] ?? 0);
+        $customerInsert = (int) ($importBatch['customer_insert_count'] ?? 0);
+        $skipCount      = (int) ($importBatch['duplicate_skip_count'] ?? 0);
+        $errorCount     = (int) ($importBatch['error_count'] ?? 0);
 
         $statusLabel = match ($status) {
             'success' => '完了',
@@ -553,15 +399,14 @@ final class RenewalCaseListView
             default   => 'badge-danger',
         };
 
-        // 担当者マッピング集計（渡されたrows から計算）
         $resolvedCount   = 0;
         $unresolvedCount = 0;
         $inactiveCount   = 0;
         foreach ($importRows as $row) {
             $ms = (string) ($row['staff_mapping_status'] ?? '');
-            if ($ms === 'resolved')       $resolvedCount++;
-            elseif ($ms === 'unresolved') $unresolvedCount++;
-            elseif ($ms === 'inactive')   $inactiveCount++;
+            if ($ms === 'resolved')       { $resolvedCount++; }
+            elseif ($ms === 'unresolved') { $unresolvedCount++; }
+            elseif ($ms === 'inactive')   { $inactiveCount++; }
         }
 
         $summary = '<div class="modal-result" style="margin-bottom:14px;">'
@@ -586,7 +431,6 @@ final class RenewalCaseListView
             . '</div>'
             . '</div>';
 
-        // 警告メッセージ
         $warnings = '';
         if ($unresolvedCount > 0) {
             $warnings .= '<div class="error" style="margin-bottom:10px;font-size:12.5px;">'
@@ -594,7 +438,6 @@ final class RenewalCaseListView
                 . '</div>';
         }
 
-        // エラー行一覧
         $ambiguousCount = 0;
         $errorRowsHtml  = '';
         foreach ($importRows as $row) {

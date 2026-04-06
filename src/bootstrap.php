@@ -55,15 +55,15 @@ $googleOAuthClient = new GoogleOAuthClient($config);
 $authGuard = new AuthGuard($session, $config);
 
 $loginController = new LoginController($session, $config);
-$authController = new AuthController($config, $session, $googleOAuthClient, $authService);
-$dashboardController = new DashboardController($authGuard, $tenantFactory, $config);
+$authController = new AuthController($config, $session, $googleOAuthClient, $authService, $authGuard, $userRepository, $tenantResolver);
+$dashboardController = new DashboardController($authGuard, $tenantFactory, $commonFactory, $config);
 $renewalCaseController = new RenewalCaseController($authGuard, $tenantFactory, $commonFactory, $config);
-$customerController = new CustomerController($authGuard, $tenantFactory, $commonFactory, $config);
+$customerController = new CustomerController($authGuard, $tenantFactory, $config);
 $salesPerformanceController = new SalesPerformanceController($authGuard, $tenantFactory, $commonFactory, $config);
 $accidentCaseController = new AccidentCaseController($authGuard, $tenantFactory, $commonFactory, $config);
-$activityController = new ActivityController($authGuard, $tenantFactory, $commonFactory, $config);
+$activityController = new ActivityController($authGuard, $tenantFactory, $config);
 $tenantSettingsController = new TenantSettingsController($authGuard, $tenantFactory, $commonFactory, $config);
-$salesCaseController = new SalesCaseController($authGuard, $tenantFactory, $commonFactory, $config);
+$salesCaseController = new SalesCaseController($authGuard, $tenantFactory, $config);
 
 $router = new Router($config->appUrl);
 
@@ -150,9 +150,6 @@ $router->post('accident/comment', static function () use ($accidentCaseControlle
 $router->get('activity/list', static function () use ($activityController): void {
     $activityController->list();
 });
-$router->get('activity/new', static function () use ($activityController): void {
-    $activityController->newForm();
-});
 $router->get('activity/detail', static function () use ($activityController): void {
     $activityController->detail();
 });
@@ -189,14 +186,29 @@ $router->post('tenant/settings/phase', static function () use ($tenantSettingsCo
 $router->post('tenant/settings/all', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->saveAll();
 });
+$router->post('tenant/settings/procedure-method/create', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->procedureMethodCreate();
+});
+$router->post('tenant/settings/procedure-method/update', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->procedureMethodUpdate();
+});
+$router->post('tenant/settings/procedure-method/deactivate', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->procedureMethodDeactivate();
+});
+$router->post('tenant/settings/procedure-method/activate', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->procedureMethodActivate();
+});
 $router->post('tenant/settings/purpose-type/create', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->purposeTypeCreate();
 });
 $router->post('tenant/settings/purpose-type/update', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->purposeTypeUpdate();
 });
-$router->post('tenant/settings/purpose-type/delete', static function () use ($tenantSettingsController): void {
-    $tenantSettingsController->purposeTypeDelete();
+$router->post('tenant/settings/purpose-type/deactivate', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->purposeTypeDeactivate();
+});
+$router->post('tenant/settings/purpose-type/activate', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->purposeTypeActivate();
 });
 $router->post('tenant/settings/staff/create', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->staffCreate();
@@ -213,8 +225,11 @@ $router->post('tenant/settings/status/create', static function () use ($tenantSe
 $router->post('tenant/settings/status/update-name', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->statusUpdateDisplayName();
 });
-$router->post('tenant/settings/status/delete', static function () use ($tenantSettingsController): void {
-    $tenantSettingsController->statusDelete();
+$router->post('tenant/settings/status/deactivate', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->statusDeactivate();
+});
+$router->post('tenant/settings/status/activate', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->statusActivate();
 });
 $router->post('tenant/settings/category/create', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->categoryCreate();
@@ -222,14 +237,17 @@ $router->post('tenant/settings/category/create', static function () use ($tenant
 $router->post('tenant/settings/category/update', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->categoryUpdate();
 });
-$router->post('tenant/settings/category/delete', static function () use ($tenantSettingsController): void {
-    $tenantSettingsController->categoryDelete();
+$router->post('tenant/settings/category/deactivate', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->categoryDeactivate();
+});
+$router->post('tenant/settings/category/activate', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->categoryActivate();
+});
+$router->post('tenant/settings/user/update-display-name', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->userUpdateDisplayName();
 });
 $router->get('sales-case/list', static function () use ($salesCaseController): void {
     $salesCaseController->list();
-});
-$router->get('sales-case/new', static function () use ($salesCaseController): void {
-    $salesCaseController->newForm();
 });
 $router->get('sales-case/detail', static function () use ($salesCaseController): void {
     $salesCaseController->detail();
@@ -248,6 +266,18 @@ $router->get('auth/google/start', static function () use ($authController): void
 });
 $router->get('auth/google/callback', static function () use ($authController): void {
     $authController->handleGoogleCallback();
+});
+$router->get('auth/totp', static function () use ($authController): void {
+    $authController->totpShow();
+});
+$router->post('auth/totp/verify', static function () use ($authController): void {
+    $authController->totpVerify();
+});
+$router->get('auth/totp-setup', static function () use ($authController): void {
+    $authController->totpSetupShow();
+});
+$router->post('auth/totp-setup/verify', static function () use ($authController): void {
+    $authController->totpSetupVerify();
 });
 $router->post('logout', static function () use ($authController): void {
     $authController->logout();

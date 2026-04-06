@@ -5,8 +5,9 @@ namespace App\Controller;
 
 use App\AppConfig;
 use App\Domain\SalesCase\SalesCaseRepository;
+use App\Domain\Tenant\ProductCategoryRepository;
+use App\Domain\Tenant\StaffRepository;
 use App\Http\Responses;
-use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
 use App\Presentation\SalesCaseDetailView;
 use App\Presentation\SalesCaseListView;
@@ -20,7 +21,6 @@ final class SalesCaseController
     public function __construct(
         private AuthGuard $guard,
         private TenantConnectionFactory $tenantConnectionFactory,
-        private CommonConnectionFactory $commonConnectionFactory,
         private AppConfig $config
     ) {
     }
@@ -32,10 +32,13 @@ final class SalesCaseController
         $listState = $this->extractListState($_GET);
         $listUrl   = $this->listUrl($criteria, $listState);
 
-        $rows       = [];
-        $total      = 0;
-        $staffUsers = [];
-        $error      = null;
+        $rows              = [];
+        $total             = 0;
+        $staffUsers        = [];
+        $customers         = [];
+        $productCategories = [];
+        $loginStaffId      = 0;
+        $error             = null;
 
         try {
             $tenantPdo  = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
@@ -52,10 +55,21 @@ final class SalesCaseController
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
             $listUrl = $this->listUrl($criteria, $listState);
 
-            $staffUsers     = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
-            $staffNameMap   = $this->buildUserNameMap($staffUsers);
+            $staffUsers   = (new StaffRepository($tenantPdo))->findActive();
+            $staffNameMap = $this->buildUserNameMap($staffUsers);
             foreach ($rows as $i => $row) {
-                $rows[$i]['staff_name'] = $staffNameMap[(int) ($row['staff_user_id'] ?? 0)] ?? '';
+                $rows[$i]['staff_name'] = $staffNameMap[(int) ($row['staff_id'] ?? 0)] ?? '';
+            }
+            $customers         = $repository->fetchCustomers();
+            $productCategories = (new ProductCategoryRepository($tenantPdo))->findAll();
+
+            // ログインユーザーに対応するm_staffレコードを特定
+            $loginUserId = (int) ($auth['user_id'] ?? 0);
+            foreach ($staffUsers as $u) {
+                if ($loginUserId > 0 && (int) ($u['user_id'] ?? 0) === $loginUserId) {
+                    $loginStaffId = (int) ($u['id'] ?? 0);
+                    break;
+                }
             }
         } catch (Throwable) {
             $error = '見込案件一覧の取得に失敗しました。';
@@ -70,66 +84,20 @@ final class SalesCaseController
             $criteria,
             $listState,
             $staffUsers,
+            $customers,
+            $productCategories,
+            $loginStaffId,
             $listUrl,
-            $this->config->routeUrl('sales-case/new'),
+            $this->config->routeUrl('sales-case/store'),
+            $this->guard->session()->issueCsrfToken('sales_case_store'),
             $this->config->routeUrl('sales-case/detail'),
             $this->config->routeUrl('customer/detail'),
+            $this->config->routeUrl('sales-case/delete'),
+            $this->guard->session()->issueCsrfToken('sales_case_delete'),
             $flashError,
             $flashSuccess,
             $error,
             ControllerLayoutHelper::build($this->guard, $this->config, 'sales_case')
-        ));
-    }
-
-    public function newForm(): void
-    {
-        $auth    = $this->guard->requireAuthenticated();
-        $listUrl = $this->listUrl($this->extractCriteria($_GET), $this->extractListState($_GET));
-
-        $customers  = [];
-        $staffUsers = [];
-        $error      = null;
-
-        $prefill = [
-            'staff_user_id' => (string) ($auth['user_id'] ?? ''),
-            'status'        => 'open',
-            'case_type'     => 'new',
-        ];
-
-        if (($_GET['customer_id'] ?? '') !== '') {
-            $prefill['customer_id'] = (string) (int) ($_GET['customer_id'] ?? 0);
-        }
-
-        try {
-            $tenantPdo  = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $repository = new SalesCaseRepository($tenantPdo);
-            $customers  = $repository->fetchCustomers();
-            $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
-        } catch (Throwable) {
-            $error = '顧客・担当者情報の取得に失敗しました。';
-        }
-
-        $flashError = $this->guard->session()->consumeFlash('error');
-
-        Responses::html(SalesCaseDetailView::renderNew(
-            $prefill,
-            $customers,
-            $staffUsers,
-            $listUrl,
-            $this->config->routeUrl('sales-case/store'),
-            $this->guard->session()->issueCsrfToken('sales_case_store'),
-            $flashError,
-            $error,
-            ControllerLayoutHelper::build(
-                $this->guard,
-                $this->config,
-                'sales_case',
-                [
-                    ['label' => 'ホーム', 'url' => $this->config->routeUrl('dashboard')],
-                    ['label' => '見込案件一覧', 'url' => $listUrl],
-                    ['label' => '見込案件登録'],
-                ]
-            )
         ));
     }
 
@@ -146,10 +114,11 @@ final class SalesCaseController
         }
 
         $record     = null;
-        $customers  = [];
-        $staffUsers = [];
-        $activities = [];
-        $error      = null;
+        $customers         = [];
+        $staffUsers        = [];
+        $activities        = [];
+        $productCategories = [];
+        $error             = null;
 
         try {
             $tenantPdo  = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
@@ -161,14 +130,15 @@ final class SalesCaseController
                 Responses::redirect($listUrl);
             }
 
-            $customers  = $repository->fetchCustomers();
-            $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
-            $activities = $repository->fetchLinkedActivities($id);
+            $customers         = $repository->fetchCustomers();
+            $staffUsers        = (new StaffRepository($tenantPdo))->findActive();
+            $activities        = $repository->fetchLinkedActivities($id);
+            $productCategories = (new ProductCategoryRepository($tenantPdo))->findAll();
 
             $staffNameMap = $this->buildUserNameMap($staffUsers);
-            $record['staff_name'] = $staffNameMap[(int) ($record['staff_user_id'] ?? 0)] ?? '';
+            $record['staff_name'] = $staffNameMap[(int) ($record['staff_id'] ?? 0)] ?? '';
             foreach ($activities as $i => $act) {
-                $activities[$i]['staff_name'] = $staffNameMap[(int) ($act['staff_user_id'] ?? 0)] ?? '';
+                $activities[$i]['staff_name'] = $staffNameMap[(int) ($act['staff_id'] ?? 0)] ?? '';
             }
         } catch (Throwable) {
             $error = '見込案件詳細の取得に失敗しました。';
@@ -203,7 +173,8 @@ final class SalesCaseController
                     ['label' => '見込案件一覧', 'url' => $listUrl],
                     ['label' => '見込案件詳細'],
                 ]
-            )
+            ),
+            $productCategories
         ));
     }
 
@@ -218,10 +189,13 @@ final class SalesCaseController
         }
 
         $input  = $this->collectInput();
+        $returnTo = trim((string) ($_POST['return_to'] ?? ''));
+        $fallback = $this->config->routeUrl('sales-case/list');
+
         $errors = $this->validateInput($input);
         if ($errors !== []) {
             $this->guard->session()->setFlash('error', implode(' ', $errors));
-            Responses::redirect($this->config->routeUrl('sales-case/new'));
+            Responses::redirect($returnTo !== '' ? $returnTo : $fallback);
         }
 
         try {
@@ -232,7 +206,7 @@ final class SalesCaseController
             Responses::redirect($this->detailUrl($newId));
         } catch (Throwable) {
             $this->guard->session()->setFlash('error', '見込案件の登録に失敗しました。');
-            Responses::redirect($this->config->routeUrl('sales-case/new'));
+            Responses::redirect($returnTo !== '' ? $returnTo : $fallback);
         }
     }
 
@@ -343,7 +317,7 @@ final class SalesCaseController
     {
         return [
             'customer_name' => trim((string) ($source['customer_name'] ?? '')),
-            'staff_user_id' => trim((string) ($source['staff_user_id'] ?? '')),
+            'staff_id' => trim((string) ($source['staff_id'] ?? '')),
             'status'        => trim((string) ($source['status'] ?? '')),
             'prospect_rank' => trim((string) ($source['prospect_rank'] ?? '')),
         ];
@@ -377,7 +351,7 @@ final class SalesCaseController
             'customer_id'             => trim((string) ($_POST['customer_id'] ?? '')),
             'contract_id'             => trim((string) ($_POST['contract_id'] ?? '')),
             'case_name'               => trim((string) ($_POST['case_name'] ?? '')),
-            'case_type'               => trim((string) ($_POST['case_type'] ?? '')),
+            'case_type'               => 'other',
             'product_type'            => trim((string) ($_POST['product_type'] ?? '')),
             'status'                  => trim((string) ($_POST['status'] ?? '')),
             'prospect_rank'           => trim((string) ($_POST['prospect_rank'] ?? '')),
@@ -387,7 +361,7 @@ final class SalesCaseController
             'next_action_date'        => trim((string) ($_POST['next_action_date'] ?? '')),
             'lost_reason'             => trim((string) ($_POST['lost_reason'] ?? '')),
             'memo'                    => trim((string) ($_POST['memo'] ?? '')),
-            'staff_user_id'           => trim((string) ($_POST['staff_user_id'] ?? '')),
+            'staff_id'                => trim((string) ($_POST['staff_id'] ?? '')),
         ];
     }
 
@@ -399,19 +373,9 @@ final class SalesCaseController
     {
         $errors = [];
 
-        $customerId = trim((string) ($input['customer_id'] ?? ''));
-        if ($customerId === '' || !ctype_digit($customerId) || (int) $customerId <= 0) {
-            $errors[] = '顧客を選択してください。';
-        }
-
         $caseName = trim((string) ($input['case_name'] ?? ''));
         if ($caseName === '') {
             $errors[] = '案件名は必須です。';
-        }
-
-        $caseType = trim((string) ($input['case_type'] ?? ''));
-        if (!array_key_exists($caseType, SalesCaseRepository::ALLOWED_CASE_TYPES)) {
-            $errors[] = '案件種別を選択してください。';
         }
 
         $status = trim((string) ($input['status'] ?? ''));
@@ -438,47 +402,6 @@ final class SalesCaseController
     }
 
     /**
-     * @return array<int, array{id:int, name:string}>
-     */
-    private function fetchAssignableUsers(string $tenantCode): array
-    {
-        if ($tenantCode === '') {
-            return [];
-        }
-
-        $pdo  = $this->commonConnectionFactory->create();
-        $stmt = $pdo->prepare(
-            'SELECT u.id, u.name
-             FROM user_tenants ut
-             INNER JOIN users u ON u.id = ut.user_id
-             WHERE ut.tenant_code = :tenant_code
-               AND ut.status = 1 AND ut.is_deleted = 0
-               AND u.status = 1 AND u.is_deleted = 0
-             ORDER BY u.name ASC, u.id ASC'
-        );
-        $stmt->bindValue(':tenant_code', $tenantCode);
-        $stmt->execute();
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        if (!is_array($rows)) {
-            return [];
-        }
-
-        $result = [];
-        foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            $id   = (int) ($row['id'] ?? 0);
-            $name = trim((string) ($row['name'] ?? ''));
-            if ($id > 0 && $name !== '') {
-                $result[] = ['id' => $id, 'name' => $name];
-            }
-        }
-
-        return $result;
-    }
-
-    /**
      * @param array<int, array{id:int, name:string}> $users
      * @return array<int, string>
      */
@@ -487,7 +410,7 @@ final class SalesCaseController
         $map = [];
         foreach ($users as $user) {
             $id   = (int) ($user['id'] ?? 0);
-            $name = trim((string) ($user['name'] ?? ''));
+            $name = trim((string) ($user['staff_name'] ?? $user['name'] ?? ''));
             if ($id > 0 && $name !== '') {
                 $map[$id] = $name;
             }

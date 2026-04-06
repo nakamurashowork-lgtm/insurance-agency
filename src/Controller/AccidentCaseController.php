@@ -5,6 +5,8 @@ namespace App\Controller;
 
 use App\AppConfig;
 use App\Domain\Accident\AccidentCaseRepository;
+use App\Domain\Tenant\CaseStatusRepository;
+use App\Domain\Tenant\StaffRepository;
 use App\Http\Responses;
 use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
@@ -17,7 +19,6 @@ use Throwable;
 
 final class AccidentCaseController
 {
-    private const ALLOWED_STATUS = ['accepted', 'linked', 'in_progress', 'waiting_docs', 'resolved', 'closed'];
     private const ALLOWED_PRIORITY = ['low', 'normal', 'high', 'urgent'];
 
     public function __construct(
@@ -39,6 +40,7 @@ final class AccidentCaseController
         $rows = [];
         $total = 0;
         $customerOptions = [];
+        $accidentStatuses = [];
         $error = null;
 
         try {
@@ -55,6 +57,7 @@ final class AccidentCaseController
             $total = (int) ($result['total'] ?? 0);
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
             $customerOptions = $repository->fetchCustomers(500);
+            $accidentStatuses = (new CaseStatusRepository($pdo))->findByType('accident');
 
             // 次回リマインド日を付与
             $caseIds = array_map(fn($r) => (int) ($r['id'] ?? 0), $rows);
@@ -70,7 +73,12 @@ final class AccidentCaseController
             $error = '事故案件一覧の取得に失敗しました。接続設定を確認してください。';
         }
 
-        $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
+        try {
+            $staffPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $staffUsers = (new StaffRepository($staffPdo))->findActive();
+        } catch (\Throwable) {
+            $staffUsers = [];
+        }
         $createDraft = $this->consumeCreateDraft();
         $openModal = trim((string) ($_GET['open_modal'] ?? ''));
         if ($openModal !== 'create') {
@@ -105,7 +113,8 @@ final class AccidentCaseController
             $flashError,
             $flashSuccess,
             (string) ($_GET['filter_open'] ?? '') === '1',
-            ControllerLayoutHelper::build($this->guard, $this->config, 'accident')
+            ControllerLayoutHelper::build($this->guard, $this->config, 'accident'),
+            $accidentStatuses
         ));
     }
 
@@ -143,7 +152,8 @@ final class AccidentCaseController
             $audits = $repository->findAuditEvents($id, 30);
             $auditUserNames = $this->fetchUserNamesByRows($audits, 'changed_by');
             $audits = $this->attachAuditUserNames($audits, $auditUserNames);
-            $assignedUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
+            $assignedUsers = (new StaffRepository($pdo))->findActive();
+            $accidentStatuses = (new CaseStatusRepository($pdo))->findByType('accident');
             $flashError = $this->guard->session()->consumeFlash('error');
             $flashSuccess = $this->guard->session()->consumeFlash('success');
 
@@ -171,7 +181,8 @@ final class AccidentCaseController
                         ['label' => '事故案件一覧', 'url' => $listUrl],
                         ['label' => '事故案件詳細'],
                     ]
-                )
+                ),
+                $accidentStatuses
             ));
         } catch (Throwable) {
             $this->guard->session()->setFlash('error', '事故案件詳細の取得に失敗しました。');
@@ -199,7 +210,16 @@ final class AccidentCaseController
 
         $status = trim((string) ($_POST['status'] ?? ''));
         $priority = trim((string) ($_POST['priority'] ?? ''));
-        if (!in_array($status, self::ALLOWED_STATUS, true) || !in_array($priority, self::ALLOWED_PRIORITY, true)) {
+
+        try {
+            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $allowedStatuses = (new CaseStatusRepository($pdo))->validCodes('accident');
+        } catch (\Throwable) {
+            $allowedStatuses = ['accepted', 'linked', 'in_progress', 'waiting_docs', 'resolved', 'closed'];
+            $pdo = null;
+        }
+
+        if (!in_array($status, $allowedStatuses, true) || !in_array($priority, self::ALLOWED_PRIORITY, true)) {
             $this->guard->session()->setFlash('error', '状態または優先度が不正です。');
             Responses::redirect($returnTo);
         }
@@ -207,14 +227,14 @@ final class AccidentCaseController
         $input = [
             'status' => $status,
             'priority' => $priority,
-            'assigned_user_id' => $this->nullableInt($_POST['assigned_user_id'] ?? null),
+            'assigned_staff_id' => $this->nullableInt($_POST['assigned_staff_id'] ?? null),
             'resolved_date' => $this->nullableDate($_POST['resolved_date'] ?? null),
-            'insurer_claim_no' => $this->nullableText($_POST['insurer_claim_no'] ?? null),
-            'remark' => $this->nullableText($_POST['remark'] ?? null),
         ];
 
         try {
-            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            if ($pdo === null) {
+                $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            }
             $repository = new AccidentCaseRepository($pdo);
             $updated = $repository->updateAccidentCase($id, $input, (int) ($auth['user_id'] ?? 0));
             if ($updated > 0) {
@@ -281,8 +301,16 @@ final class AccidentCaseController
         $insuranceCategory = $this->requiredText($_POST['insurance_category'] ?? null);
         $customerId = $this->requiredInt($_POST['customer_id'] ?? null);
         $intakeBranch = $this->requiredText($_POST['intake_branch'] ?? null);
-        $assignedUserId = $this->requiredInt($_POST['assigned_user_id'] ?? null);
+        $assignedUserId = $this->requiredInt($_POST['assigned_staff_id'] ?? null);
         $status = trim((string) ($_POST['status'] ?? ''));
+
+        try {
+            $pdoForStore = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $allowedStatuses = (new CaseStatusRepository($pdoForStore))->validCodes('accident');
+        } catch (\Throwable) {
+            $allowedStatuses = ['accepted', 'linked', 'in_progress', 'waiting_docs', 'resolved', 'closed'];
+            $pdoForStore = null;
+        }
 
         $input = [
             'customer_id' => $customerId,
@@ -292,7 +320,7 @@ final class AccidentCaseController
             'accident_location' => $intakeBranch,
             'status' => $status,
             'priority' => 'normal',
-            'assigned_user_id' => $assignedUserId,
+            'assigned_staff_id' => $assignedUserId,
             'remark' => $this->nullableText($_POST['remark'] ?? null),
         ];
 
@@ -302,7 +330,7 @@ final class AccidentCaseController
             || $customerId === null
             || $intakeBranch === null
             || $assignedUserId === null
-            || !in_array($status, self::ALLOWED_STATUS, true)
+            || !in_array($status, $allowedStatuses, true)
         ) {
             $this->guard->session()->setFlash('error', '事故日・保険種類・お客さま・担当拠点・担当者・ステータスを入力してください。');
             $this->storeCreateDraft($input);
@@ -310,7 +338,7 @@ final class AccidentCaseController
         }
 
         try {
-            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $pdo = $pdoForStore ?? $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
             $repository = new AccidentCaseRepository($pdo);
             $newId = $repository->createAccidentCase($input, (int) ($auth['user_id'] ?? 0));
             if ($newId > 0) {
@@ -335,7 +363,7 @@ final class AccidentCaseController
      */
     private function extractCriteria(array $source): array
     {
-        $assignedUserId = (int) ($source['assigned_user_id'] ?? 0);
+        $assignedUserId = (int) ($source['assigned_staff_id'] ?? 0);
         return [
             'accepted_date_from' => trim((string) ($source['accepted_date_from'] ?? '')),
             'accepted_date_to'   => trim((string) ($source['accepted_date_to'] ?? '')),
@@ -343,7 +371,7 @@ final class AccidentCaseController
             'policy_no'          => trim((string) ($source['policy_no'] ?? '')),
             'product_type'       => trim((string) ($source['product_type'] ?? '')),
             'status'             => trim((string) ($source['status'] ?? '')),
-            'assigned_user_id'   => $assignedUserId > 0 ? (string) $assignedUserId : '',
+            'assigned_staff_id'   => $assignedUserId > 0 ? (string) $assignedUserId : '',
         ];
     }
 
@@ -439,54 +467,6 @@ final class AccidentCaseController
 
         $decoded = json_decode($raw, true);
         return is_array($decoded) ? $decoded : null;
-    }
-
-    /**
-     * @return array<int, array{id: int, name: string}>
-     */
-    private function fetchAssignableUsers(string $tenantCode): array
-    {
-        $tenantCode = trim($tenantCode);
-        if ($tenantCode === '') {
-            return [];
-        }
-
-        $pdo = $this->commonConnectionFactory->create();
-        $stmt = $pdo->prepare(
-            'SELECT u.id, u.name
-             FROM user_tenants ut
-             INNER JOIN users u ON u.id = ut.user_id
-             WHERE ut.tenant_code = :tenant_code
-               AND ut.status = 1
-               AND ut.is_deleted = 0
-               AND u.status = 1
-               AND u.is_deleted = 0
-             ORDER BY u.name ASC, u.id ASC'
-        );
-        $stmt->bindValue(':tenant_code', $tenantCode);
-        $stmt->execute();
-
-        $result = [];
-        $rows = $stmt->fetchAll();
-        if (!is_array($rows)) {
-            return [];
-        }
-
-        foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-
-            $id = (int) ($row['id'] ?? 0);
-            $name = trim((string) ($row['name'] ?? ''));
-            if ($id <= 0 || $name === '') {
-                continue;
-            }
-
-            $result[] = ['id' => $id, 'name' => $name];
-        }
-
-        return $result;
     }
 
     private function nullableInt(mixed $value): ?int
@@ -590,7 +570,7 @@ final class AccidentCaseController
         $placeholders = implode(', ', array_fill(0, count($ids), '?'));
         $pdo = $this->commonConnectionFactory->create();
         $stmt = $pdo->prepare(
-            'SELECT id, name
+            'SELECT id, COALESCE(NULLIF(display_name, ""), name) AS name
              FROM users
              WHERE id IN (' . $placeholders . ')
                AND status = 1

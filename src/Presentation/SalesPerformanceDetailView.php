@@ -13,6 +13,7 @@ final class SalesPerformanceDetailView
      * @param array<int, array<string, mixed>> $staffUsers
      * @param array<int, array<string, mixed>> $contracts
      * @param array<int, array<string, mixed>> $renewalCases
+     * @param array<int, array<string, mixed>> $audits
      * @param array<int, string> $allowedTypes
      * @param array<string, mixed> $layoutOptions
      */
@@ -22,6 +23,7 @@ final class SalesPerformanceDetailView
         array $staffUsers,
         array $contracts,
         array $renewalCases,
+        array $audits,
         array $allowedTypes,
         string $listUrl,
         string $detailUrl,
@@ -95,7 +97,7 @@ final class SalesPerformanceDetailView
         $customerId = (int) ($record['customer_id'] ?? 0);
         $selectedContractId = (int) ($record['contract_id'] ?? 0);
         $selectedRenewalCaseId = (int) ($record['renewal_case_id'] ?? 0);
-        $staffUserId = (int) ($record['staff_user_id'] ?? 0);
+        $staffUserId = (int) ($record['staff_id'] ?? 0);
 
         // Page title: 実績詳細 — 2026/4/1 上田 勇
         $titleDate = '';
@@ -176,7 +178,7 @@ final class SalesPerformanceDetailView
         $staffOptions = '<option value="">未設定</option>';
         foreach ($staffUsers as $row) {
             $uid = (int) ($row['id'] ?? 0);
-            $name = trim((string) ($row['name'] ?? ''));
+            $name = trim((string) ($row['staff_name'] ?? $row['name'] ?? ''));
             if ($uid <= 0 || $name === '') {
                 continue;
             }
@@ -261,7 +263,7 @@ final class SalesPerformanceDetailView
             . '<div class="form-row"><label class="form-label">実績区分 <strong class="required-mark">*</strong></label><select class="form-select" name="performance_type" required>' . $typeOptions . '</select></div>'
             . '<div class="form-row"><label class="form-label">実績計上日 <strong class="required-mark">*</strong></label><input class="form-input" type="date" name="performance_date" value="' . $performanceDate . '" required></div>'
             . '<div class="form-row"><label class="form-label">契約者名 <strong class="required-mark">*</strong></label><select class="form-select" name="customer_id" required>' . $customerOptions . '</select></div>'
-            . '<div class="form-row"><label class="form-label">担当者</label><select class="form-select" name="staff_user_id">' . $staffOptions . '</select></div>'
+            . '<div class="form-row"><label class="form-label">担当者</label><select class="form-select" name="staff_id">' . $staffOptions . '</select></div>'
             . '<div class="form-row"><label class="form-label">契約</label><select class="form-select" name="contract_id">' . $contractOptions . '</select></div>'
             . '<div class="form-row"><label class="form-label">満期案件</label><select class="form-select" name="renewal_case_id">' . $renewalOptions . '</select></div>'
             . '<div class="form-row"><label class="form-label">保険会社名</label><input class="form-input" type="text" name="insurer_name" data-contract-fill="insurer_name" value="' . $insurerName . '"></div>'
@@ -326,24 +328,148 @@ final class SalesPerformanceDetailView
             . '})();'
             . '</script>';
 
+        // ─── 変更履歴タイムライン ─────────────────────────────────
+        $auditItems = [];
+        foreach ($audits as $row) {
+            $changedAt = self::formatAuditDate((string) ($row['changed_at'] ?? ''));
+            $changedBy = trim((string) ($row['changed_by_name'] ?? ''));
+            if ($changedBy === '') {
+                $changedBy = '不明なユーザー';
+            }
+            $details = $row['details'] ?? [];
+            $diffItems = [];
+            if (is_array($details)) {
+                foreach ($details as $detailRow) {
+                    if (!is_array($detailRow)) {
+                        continue;
+                    }
+                    $fieldKey   = trim((string) ($detailRow['field_key'] ?? ''));
+                    $fieldLabel = trim((string) ($detailRow['field_label'] ?? ''));
+                    if ($fieldLabel === '') {
+                        $fieldLabel = $fieldKey;
+                    }
+                    $beforeValue = trim((string) ($detailRow['before_value_text'] ?? ''));
+                    $afterValue  = trim((string) ($detailRow['after_value_text']  ?? ''));
+                    $beforeValue = self::translateAuditValue($fieldKey, $beforeValue);
+                    $afterValue  = self::translateAuditValue($fieldKey, $afterValue);
+                    if ($beforeValue === '') { $beforeValue = '未設定'; }
+                    if ($afterValue  === '') { $afterValue  = '未設定'; }
+                    $diffItems[] = [
+                        'label'  => $fieldLabel,
+                        'before' => $beforeValue,
+                        'after'  => $afterValue,
+                    ];
+                }
+            }
+            $auditItems[] = [
+                'changed_at' => $changedAt,
+                'changed_by' => $changedBy,
+                'diff_items' => $diffItems,
+            ];
+        }
+        $auditsHtml = self::renderTimeline($auditItems);
+
         $content = $errorHtml . $successHtml
             . '<div class="page-header">'
             . '<div><div class="page-title">' . Layout::escape($pageHeadTitle) . '</div></div>'
             . '<div class="actions">'
             . '<a class="btn btn-secondary" href="' . Layout::escape($listUrl) . '">一覧へ戻る</a>'
             . '<button class="btn" id="sales-edit-open-btn" type="button">編集</button>'
-            . '<button class="btn btn-danger" type="button" onclick="document.getElementById(\'sales-delete-form\').submit()">削除する</button>'
             . '</div>'
             . '</div>'
-            . '<div class="card" style="max-width:520px;">'
+            . '<div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">'
+            . '<div class="card" style="flex:0 0 auto;width:min(520px,100%);">'
             . '<div class="detail-section-title">実績情報</div>'
             . $kvHtml
+            . '</div>'
+            . '<details class="card details-panel details-compact" open style="flex:1 1 360px;min-width:0;">'
+            . '<summary><span>変更履歴</span><span class="muted">' . count($audits) . '件</span></summary>'
+            . '<div class="details-compact-body">'
+            . $auditsHtml
+            . '</div>'
+            . '</details>'
             . '</div>'
             . $deleteFormHtml
             . $dialogHtml
             . $js;
 
         return Layout::render('実績詳細', $content, $layoutOptions);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $items
+     */
+    private static function renderTimeline(array $items): string
+    {
+        $html = '';
+        foreach ($items as $item) {
+            $diffItems = $item['diff_items'] ?? [];
+            if ($diffItems === []) {
+                continue;
+            }
+
+            $diffHtml = '';
+            foreach ($diffItems as $d) {
+                $label  = Layout::escape((string) ($d['label']  ?? ''));
+                $before = Layout::escape((string) ($d['before'] ?? ''));
+                $after  = Layout::escape((string) ($d['after']  ?? ''));
+
+                $diffHtml .= '<div style="display:flex;align-items:baseline;gap:6px;margin:3px 0;font-size:12.5px;">'
+                    . '<span style="min-width:90px;color:var(--text-muted,#6b7280);">' . $label . '</span>'
+                    . '<span style="color:var(--text-muted,#9ca3af);text-decoration:line-through;">' . $before . '</span>'
+                    . '<span style="color:var(--text-muted,#9ca3af);">→</span>'
+                    . '<span style="font-weight:600;">' . $after . '</span>'
+                    . '</div>';
+            }
+
+            $html .= '<div style="border-left:3px solid var(--border-color,#d1d5db);padding:8px 10px 8px 12px;margin-bottom:10px;background:var(--bg-card,#fff);border-radius:0 4px 4px 0;">'
+                . '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'
+                . '<span style="font-size:12px;color:var(--text-muted,#6b7280);">' . Layout::escape((string) ($item['changed_at'] ?? '')) . '</span>'
+                . '<span style="font-size:12px;color:var(--text-muted,#6b7280);">' . Layout::escape((string) ($item['changed_by'] ?? '')) . '</span>'
+                . '</div>'
+                . $diffHtml
+                . '</div>';
+        }
+
+        if ($html === '') {
+            $html = '<div class="muted" style="font-size:12.5px;">変更履歴はありません。</div>';
+        }
+
+        return $html;
+    }
+
+    private static function formatAuditDate(string $changedAt): string
+    {
+        $value = trim($changedAt);
+        if ($value === '') {
+            return '';
+        }
+        $ts = strtotime($value);
+        return $ts !== false ? date('Y-m-d H:i', $ts) : $value;
+    }
+
+    private static function translateAuditValue(string $fieldKey, string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        return match ($fieldKey) {
+            'performance_type' => match ($value) {
+                'new'             => '新規',
+                'renewal'         => '更改',
+                'addition'        => '追加',
+                'change'          => '異動',
+                'cancel_deduction' => '解約控除',
+                default => $value,
+            },
+            'source_type' => match ($value) {
+                'non_life' => '損保',
+                'life'     => '生保',
+                default    => $value,
+            },
+            default => $value,
+        };
     }
 
     private static function performanceTypeLabel(string $type): string

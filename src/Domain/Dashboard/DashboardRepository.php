@@ -9,7 +9,7 @@ use Throwable;
 final class DashboardRepository
 {
     /** @var array<int, string> */
-    private const RENEWAL_DONE_STATUSES = ['completed'];
+    private const RENEWAL_DONE_STATUSES = ['completed', 'cancelled', 'lost'];
 
     /** @var array<int, string> */
     private const ACCIDENT_DONE_STATUSES = ['resolved', 'closed'];
@@ -17,13 +17,322 @@ final class DashboardRepository
     /** @var array<int, string> */
     private const ACCIDENT_HIGH_PRIORITIES = ['high', 'urgent'];
 
-    public function __construct(private PDO $pdo)
+    public function __construct(
+        private PDO $pdo,
+        private ?PDO $commonPdo = null,
+        private string $tenantCode = ''
+    ) {
+    }
+
+    // ─── New summary methods ──────────────────────────────────────────────
+
+    /**
+     * 満期アラートカウント（対応遅れ・7日以内・14日以内・28日以内・60日以内）を返す。
+     *
+     * @return array{overdue: int, within_7d: int, within_14d: int, within_28d: int, within_60d: int}
+     */
+    public function getRenewalAlertCounts(?int $staffUserId): array
     {
+        $doneSql = self::quotedList(self::RENEWAL_DONE_STATUSES);
+        $userJoin = $staffUserId !== null
+            ? 'INNER JOIN m_staff ms ON ms.id = rc.assigned_staff_id AND ms.user_id = :staff_user_id'
+            : '';
+
+        $sql =
+            'SELECT
+                COALESCE(SUM(CASE WHEN rc.maturity_date < CURDATE() THEN 1 ELSE 0 END), 0) AS overdue,
+                COALESCE(SUM(CASE WHEN rc.maturity_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY) THEN 1 ELSE 0 END), 0) AS within_7d,
+                COALESCE(SUM(CASE WHEN rc.maturity_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 14 DAY) THEN 1 ELSE 0 END), 0) AS within_14d,
+                COALESCE(SUM(CASE WHEN rc.maturity_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 28 DAY) THEN 1 ELSE 0 END), 0) AS within_28d,
+                COALESCE(SUM(CASE WHEN rc.maturity_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 60 DAY) THEN 1 ELSE 0 END), 0) AS within_60d
+             FROM t_renewal_case rc
+             ' . $userJoin . '
+             WHERE rc.is_deleted = 0
+               AND rc.case_status NOT IN (' . $doneSql . ')';
+
+        $stmt = $this->pdo->prepare($sql);
+        if ($staffUserId !== null) {
+            $stmt->bindValue(':staff_user_id', $staffUserId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return [
+            'overdue'    => (int) (is_array($row) ? ($row['overdue']    ?? 0) : 0),
+            'within_7d'  => (int) (is_array($row) ? ($row['within_7d']  ?? 0) : 0),
+            'within_14d' => (int) (is_array($row) ? ($row['within_14d'] ?? 0) : 0),
+            'within_28d' => (int) (is_array($row) ? ($row['within_28d'] ?? 0) : 0),
+            'within_60d' => (int) (is_array($row) ? ($row['within_60d'] ?? 0) : 0),
+        ];
     }
 
     /**
-     * 満期業務サマリを返す。
+     * 事故アラートカウント（高・中・低優先度未完了）を返す。
      *
+     * @return array{high_priority: int, mid_priority: int, low_priority: int, open: int}
+     */
+    public function getAccidentAlertCounts(?int $staffUserId): array
+    {
+        $doneSql    = self::quotedList(self::ACCIDENT_DONE_STATUSES);
+        $userJoin   = $staffUserId !== null
+            ? 'LEFT JOIN m_staff ms ON ms.id = ac.assigned_staff_id AND ms.user_id = :staff_user_id'
+            : '';
+        $userWhere  = $staffUserId !== null ? 'AND ms.id IS NOT NULL' : '';
+
+        $sql =
+            'SELECT
+                COALESCE(SUM(CASE WHEN ac.priority IN ("high", "urgent") THEN 1 ELSE 0 END), 0) AS `high_priority`,
+                COALESCE(SUM(CASE WHEN ac.priority = "normal"            THEN 1 ELSE 0 END), 0) AS `mid_priority`,
+                COALESCE(SUM(CASE WHEN ac.priority = "low"               THEN 1 ELSE 0 END), 0) AS `low_priority`,
+                COALESCE(COUNT(*), 0) AS `open`
+             FROM t_accident_case ac
+             ' . $userJoin . '
+             WHERE ac.is_deleted = 0
+               AND ac.status NOT IN (' . $doneSql . ')
+               ' . $userWhere;
+
+        $stmt = $this->pdo->prepare($sql);
+        if ($staffUserId !== null) {
+            $stmt->bindValue(':staff_user_id', $staffUserId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return [
+            'high_priority' => (int) (is_array($row) ? ($row['high_priority'] ?? 0) : 0),
+            'mid_priority'  => (int) (is_array($row) ? ($row['mid_priority']  ?? 0) : 0),
+            'low_priority'  => (int) (is_array($row) ? ($row['low_priority']  ?? 0) : 0),
+            'open'          => (int) (is_array($row) ? ($row['open']          ?? 0) : 0),
+        ];
+    }
+
+    /**
+     * 見込管理サマリ（見込度別件数・今月成約予定件数）を返す。
+     * 完了ステータス（won, lost）を除いた未完了件数を集計する。
+     *
+     * @return array{rank_a: int, rank_b: int, rank_c: int, closing_this_month: int}
+     */
+    public function getSalesCaseAlertCounts(?int $staffUserId): array
+    {
+        $userJoin = $staffUserId !== null
+            ? 'LEFT JOIN m_staff ms ON ms.id = sc.assigned_staff_id AND ms.user_id = :staff_user_id'
+            : '';
+        $userWhere = $staffUserId !== null ? 'AND ms.id IS NOT NULL' : '';
+
+        $sql =
+            'SELECT
+                COALESCE(SUM(CASE WHEN sc.prospect_rank = \'A\' THEN 1 ELSE 0 END), 0) AS rank_a,
+                COALESCE(SUM(CASE WHEN sc.prospect_rank = \'B\' THEN 1 ELSE 0 END), 0) AS rank_b,
+                COALESCE(SUM(CASE WHEN sc.prospect_rank = \'C\' THEN 1 ELSE 0 END), 0) AS rank_c,
+                COALESCE(SUM(CASE WHEN sc.expected_contract_month = DATE_FORMAT(CURDATE(), \'%Y-%m\') THEN 1 ELSE 0 END), 0) AS closing_this_month
+             FROM t_sales_case sc
+             ' . $userJoin . '
+             WHERE sc.is_deleted = 0
+               AND sc.status NOT IN (\'won\', \'lost\')
+               ' . $userWhere;
+
+        $stmt = $this->pdo->prepare($sql);
+        if ($staffUserId !== null) {
+            $stmt->bindValue(':staff_user_id', $staffUserId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return [
+            'rank_a'             => (int) (is_array($row) ? ($row['rank_a']             ?? 0) : 0),
+            'rank_b'             => (int) (is_array($row) ? ($row['rank_b']             ?? 0) : 0),
+            'rank_c'             => (int) (is_array($row) ? ($row['rank_c']             ?? 0) : 0),
+            'closing_this_month' => (int) (is_array($row) ? ($row['closing_this_month'] ?? 0) : 0),
+        ];
+    }
+
+    /**
+     * 月別実績サマリ（12ヶ月分、4月始まり）を返す。
+     *
+     * @return array<int, array{premium: int, count: int}>
+     */
+    public function getPerformanceMonthlySummary(int $fiscalYear, ?int $staffUserId): array
+    {
+        $fiscalStart = $fiscalYear . '-04-01';
+        $fiscalEnd   = ($fiscalYear + 1) . '-03-31';
+
+        $userJoin  = $staffUserId !== null
+            ? 'LEFT JOIN m_staff ms ON ms.id = sp.staff_id AND ms.user_id = :staff_user_id'
+            : '';
+        $userWhere = $staffUserId !== null ? 'AND ms.id IS NOT NULL' : '';
+
+        $sql =
+            'SELECT MONTH(sp.performance_date) AS perf_month,
+                    COALESCE(SUM(sp.premium_amount), 0) AS premium,
+                    COUNT(*) AS cnt
+             FROM t_sales_performance sp
+             ' . $userJoin . '
+             WHERE sp.is_deleted = 0
+               AND sp.performance_date BETWEEN :fiscal_start AND :fiscal_end
+               ' . $userWhere . '
+             GROUP BY MONTH(sp.performance_date)';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':fiscal_start', $fiscalStart);
+        $stmt->bindValue(':fiscal_end',   $fiscalEnd);
+        if ($staffUserId !== null) {
+            $stmt->bindValue(':staff_user_id', $staffUserId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+        $dbRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // 12ヶ月分を初期化（データなし月は 0）
+        $result = [];
+        foreach ([4,5,6,7,8,9,10,11,12,1,2,3] as $m) {
+            $result[$m] = ['premium' => 0, 'count' => 0];
+        }
+
+        if (is_array($dbRows)) {
+            foreach ($dbRows as $row) {
+                $m = (int) ($row['perf_month'] ?? 0);
+                if (isset($result[$m])) {
+                    $result[$m]['premium'] = (int) ($row['premium'] ?? 0);
+                    $result[$m]['count']   = (int) ($row['cnt']     ?? 0);
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * 月別・年度目標サマリを返す。
+     *
+     * @return array{annual: int|null, monthly: array<int, int>}
+     */
+    public function getTargetMonthlySummary(int $fiscalYear, ?int $staffUserId): array
+    {
+        if ($staffUserId === null) {
+            $staffWhere = 'AND st.staff_user_id IS NULL';
+        } else {
+            $staffWhere = 'AND st.staff_user_id = :staff_user_id';
+        }
+
+        $sql =
+            'SELECT st.target_month, st.target_amount
+             FROM t_sales_target st
+             WHERE st.is_deleted = 0
+               AND st.fiscal_year = :fiscal_year
+               AND st.target_type = \'premium_total\'
+               ' . $staffWhere;
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':fiscal_year', $fiscalYear, PDO::PARAM_INT);
+        if ($staffUserId !== null) {
+            $stmt->bindValue(':staff_user_id', $staffUserId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+        $dbRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $annual  = null;
+        $monthly = [];
+
+        if (is_array($dbRows)) {
+            foreach ($dbRows as $row) {
+                $targetMonth  = $row['target_month'] ?? null;
+                $targetAmount = (int) ($row['target_amount'] ?? 0);
+
+                if ($targetMonth === null) {
+                    $annual = $targetAmount;
+                } else {
+                    $monthly[(int) $targetMonth] = $targetAmount;
+                }
+            }
+        }
+
+        return ['annual' => $annual, 'monthly' => $monthly];
+    }
+
+    /**
+     * 今日の活動件数と日報提出状態を返す。
+     *
+     * @return array{today_count: int, is_submitted: bool, submitted_at: string|null}
+     */
+    public function getActivitySummary(int $staffUserId): array
+    {
+        // 今日の活動件数（t_activity.staff_id = common.users.id）
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM t_activity
+             WHERE activity_date = CURDATE()
+               AND staff_id = :staff_id
+               AND is_deleted = 0'
+        );
+        $stmt->bindValue(':staff_id', $staffUserId, PDO::PARAM_INT);
+        $stmt->execute();
+        $todayCount = (int) $stmt->fetchColumn();
+
+        // 日報提出状態（t_daily_report.staff_user_id = common.users.id）
+        $stmt2 = $this->pdo->prepare(
+            'SELECT is_submitted, submitted_at
+             FROM t_daily_report
+             WHERE report_date = CURDATE()
+               AND staff_user_id = :staff_user_id
+               AND is_deleted = 0
+             LIMIT 1'
+        );
+        $stmt2->bindValue(':staff_user_id', $staffUserId, PDO::PARAM_INT);
+        $stmt2->execute();
+        $drRow = $stmt2->fetch(PDO::FETCH_ASSOC);
+
+        $isSubmitted  = is_array($drRow) && (int) ($drRow['is_submitted'] ?? 0) === 1;
+        $submittedAt  = is_array($drRow) ? ($drRow['submitted_at'] ?? null) : null;
+
+        return [
+            'today_count'  => $todayCount,
+            'is_submitted' => $isSubmitted,
+            'submitted_at' => is_string($submittedAt) ? $submittedAt : null,
+        ];
+    }
+
+    /**
+     * テナント全体の日報提出状況（管理者専用）を返す。
+     *
+     * @return array{total: int, submitted: int, unsubmitted: int}
+     */
+    public function getDailyReportStatus(): array
+    {
+        // テナントのアクティブユーザー数（common DB）
+        $total = 0;
+        if ($this->commonPdo !== null && $this->tenantCode !== '') {
+            $stmt = $this->commonPdo->prepare(
+                'SELECT COUNT(*)
+                 FROM user_tenants ut
+                 WHERE ut.tenant_code = :tenant_code
+                   AND ut.status = 1
+                   AND ut.is_deleted = 0'
+            );
+            $stmt->bindValue(':tenant_code', $this->tenantCode);
+            $stmt->execute();
+            $total = (int) $stmt->fetchColumn();
+        }
+
+        // 今日の提出済み日報数（tenant DB）
+        $stmt2 = $this->pdo->prepare(
+            'SELECT COUNT(*)
+             FROM t_daily_report
+             WHERE report_date = CURDATE()
+               AND is_submitted = 1
+               AND is_deleted = 0'
+        );
+        $stmt2->execute();
+        $submitted = (int) $stmt2->fetchColumn();
+        $submitted = min($submitted, $total); // total を超えない
+
+        return [
+            'total'       => $total,
+            'submitted'   => $submitted,
+            'unsubmitted' => max(0, $total - $submitted),
+        ];
+    }
+
+    // ─── Existing methods (kept for backward compatibility) ──────────────
+
+    /**
      * @return array{due_today: int, upcoming_30: int, overdue: int, this_month_not_completed: int, early_deadline_overdue: int}|null
      */
     public function getRenewalSummary(): ?array
@@ -78,14 +387,12 @@ final class DashboardRepository
     }
 
     /**
-     * 事故業務サマリを返す。
-     *
      * @return array{open_count: int, high_priority_open_count: int, resolved_this_month: int, new_accepted_count: int}|null
      */
     public function getAccidentSummary(): ?array
     {
         try {
-            $accidentDoneSql      = self::quotedList(self::ACCIDENT_DONE_STATUSES);
+            $accidentDoneSql         = self::quotedList(self::ACCIDENT_DONE_STATUSES);
             $accidentHighPrioritySql = self::quotedList(self::ACCIDENT_HIGH_PRIORITIES);
 
             $stmt = $this->pdo->prepare(
@@ -114,20 +421,16 @@ final class DashboardRepository
             }
 
             return [
-                'open_count'              => (int) ($row['open_count'] ?? 0),
+                'open_count'               => (int) ($row['open_count'] ?? 0),
                 'high_priority_open_count' => (int) ($row['high_priority_open_count'] ?? 0),
-                'resolved_this_month'     => (int) ($row['resolved_this_month'] ?? 0),
-                'new_accepted_count'      => (int) ($row['new_accepted_count'] ?? 0),
+                'resolved_this_month'      => (int) ($row['resolved_this_month'] ?? 0),
+                'new_accepted_count'       => (int) ($row['new_accepted_count'] ?? 0),
             ];
         } catch (Throwable) {
             return null;
         }
     }
 
-    /**
-     * 実績の今月入力件数を返す。
-     * settlement_month が NULL のレコードは除外する。
-     */
     public function getSalesMonthlyInputCount(string $yearMonth): ?int
     {
         try {
@@ -151,8 +454,6 @@ final class DashboardRepository
     }
 
     /**
-     * 今後30日以内に満期を迎える未完了案件（最大 $limit 件）を返す。
-     *
      * @return array<int, array<string, mixed>>
      */
     public function getRenewalUpcomingRows(int $limit = 5): array
@@ -163,12 +464,16 @@ final class DashboardRepository
                         mc.customer_name,
                         c.product_type,
                         rc.maturity_date,
-                        rc.case_status
+                        rc.early_renewal_deadline,
+                        rc.case_status,
+                        rc.next_action_date,
+                        ms.staff_name AS assigned_staff_name
                  FROM t_renewal_case rc
                  INNER JOIN t_contract c ON c.id = rc.contract_id AND c.is_deleted = 0
                  INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.is_deleted = 0
+                 LEFT  JOIN m_staff ms ON ms.id = rc.assigned_staff_id AND ms.is_active = 1
                  WHERE rc.is_deleted = 0
-                   AND rc.case_status != "completed"
+                   AND rc.case_status NOT IN (' . self::quotedList(self::RENEWAL_DONE_STATUSES) . ')
                    AND rc.maturity_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
                  ORDER BY rc.maturity_date ASC, rc.id ASC
                  LIMIT :limit'
@@ -183,8 +488,6 @@ final class DashboardRepository
     }
 
     /**
-     * 対応中の事故案件（最大 $limit 件）を返す。
-     *
      * @return array<int, array<string, mixed>>
      */
     public function getAccidentOpenRows(int $limit = 5): array
@@ -196,9 +499,13 @@ final class DashboardRepository
                         mc.customer_name,
                         ac.accident_date,
                         ac.accepted_date,
-                        ac.status
+                        ac.product_type,
+                        ac.priority,
+                        ac.status,
+                        ms.staff_name AS assigned_staff_name
                  FROM t_accident_case ac
                  INNER JOIN m_customer mc ON mc.id = ac.customer_id AND mc.is_deleted = 0
+                 LEFT  JOIN m_staff ms ON ms.id = ac.assigned_staff_id AND ms.is_active = 1
                  WHERE ac.is_deleted = 0
                    AND ac.status NOT IN (' . $accidentDoneSql . ')
                  ORDER BY ac.accepted_date DESC, ac.id DESC
@@ -214,30 +521,25 @@ final class DashboardRepository
     }
 
     /**
-     * 当日の活動記録（最大 $limit 件）を返す。t_activity が存在しない場合は空配列。
-     *
      * @return array<int, array<string, mixed>>
      */
-    public function getTodayActivityRows(int $userId, string $today, int $limit = 10): array
+    public function getRecentActivityRows(int $limit = 10): array
     {
         try {
             $stmt = $this->pdo->prepare(
                 'SELECT a.id,
-                        a.start_time,
+                        a.activity_date,
                         mc.customer_name,
                         a.activity_type,
                         a.content_summary,
-                        a.result_type
+                        ms.staff_name
                  FROM t_activity a
                  INNER JOIN m_customer mc ON mc.id = a.customer_id AND mc.is_deleted = 0
+                 LEFT  JOIN m_staff ms ON ms.id = a.staff_id AND ms.is_active = 1
                  WHERE a.is_deleted = 0
-                   AND a.activity_date = :today
-                   AND a.staff_user_id = :user_id
-                 ORDER BY a.start_time ASC, a.id ASC
+                 ORDER BY a.updated_at DESC, a.id DESC
                  LIMIT :limit'
             );
-            $stmt->bindValue(':today', $today);
-            $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
             $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
             $stmt->execute();
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);

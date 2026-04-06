@@ -10,63 +10,11 @@ use App\Presentation\View\ListViewHelper;
 final class SalesCaseDetailView
 {
     /**
-     * 見込案件登録（新規専用）
-     *
-     * @param array<string, mixed>                  $prefill
-     * @param array<int, array<string, mixed>>      $customers
-     * @param array<int, array{id:int,name:string}> $staffUsers
-     * @param array<string, mixed>                  $layoutOptions
-     */
-    public static function renderNew(
-        array $prefill,
-        array $customers,
-        array $staffUsers,
-        string $listUrl,
-        string $storeUrl,
-        string $storeCsrf,
-        ?string $flashError,
-        ?string $errorMessage,
-        array $layoutOptions
-    ): string {
-        $noticeHtml = '';
-        if (is_string($flashError) && $flashError !== '') {
-            $noticeHtml .= '<div class="error">' . Layout::escape($flashError) . '</div>';
-        }
-        if (is_string($errorMessage) && $errorMessage !== '') {
-            $noticeHtml .= '<div class="error">' . Layout::escape($errorMessage) . '</div>';
-        }
-
-        $formHtml = self::buildForm($prefill, $customers, $staffUsers);
-
-        $content =
-            '<div class="card">'
-            . '<div class="section-head">'
-            . '<div><h1 class="title">見込案件登録</h1></div>'
-            . '<div class="actions">'
-            . '<a href="' . Layout::escape($listUrl) . '" class="btn btn-ghost">キャンセル</a>'
-            . '<button type="submit" class="btn btn-primary" form="sales-case-new-form">登録</button>'
-            . '</div>'
-            . '</div>'
-            . $noticeHtml
-            . '</div>'
-            . '<form id="sales-case-new-form" method="post" action="' . Layout::escape($storeUrl) . '">'
-            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($storeCsrf) . '">'
-            . $formHtml
-            . '<div class="actions" style="margin-top:4px;">'
-            . '<button type="submit" class="btn btn-primary">登録</button>'
-            . '<a href="' . Layout::escape($listUrl) . '" class="btn btn-ghost">キャンセル</a>'
-            . '</div>'
-            . '</form>';
-
-        return Layout::render('見込案件登録', $content, $layoutOptions);
-    }
-
-    /**
      * 見込案件詳細（既存の確認・編集・削除専用）
      *
      * @param array<string, mixed>|null             $record
      * @param array<int, array<string, mixed>>      $customers
-     * @param array<int, array{id:int,name:string}> $staffUsers
+     * @param array<int, array<string, mixed>> $staffUsers
      * @param array<int, array<string, mixed>>      $activities
      * @param array<string, mixed>                  $layoutOptions
      */
@@ -86,7 +34,8 @@ final class SalesCaseDetailView
         ?string $flashError,
         ?string $flashSuccess,
         ?string $errorMessage,
-        array $layoutOptions
+        array $layoutOptions,
+        array $productCategories = []
     ): string {
         $noticeHtml = '';
         if (is_string($flashError) && $flashError !== '') {
@@ -120,7 +69,7 @@ final class SalesCaseDetailView
             ? '<a href="' . $custUrl . '" class="text-link">' . Layout::escape($custName) . '</a>'
             : Layout::escape($custName);
 
-        $formHtml = self::buildForm($record, $customers, $staffUsers, $id);
+        $formHtml = self::buildForm($record, $customers, $staffUsers, $id, $productCategories);
 
         $deleteDialog =
             '<dialog id="dlg-delete" class="modal-dialog">'
@@ -163,9 +112,9 @@ final class SalesCaseDetailView
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($updateCsrf) . '">'
             . '<input type="hidden" name="id" value="' . $id . '">'
             . $formHtml
-            . '<div class="actions" style="margin-top:4px;">'
+            . '<div class="actions" style="margin-top:8px;">'
             . '<button type="submit" class="btn btn-primary">保存</button>'
-            . '<a href="' . Layout::escape($listUrl) . '" class="btn btn-ghost">一覧に戻る</a>'
+            . '<a href="' . Layout::escape($listUrl) . '" class="btn btn-secondary">一覧に戻る</a>'
             . '</div>'
             . '</form>'
             . $activitiesHtml
@@ -177,13 +126,14 @@ final class SalesCaseDetailView
     /**
      * @param array<string, mixed>                  $data
      * @param array<int, array<string, mixed>>      $customers
-     * @param array<int, array{id:int,name:string}> $staffUsers
+     * @param array<int, array<string, mixed>> $staffUsers
      */
     private static function buildForm(
         array $data,
         array $customers,
         array $staffUsers,
-        int $id = 0
+        int $id = 0,
+        array $productCategories = []
     ): string {
         $customerIdVal        = (string) ($data['customer_id'] ?? '');
         $caseNameVal          = (string) ($data['case_name'] ?? '');
@@ -191,13 +141,13 @@ final class SalesCaseDetailView
         $productTypeVal       = (string) ($data['product_type'] ?? '');
         $statusVal            = (string) ($data['status'] ?? 'open');
         $prospectRankVal      = (string) ($data['prospect_rank'] ?? '');
-        $premiumVal           = $data['expected_premium'] !== null ? (string) $data['expected_premium'] : '';
+        $premiumVal           = ($data['expected_premium'] ?? null) !== null ? (string) $data['expected_premium'] : '';
         $closeMonthVal        = (string) ($data['expected_contract_month'] ?? '');
         $referralSourceVal    = (string) ($data['referral_source'] ?? '');
         $nextActionDateVal    = (string) ($data['next_action_date'] ?? '');
         $lostReasonVal        = (string) ($data['lost_reason'] ?? '');
         $memoVal              = (string) ($data['memo'] ?? '');
-        $staffUserIdVal       = (string) ($data['staff_user_id'] ?? '');
+        $staffUserIdVal       = (string) ($data['staff_id'] ?? '');
 
         $custOptions = '<option value="">-- 顧客を選択 --</option>';
         foreach ($customers as $cust) {
@@ -228,55 +178,80 @@ final class SalesCaseDetailView
         $staffOptions = '<option value="">-- 選択 --</option>';
         foreach ($staffUsers as $user) {
             $uid   = (int) ($user['id'] ?? 0);
-            $uname = (string) ($user['name'] ?? '');
+            $uname = (string) ($user['staff_name'] ?? $user['name'] ?? '');
             $sel   = $staffUserIdVal === (string) $uid ? ' selected' : '';
             $staffOptions .= '<option value="' . $uid . '"' . $sel . '>' . Layout::escape($uname) . '</option>';
         }
 
-        $req = '<strong class="required-mark"> *</strong>';
+        $productOptions = '<option value="">— 未選択 —</option>';
+        foreach ($productCategories as $cat) {
+            $catVal  = Layout::escape((string) ($cat['display_name'] ?? ''));
+            $sel     = $productTypeVal === (string) ($cat['display_name'] ?? '') ? ' selected' : '';
+            $productOptions .= '<option value="' . $catVal . '"' . $sel . '>' . $catVal . '</option>';
+        }
+        // 既存値がマスタに存在しない場合は先頭に追加
+        if ($productTypeVal !== '' && $productCategories !== []) {
+            $exists = false;
+            foreach ($productCategories as $cat) {
+                if ((string) ($cat['display_name'] ?? '') === $productTypeVal) {
+                    $exists = true;
+                    break;
+                }
+            }
+            if (!$exists) {
+                $productOptions = '<option value="">— 未選択 —</option>'
+                    . '<option value="' . Layout::escape($productTypeVal) . '" selected style="color:#999;">'
+                    . Layout::escape('（旧値: ' . $productTypeVal . '）') . '</option>'
+                    . substr($productOptions, strlen('<option value="">— 未選択 —</option>'));
+            }
+        }
+
+        // 失注理由はステータスが lost のときのみ表示（$id=0 は新規なので非表示）
+        $lostReasonHtml = '';
+        if ($id > 0 && $statusVal === 'lost') {
+            $lostReasonHtml =
+                '<label class="form-field form-field--full"><span class="form-field-label">失注理由</span>'
+                . '<input type="text" name="lost_reason" value="' . Layout::escape($lostReasonVal) . '" maxlength="500"></label>';
+        }
 
         return
             '<div class="card">'
-            . '<div class="list-filter-grid modal-form-grid">'
+            . '<div class="customer-create-grid">'
 
-            . '<label class="list-filter-field modal-form-wide"><span>顧客' . $req . '</span>'
-            . '<select name="customer_id" required>' . $custOptions . '</select></label>'
+            . '<label class="form-field form-field--full"><span class="form-field-label">顧客（既存）</span>'
+            . '<select name="customer_id">' . $custOptions . '</select></label>'
 
-            . '<label class="list-filter-field modal-form-wide"><span>案件名' . $req . '</span>'
+            . '<label class="form-field form-field--required form-field--full"><span class="form-field-label">案件名</span>'
             . '<input type="text" name="case_name" value="' . Layout::escape($caseNameVal) . '" required maxlength="200"></label>'
 
-            . '<label class="list-filter-field"><span>案件種別' . $req . '</span>'
-            . '<select name="case_type" required>' . $caseTypeOptions . '</select></label>'
-
-            . '<label class="list-filter-field"><span>ステータス' . $req . '</span>'
+            . '<label class="form-field form-field--required"><span class="form-field-label">ステータス</span>'
             . '<select name="status" required>' . $statusOptions . '</select></label>'
 
-            . '<label class="list-filter-field"><span>種目</span>'
-            . '<input type="text" name="product_type" value="' . Layout::escape($productTypeVal) . '" maxlength="100"></label>'
+            . '<label class="form-field"><span class="form-field-label">種目</span>'
+            . '<select name="product_type">' . $productOptions . '</select></label>'
 
-            . '<label class="list-filter-field"><span>見込度</span>'
+            . '<label class="form-field"><span class="form-field-label">見込度</span>'
             . '<select name="prospect_rank">' . $rankOptions . '</select></label>'
 
-            . '<label class="list-filter-field"><span>想定保険料（円）</span>'
+            . '<label class="form-field"><span class="form-field-label">想定保険料（円）</span>'
             . '<input type="number" name="expected_premium" value="' . Layout::escape($premiumVal) . '" min="0"></label>'
 
-            . '<label class="list-filter-field"><span>契約予定月（YYYY-MM）</span>'
+            . '<label class="form-field"><span class="form-field-label">契約予定月</span>'
             . '<input type="month" name="expected_contract_month" value="' . Layout::escape($closeMonthVal) . '"></label>'
 
-            . '<label class="list-filter-field"><span>次回予定日</span>'
+            . '<label class="form-field"><span class="form-field-label">次回予定日</span>'
             . '<input type="date" name="next_action_date" value="' . Layout::escape($nextActionDateVal) . '"></label>'
 
-            . '<label class="list-filter-field"><span>担当者</span>'
-            . '<select name="staff_user_id">' . $staffOptions . '</select></label>'
+            . '<label class="form-field"><span class="form-field-label">担当者</span>'
+            . '<select name="staff_id">' . $staffOptions . '</select></label>'
 
-            . '<label class="list-filter-field modal-form-wide"><span>紹介元</span>'
+            . '<label class="form-field form-field--full"><span class="form-field-label">紹介元</span>'
             . '<input type="text" name="referral_source" value="' . Layout::escape($referralSourceVal) . '" maxlength="200"></label>'
 
-            . '<label class="list-filter-field modal-form-wide"><span>失注理由</span>'
-            . '<input type="text" name="lost_reason" value="' . Layout::escape($lostReasonVal) . '" maxlength="500"></label>'
+            . $lostReasonHtml
 
-            . '<label class="list-filter-field modal-form-wide"><span>メモ</span>'
-            . '<textarea name="memo" rows="3" style="width:100%;resize:vertical;">' . Layout::escape($memoVal) . '</textarea></label>'
+            . '<label class="form-field form-field--full"><span class="form-field-label">メモ</span>'
+            . '<textarea name="memo" rows="4">' . Layout::escape($memoVal) . '</textarea></label>'
 
             . '</div>'
             . '</div>';

@@ -6,6 +6,7 @@ namespace App\Controller;
 use App\AppConfig;
 use App\Domain\Sales\SalesCsvImportService;
 use App\Domain\Sales\SalesPerformanceRepository;
+use App\Domain\Tenant\StaffRepository;
 use App\Http\Responses;
 use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
@@ -44,7 +45,7 @@ final class SalesPerformanceController
         $staffUsers = [];
         $contracts = [];
         $renewalCases = [];
-        $metrics = ['non_life_month' => 0, 'non_life_ytd' => 0, 'general_month' => 0, 'total_count_month' => 0];
+        $performanceMonths = [];
         $createDraft = $this->consumeCreateDraft();
         $importBatch = null;
         $importRows = [];
@@ -73,13 +74,12 @@ final class SalesPerformanceController
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
             $listUrl = $this->listUrl($criteria, $listState);
             $customers = $repository->fetchCustomers(500);
-            $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
+            $staffUsers = (new StaffRepository($pdo))->findActive();
             $contracts = $repository->fetchContracts(500);
             $renewalCases = $repository->fetchRenewalCases(500);
+            $performanceMonths = $repository->fetchPerformanceMonths();
             $staffUserNames = $this->buildUserNameMap($staffUsers);
             $rows = $this->attachStaffNamesToRows($rows, $staffUserNames);
-            $now = new DateTimeImmutable();
-            $metrics = $repository->fetchMonthlyMetrics((int) $now->format('Y'), (int) $now->format('n'));
 
             $importBatchId = (int) ($_GET['import_batch_id'] ?? 0);
             if ($importBatchId > 0) {
@@ -107,6 +107,7 @@ final class SalesPerformanceController
             $staffUsers,
             $contracts,
             $renewalCases,
+            $performanceMonths,
             $createDraft,
             $openModal,
             $listUrl,
@@ -121,7 +122,6 @@ final class SalesPerformanceController
             self::ALLOWED_TYPES,
             $importBatch,
             $importRows,
-            $metrics,
             (string) ($_GET['filter_open'] ?? '') === '1',
             ControllerLayoutHelper::build($this->guard, $this->config, 'sales')
         ));
@@ -145,6 +145,7 @@ final class SalesPerformanceController
         $staffUsers = [];
         $contracts = [];
         $renewalCases = [];
+        $audits = [];
         $error = null;
 
         try {
@@ -156,11 +157,15 @@ final class SalesPerformanceController
                 Responses::redirect($listUrl);
             }
             $customers = $repository->fetchCustomers(500);
-            $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
+            $staffUsers = (new StaffRepository($pdo))->findActive();
             $contracts = $repository->fetchContracts(500);
             $renewalCases = $repository->fetchRenewalCases(500);
             $staffUserNames = $this->buildUserNameMap($staffUsers);
             $record = $this->attachStaffNameToRecord($record, $staffUserNames);
+
+            $audits = $repository->findAuditEvents($id);
+            $auditUserNames = $this->fetchUserNamesByRows($audits, 'changed_by');
+            $audits = $this->attachAuditUserNames($audits, $auditUserNames);
 
             $editDraft = $this->consumeEditDraft();
             if ($editDraft !== null && (int) ($editDraft['id'] ?? 0) === $id && is_array($editDraft['input'] ?? null)) {
@@ -180,6 +185,7 @@ final class SalesPerformanceController
             $staffUsers,
             $contracts,
             $renewalCases,
+            $audits,
             self::ALLOWED_TYPES,
             $listUrl,
             $detailUrl,
@@ -362,11 +368,21 @@ final class SalesPerformanceController
      */
     private function extractCriteria(array $source): array
     {
+        // 年度（4月始まり）のデフォルト計算はダッシュボードと同一ロジック
+        $performanceFiscalYear = trim((string) ($source['performance_fiscal_year'] ?? ''));
+        $performanceMonthNum   = trim((string) ($source['performance_month_num'] ?? ''));
+        if ($performanceFiscalYear === '' && $performanceMonthNum === '' && !array_key_exists('filter_open', $source)) {
+            $currentMonth          = (int) date('n');
+            $currentYear           = (int) date('Y');
+            $performanceFiscalYear = (string) ($currentMonth >= 4 ? $currentYear : $currentYear - 1);
+            $performanceMonthNum   = (string) $currentMonth;
+        }
+
         return [
-            'performance_date_from' => trim((string) ($source['performance_date_from'] ?? '')),
-            'performance_date_to' => trim((string) ($source['performance_date_to'] ?? '')),
+            'performance_fiscal_year' => $performanceFiscalYear,
+            'performance_month_num'   => $performanceMonthNum,
             'customer_name' => trim((string) ($source['customer_name'] ?? '')),
-            'staff_user_id' => trim((string) ($source['staff_user_id'] ?? '')),
+            'staff_id' => trim((string) ($source['staff_id'] ?? '')),
             'source_type' => trim((string) ($source['source_type'] ?? '')),
             'performance_type' => trim((string) ($source['performance_type'] ?? '')),
             'insurer_name' => trim((string) ($source['insurer_name'] ?? '')),
@@ -461,7 +477,7 @@ final class SalesPerformanceController
         $customerId = (int) ($_POST['customer_id'] ?? 0);
         $contractId = (int) ($_POST['contract_id'] ?? 0);
         $renewalCaseId = (int) ($_POST['renewal_case_id'] ?? 0);
-        $staffUserId = (int) ($_POST['staff_user_id'] ?? 0);
+        $staffUserId = (int) ($_POST['staff_id'] ?? 0);
 
         return [
             'customer_id' => $customerId,
@@ -480,7 +496,7 @@ final class SalesPerformanceController
             'installment_count' => $this->nullableInt($_POST['installment_count'] ?? null),
             'receipt_no' => $this->nullableText($_POST['receipt_no'] ?? null),
             'settlement_month' => $this->nullableText($_POST['settlement_month'] ?? null),
-            'staff_user_id' => $staffUserId > 0 ? $staffUserId : null,
+            'staff_id' => $staffUserId > 0 ? $staffUserId : null,
             'remark' => $this->nullableText($_POST['remark'] ?? null),
         ];
     }
@@ -545,7 +561,7 @@ final class SalesPerformanceController
             $errors[] = '精算月は YYYY-MM 形式で入力してください。';
         }
 
-        $staffUserId = $input['staff_user_id'] ?? null;
+        $staffUserId = $input['staff_id'] ?? null;
         if ($staffUserId !== null) {
             if (!is_int($staffUserId) || $staffUserId <= 0) {
                 $errors[] = '担当者が不正です。';
@@ -587,55 +603,63 @@ final class SalesPerformanceController
     }
 
     /**
-     * @return array<int, array{id: int, name: string}>
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, string>
      */
-    private function fetchAssignableUsers(string $tenantCode): array
+    private function fetchUserNamesByRows(array $rows, string $key): array
     {
-        $tenantCode = trim($tenantCode);
-        if ($tenantCode === '') {
-            return [];
-        }
-
-        $pdo = $this->commonConnectionFactory->create();
-        $stmt = $pdo->prepare(
-            'SELECT u.id, u.name
-             FROM user_tenants ut
-             INNER JOIN users u ON u.id = ut.user_id
-             WHERE ut.tenant_code = :tenant_code
-               AND ut.status = 1
-               AND ut.is_deleted = 0
-               AND u.status = 1
-               AND u.is_deleted = 0
-             ORDER BY u.name ASC, u.id ASC'
-        );
-        $stmt->bindValue(':tenant_code', $tenantCode);
-        $stmt->execute();
-
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        if (!is_array($rows)) {
-            return [];
-        }
-
-        $result = [];
+        $userIds = [];
         foreach ($rows as $row) {
-            if (!is_array($row)) {
-                continue;
+            $userId = (int) ($row[$key] ?? 0);
+            if ($userId > 0) {
+                $userIds[$userId] = true;
             }
-
-            $id = (int) ($row['id'] ?? 0);
-            $name = trim((string) ($row['name'] ?? ''));
-            if ($id <= 0 || $name === '') {
-                continue;
-            }
-
-            $result[] = ['id' => $id, 'name' => $name];
         }
 
-        return $result;
+        if ($userIds === []) {
+            return [];
+        }
+
+        $ids = array_keys($userIds);
+        $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+
+        try {
+            $pdo = $this->commonConnectionFactory->create();
+            $stmt = $pdo->prepare(
+                'SELECT id, COALESCE(NULLIF(display_name, ""), name) AS name FROM users WHERE id IN (' . $placeholders . ') AND status = 1 AND is_deleted = 0'
+            );
+            foreach ($ids as $index => $id) {
+                $stmt->bindValue($index + 1, $id, PDO::PARAM_INT);
+            }
+            $stmt->execute();
+            $names = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $names[(int) $row['id']] = (string) $row['name'];
+            }
+
+            return $names;
+        } catch (Throwable) {
+            return [];
+        }
     }
 
     /**
-     * @param array<int, array{id:int, name:string}> $users
+     * @param array<int, array<string, mixed>> $audits
+     * @param array<int, string> $userNames
+     * @return array<int, array<string, mixed>>
+     */
+    private function attachAuditUserNames(array $audits, array $userNames): array
+    {
+        foreach ($audits as $index => $row) {
+            $changedBy = (int) ($row['changed_by'] ?? 0);
+            $audits[$index]['changed_by_name'] = $userNames[$changedBy] ?? '不明なユーザー';
+        }
+
+        return $audits;
+    }
+
+    /**
+     * @param array<int, array{id:int, staff_name:string}> $users
      * @return array<int, string>
      */
     private function buildUserNameMap(array $users): array
@@ -643,7 +667,7 @@ final class SalesPerformanceController
         $map = [];
         foreach ($users as $user) {
             $id = (int) ($user['id'] ?? 0);
-            $name = trim((string) ($user['name'] ?? ''));
+            $name = trim((string) ($user['staff_name'] ?? $user['name'] ?? ''));
             if ($id > 0 && $name !== '') {
                 $map[$id] = $name;
             }
@@ -664,7 +688,7 @@ final class SalesPerformanceController
                 continue;
             }
 
-            $staffUserId = (int) ($row['staff_user_id'] ?? 0);
+            $staffUserId = (int) ($row['staff_id'] ?? 0);
             $rows[$index]['staff_user_name'] = $staffUserId > 0 ? ($staffUserNames[$staffUserId] ?? '') : '';
         }
 
@@ -682,7 +706,7 @@ final class SalesPerformanceController
             return null;
         }
 
-        $staffUserId = (int) ($record['staff_user_id'] ?? 0);
+        $staffUserId = (int) ($record['staff_id'] ?? 0);
         $record['staff_user_name'] = $staffUserId > 0 ? ($staffUserNames[$staffUserId] ?? '') : '';
 
         return $record;

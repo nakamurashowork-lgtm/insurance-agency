@@ -21,7 +21,7 @@ final class ActivityPurposeTypeRepository
         if ($activeOnly) {
             $sql .= ' WHERE is_active = 1';
         }
-        $sql .= ' ORDER BY display_order ASC, code ASC';
+        $sql .= ' ORDER BY is_active DESC, display_order ASC, code ASC';
 
         $rows = $this->pdo->query($sql)->fetchAll();
 
@@ -74,11 +74,12 @@ final class ActivityPurposeTypeRepository
         return $stmt->rowCount();
     }
 
-    public function delete(string $code): int
+    public function setActive(string $code, int $active): int
     {
         $stmt = $this->pdo->prepare(
-            'DELETE FROM m_activity_purpose_type WHERE code = :code'
+            'UPDATE m_activity_purpose_type SET is_active = :active WHERE code = :code'
         );
+        $stmt->bindValue(':active', $active, \PDO::PARAM_INT);
         $stmt->bindValue(':code', $code);
         $stmt->execute();
 

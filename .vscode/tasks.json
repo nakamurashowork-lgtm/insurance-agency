@@ -1,0 +1,106 @@
+{
+  "version": "2.0.0",
+  "inputs": [
+    {
+      "id": "batchDate",
+      "type": "promptString",
+      "description": "実行対象日（YYYY-MM-DD）",
+      "default": ""
+    },
+    {
+      "id": "batchType",
+      "type": "pickString",
+      "description": "通知種別",
+      "options": ["renewal", "accident", "all"],
+      "default": "renewal"
+    },
+    {
+      "id": "batchTenant",
+      "type": "promptString",
+      "description": "テナントコード（空欄で全テナント）",
+      "default": ""
+    },
+    {
+      "id": "batchTypeNoTenant",
+      "type": "pickString",
+      "description": "通知種別",
+      "options": ["renewal", "accident", "all"],
+      "default": "renewal"
+    },
+    {
+      "id": "batchTypeTodayTenant",
+      "type": "pickString",
+      "description": "通知種別",
+      "options": ["renewal", "accident", "all"],
+      "default": "renewal"
+    },
+    {
+      "id": "batchTenantToday",
+      "type": "promptString",
+      "description": "テナントコード（空欄で全テナント）",
+      "default": ""
+    }
+  ],
+  "tasks": [
+    {
+      "label": "通知バッチ：日付指定",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "$date='${input:batchDate}'; $type='${input:batchType}'; $tenant='${input:batchTenant}'; $tenantArg = if ($tenant -ne '') { \"--tenant=$tenant\" } else { $null }; $phpArgs = @(\"tools/batch/run_renewal_notification.php\", \"--date=$date\", \"--type=$type\"); if ($tenantArg) { $phpArgs += $tenantArg }; & 'C:\\xampp\\php\\php.exe' $phpArgs"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "通知バッチ：今日・全テナント",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "$date=(Get-Date -Format 'yyyy-MM-dd'); $type='${input:batchTypeNoTenant}'; & 'C:\\xampp\\php\\php.exe' tools/batch/run_renewal_notification.php \"--date=$date\" \"--type=$type\""
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "通知バッチ：今日・テナント指定",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "$date=(Get-Date -Format 'yyyy-MM-dd'); $type='${input:batchTypeTodayTenant}'; $tenant='${input:batchTenantToday}'; $tenantArg = if ($tenant -ne '') { \"--tenant=$tenant\" } else { $null }; $phpArgs = @(\"tools/batch/run_renewal_notification.php\", \"--date=$date\", \"--type=$type\"); if ($tenantArg) { $phpArgs += $tenantArg }; & 'C:\\xampp\\php\\php.exe' $phpArgs"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "clear": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}

@@ -10,7 +10,7 @@ final class CustomerRepository
     /**
      * @var array<int, string>
      */
-    public const SORTABLE_FIELDS = ['customer_name', 'phone', 'assigned_user_id', 'contract_count', 'updated_at'];
+    public const SORTABLE_FIELDS = ['customer_name', 'contract_count', 'updated_at'];
 
     public function __construct(private PDO $pdo)
     {
@@ -54,7 +54,6 @@ final class CustomerRepository
                     mc.email,
                     mc.address1,
                     mc.address2,
-                    mc.assigned_user_id,
                     mc.status,
                     mc.updated_at,
                     COALESCE(cnt.contract_count, 0) AS contract_count'
@@ -103,24 +102,6 @@ final class CustomerRepository
             $params['customer_name_kana'] = '%' . $customerName . '%';
         }
 
-        $assignedUserId = (int) ($criteria['assigned_user_id'] ?? 0);
-        if ($assignedUserId > 0) {
-            $sql .= ' AND mc.assigned_user_id = :assigned_user_id';
-            $params['assigned_user_id'] = $assignedUserId;
-        }
-
-        $phone = trim((string) ($criteria['phone'] ?? ''));
-        if ($phone !== '') {
-            $sql .= ' AND mc.phone LIKE :phone';
-            $params['phone'] = '%' . $phone . '%';
-        }
-
-        $email = trim((string) ($criteria['email'] ?? ''));
-        if ($email !== '') {
-            $sql .= ' AND mc.email LIKE :email';
-            $params['email'] = '%' . $email . '%';
-        }
-
         return ['sql' => $sql, 'params' => $params];
     }
 
@@ -145,12 +126,10 @@ final class CustomerRepository
         $directionSql = strtoupper($direction) === 'DESC' ? 'DESC' : 'ASC';
 
         return match ($sort) {
-            'customer_name' => 'mc.customer_name ' . $directionSql . ', mc.id ASC',
-            'phone' => 'mc.phone ' . $directionSql . ', mc.id ASC',
-            'assigned_user_id' => 'mc.assigned_user_id ' . $directionSql . ', mc.id ASC',
+            'customer_name'  => 'mc.customer_name ' . $directionSql . ', mc.id ASC',
             'contract_count' => 'COALESCE(cnt.contract_count, 0) ' . $directionSql . ', mc.id ASC',
-            'updated_at' => 'mc.updated_at ' . $directionSql . ', mc.id DESC',
-            default => 'mc.updated_at DESC, mc.id DESC',
+            'updated_at'     => 'mc.updated_at ' . $directionSql . ', mc.id DESC',
+            default          => 'mc.updated_at DESC, mc.id DESC',
         };
     }
 
@@ -169,7 +148,6 @@ final class CustomerRepository
                     postal_code,
                     address1,
                     address2,
-                    assigned_user_id,
                     status,
                     note,
                     updated_at
@@ -248,11 +226,11 @@ final class CustomerRepository
             $stmt = $this->pdo->prepare(
                 'INSERT INTO m_customer
                     (customer_type, customer_name, customer_name_kana, phone, email,
-                     postal_code, address1, address2, assigned_user_id, status, note,
+                     postal_code, address1, address2, status, note,
                      created_by, updated_by)
                  VALUES
                     (:customer_type, :customer_name, :customer_name_kana, :phone, :email,
-                     :postal_code, :address1, :address2, :assigned_user_id, :status, :note,
+                     :postal_code, :address1, :address2, :status, :note,
                      :created_by, :updated_by)'
             );
             $stmt->execute([
@@ -264,7 +242,6 @@ final class CustomerRepository
                 'postal_code'        => $input['postal_code'] ?? null,
                 'address1'           => $input['address1'] ?? null,
                 'address2'           => $input['address2'] ?? null,
-                'assigned_user_id'   => $input['assigned_user_id'] ?? null,
                 'status'             => 'active',
                 'note'               => $input['note'] ?? null,
                 'created_by'         => $userId,
@@ -307,34 +284,37 @@ final class CustomerRepository
     {
         $stmt = $this->pdo->prepare(
             'UPDATE m_customer
-             SET customer_type      = :customer_type,
-                 customer_name      = :customer_name,
-                 customer_name_kana = :customer_name_kana,
-                 phone              = :phone,
-                 email              = :email,
-                 postal_code        = :postal_code,
-                 address1           = :address1,
-                 address2           = :address2,
-                 assigned_user_id   = :assigned_user_id,
-                 note               = :note,
-                 updated_by         = :updated_by
+             SET note       = :note,
+                 updated_by = :updated_by
              WHERE id = :id
                AND is_deleted = 0'
         );
         $stmt->execute([
-            'customer_type'      => (string) ($input['customer_type'] ?? ''),
-            'customer_name'      => (string) ($input['customer_name'] ?? ''),
-            'customer_name_kana' => $input['customer_name_kana'] ?? null,
-            'phone'              => $input['phone'] ?? null,
-            'email'              => $input['email'] ?? null,
-            'postal_code'        => $input['postal_code'] ?? null,
-            'address1'           => $input['address1'] ?? null,
-            'address2'           => $input['address2'] ?? null,
-            'assigned_user_id'   => $input['assigned_user_id'] ?? null,
-            'note'               => $input['note'] ?? null,
-            'updated_by'         => $userId,
-            'id'                 => $customerId,
+            'note'       => $input['note'] ?? null,
+            'updated_by' => $userId,
+            'id'         => $customerId,
         ]);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function findAccidentCases(int $customerId, int $limit = 50): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, accident_no, accepted_date, insurance_category, status, priority, accident_summary
+             FROM t_accident_case
+             WHERE customer_id = :customer_id
+               AND is_deleted = 0
+             ORDER BY accepted_date DESC, id DESC
+             LIMIT :limit'
+        );
+        $stmt->bindValue(':customer_id', $customerId, PDO::PARAM_INT);
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        $rows = $stmt->fetchAll();
+
+        return is_array($rows) ? $rows : [];
     }
 
     /**
@@ -344,7 +324,7 @@ final class CustomerRepository
     {
         $stmt = $this->pdo->prepare(
             'SELECT id, activity_date, activity_type, subject, content_summary, detail_text, result_type,
-                    next_action_date, next_action_note, staff_user_id
+                    next_action_date, next_action_note, staff_id
              FROM t_activity
              WHERE customer_id = :customer_id
                AND is_deleted = 0

@@ -12,7 +12,7 @@ final class SalesPerformanceRepository
         'performance_type',
         'source_type',
         'customer_name',
-        'staff_user_id',
+        'staff_id',
         'insurer_name',
         'policy_no',
         'product_type',
@@ -73,7 +73,7 @@ final class SalesPerformanceRepository
                     sp.installment_count,
                     sp.receipt_no,
                     sp.settlement_month,
-                    sp.staff_user_id,
+                    sp.staff_id,
                     sp.remark,
                     sp.updated_at,
                     mc.customer_name,
@@ -120,16 +120,33 @@ final class SalesPerformanceRepository
     {
         $sql = ' WHERE sp.is_deleted = 0';
 
-        $dateFrom = trim((string) ($criteria['performance_date_from'] ?? ''));
-        if ($dateFrom !== '') {
-            $sql .= ' AND sp.performance_date >= :performance_date_from';
-            $params['performance_date_from'] = $dateFrom;
-        }
+        // 年度（4月始まり）+ 月の組み合わせで日付範囲を構築する
+        // 年度のみ   → fiscal_year-04-01 〜 (fiscal_year+1)-04-01
+        // 年度 + 月  → 月>=4: fiscal_year年のその月 / 月<=3: (fiscal_year+1)年のその月
+        // 月のみ     → MONTH() で全年度横断絞り込み
+        $fiscalYear  = trim((string) ($criteria['performance_fiscal_year'] ?? ''));
+        $monthNum    = trim((string) ($criteria['performance_month_num'] ?? ''));
+        $hasFY       = $fiscalYear !== '' && ctype_digit($fiscalYear);
+        $hasMonth    = $monthNum !== '' && ctype_digit($monthNum)
+                       && (int) $monthNum >= 1 && (int) $monthNum <= 12;
 
-        $dateTo = trim((string) ($criteria['performance_date_to'] ?? ''));
-        if ($dateTo !== '') {
-            $sql .= ' AND sp.performance_date <= :performance_date_to';
-            $params['performance_date_to'] = $dateTo;
+        if ($hasFY && $hasMonth) {
+            $fy       = (int) $fiscalYear;
+            $mn       = (int) $monthNum;
+            $calYear  = $mn >= 4 ? $fy : $fy + 1;
+            $dateFrom = sprintf('%04d-%02d-01', $calYear, $mn);
+            $dateTo   = date('Y-m-d', (int) strtotime($dateFrom . ' +1 month'));
+            $sql .= ' AND sp.performance_date >= :performance_date_from AND sp.performance_date < :performance_date_to';
+            $params['performance_date_from'] = $dateFrom;
+            $params['performance_date_to']   = $dateTo;
+        } elseif ($hasFY) {
+            $fy = (int) $fiscalYear;
+            $sql .= ' AND sp.performance_date >= :performance_date_from AND sp.performance_date < :performance_date_to';
+            $params['performance_date_from'] = $fy . '-04-01';
+            $params['performance_date_to']   = ($fy + 1) . '-04-01';
+        } elseif ($hasMonth) {
+            $sql .= ' AND MONTH(sp.performance_date) = :performance_month_num';
+            $params['performance_month_num'] = (int) $monthNum;
         }
 
         $customerName = trim((string) ($criteria['customer_name'] ?? ''));
@@ -138,10 +155,10 @@ final class SalesPerformanceRepository
             $params['customer_name'] = '%' . $customerName . '%';
         }
 
-        $staffUserId = trim((string) ($criteria['staff_user_id'] ?? ''));
+        $staffUserId = trim((string) ($criteria['staff_id'] ?? ''));
         if ($staffUserId !== '' && ctype_digit($staffUserId)) {
-            $sql .= ' AND sp.staff_user_id = :staff_user_id';
-            $params['staff_user_id'] = (int) $staffUserId;
+            $sql .= ' AND sp.staff_id = :staff_id';
+            $params['staff_id'] = (int) $staffUserId;
         }
 
         $sourceType = trim((string) ($criteria['source_type'] ?? ''));
@@ -213,7 +230,7 @@ final class SalesPerformanceRepository
             'performance_type' => 'sp.performance_type',
             'source_type' => 'sp.source_type',
             'customer_name' => 'mc.customer_name',
-            'staff_user_id' => 'sp.staff_user_id',
+            'staff_id' => 'sp.staff_id',
             'insurer_name' => 'COALESCE(NULLIF(sp.insurer_name, ""), c.insurer_name)',
             'policy_no' => 'COALESCE(NULLIF(sp.policy_no, ""), c.policy_no)',
             'product_type' => 'sp.product_type',
@@ -252,7 +269,7 @@ final class SalesPerformanceRepository
                 sp.installment_count,
                   sp.receipt_no,
                   sp.settlement_month,
-                  sp.staff_user_id,
+                  sp.staff_id,
                   sp.remark,
                   mc.customer_name,
                 c.policy_no AS contract_policy_no,
@@ -328,6 +345,27 @@ final class SalesPerformanceRepository
             'general_month'     => (int) ($row['general_month'] ?? 0),
             'total_count_month' => (int) ($row['total_count_month'] ?? 0),
         ];
+    }
+
+    /**
+     * t_sales_performance に実績が存在する年月を降順で返す
+     *
+     * @return array<int, string>  例: ['2026-04', '2026-03', ...]
+     */
+    public function fetchPerformanceMonths(): array
+    {
+        $stmt = $this->pdo->query(
+            'SELECT DATE_FORMAT(performance_date, "%Y-%m") AS ym
+             FROM t_sales_performance
+             WHERE is_deleted = 0
+             GROUP BY ym
+             ORDER BY ym DESC'
+        );
+        if ($stmt === false) {
+            return [];
+        }
+        $rows = $stmt->fetchAll(PDO::FETCH_COLUMN, 0);
+        return is_array($rows) ? array_values($rows) : [];
     }
 
     /**
@@ -429,7 +467,7 @@ final class SalesPerformanceRepository
                 installment_count,
                 receipt_no,
                 settlement_month,
-                staff_user_id,
+                staff_id,
                 remark,
                 created_by,
                 updated_by
@@ -450,7 +488,7 @@ final class SalesPerformanceRepository
                 :installment_count,
                 :receipt_no,
                 :settlement_month,
-                :staff_user_id,
+                :staff_id,
                 :remark,
                 :created_by,
                 :updated_by
@@ -474,7 +512,7 @@ final class SalesPerformanceRepository
             'installment_count' => $input['installment_count'] ?? null,
             'receipt_no' => $input['receipt_no'] ?? null,
             'settlement_month' => $input['settlement_month'] ?? null,
-            'staff_user_id' => $input['staff_user_id'] ?? null,
+            'staff_id' => $input['staff_id'] ?? null,
             'remark' => $input['remark'] ?? null,
             'created_by' => $userId,
             'updated_by' => $userId,
@@ -486,6 +524,8 @@ final class SalesPerformanceRepository
      */
     public function update(int $id, array $input, int $userId): int
     {
+        $before = $this->findForAudit($id);
+
         $stmt = $this->pdo->prepare(
             'UPDATE t_sales_performance
              SET customer_id = :customer_id,
@@ -504,7 +544,7 @@ final class SalesPerformanceRepository
                  installment_count = :installment_count,
                  receipt_no = :receipt_no,
                  settlement_month = :settlement_month,
-                 staff_user_id = :staff_user_id,
+                 staff_id = :staff_id,
                  remark = :remark,
                  updated_by = :updated_by
              WHERE id = :id
@@ -529,12 +569,255 @@ final class SalesPerformanceRepository
             'installment_count' => $input['installment_count'] ?? null,
             'receipt_no' => $input['receipt_no'] ?? null,
             'settlement_month' => $input['settlement_month'] ?? null,
-            'staff_user_id' => $input['staff_user_id'] ?? null,
+            'staff_id' => $input['staff_id'] ?? null,
             'remark' => $input['remark'] ?? null,
             'updated_by' => $userId,
         ]);
 
-        return $stmt->rowCount();
+        $affected = $stmt->rowCount();
+
+        if ($affected > 0 && $before !== null) {
+            $after = $this->findForAudit($id);
+            if ($after !== null) {
+                $details = $this->buildAuditDetails($before, $after);
+                $eventId = $this->insertAuditEvent($id, $userId, '実績情報を更新');
+                if ($details !== []) {
+                    $this->insertAuditEventDetails($eventId, $details);
+                }
+            }
+        }
+
+        return $affected;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function findAuditEvents(int $salesPerformanceId, int $limit = 50): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, changed_at, changed_by, action_type, change_source, note
+             FROM t_audit_event
+             WHERE entity_type = "sales_performance"
+               AND entity_id = :entity_id
+             ORDER BY changed_at DESC, id DESC
+             LIMIT :limit'
+        );
+        $stmt->bindValue(':entity_id', $salesPerformanceId, PDO::PARAM_INT);
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        $events = $stmt->fetchAll();
+        if (!is_array($events) || $events === []) {
+            return [];
+        }
+
+        $eventIds = [];
+        foreach ($events as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $eventId = (int) ($row['id'] ?? 0);
+            if ($eventId > 0) {
+                $eventIds[] = $eventId;
+            }
+        }
+
+        $detailsByEventId = $this->findAuditEventDetails($eventIds);
+        foreach ($events as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $eventId = (int) ($row['id'] ?? 0);
+            $events[$index]['details'] = $detailsByEventId[$eventId] ?? [];
+        }
+
+        return $events;
+    }
+
+    /**
+     * @return array<string, string|null>|null
+     */
+    private function findForAudit(int $id): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT performance_date, performance_type, source_type,
+                    customer_id, staff_id, insurer_name, insurance_category,
+                    product_type, premium_amount, policy_no, policy_start_date,
+                    application_date, receipt_no, settlement_month, installment_count,
+                    contract_id, renewal_case_id, remark
+             FROM t_sales_performance
+             WHERE id = :id AND is_deleted = 0
+             LIMIT 1'
+        );
+        $stmt->execute(['id' => $id]);
+        $row = $stmt->fetch();
+        if (!is_array($row)) {
+            return null;
+        }
+
+        $normalize = static function (mixed $v): ?string {
+            if ($v === null) {
+                return null;
+            }
+            $s = trim((string) $v);
+            return $s === '' ? null : $s;
+        };
+
+        return [
+            'performance_date'   => $normalize($row['performance_date'] ?? null),
+            'performance_type'   => $normalize($row['performance_type'] ?? null),
+            'source_type'        => $normalize($row['source_type'] ?? null),
+            'customer_id'        => $normalize($row['customer_id'] ?? null),
+            'staff_id'           => $normalize($row['staff_id'] ?? null),
+            'insurer_name'       => $normalize($row['insurer_name'] ?? null),
+            'insurance_category' => $normalize($row['insurance_category'] ?? null),
+            'product_type'       => $normalize($row['product_type'] ?? null),
+            'premium_amount'     => $normalize($row['premium_amount'] ?? null),
+            'policy_no'          => $normalize($row['policy_no'] ?? null),
+            'policy_start_date'  => $normalize($row['policy_start_date'] ?? null),
+            'application_date'   => $normalize($row['application_date'] ?? null),
+            'receipt_no'         => $normalize($row['receipt_no'] ?? null),
+            'settlement_month'   => $normalize($row['settlement_month'] ?? null),
+            'installment_count'  => $normalize($row['installment_count'] ?? null),
+            'contract_id'        => $normalize($row['contract_id'] ?? null),
+            'renewal_case_id'    => $normalize($row['renewal_case_id'] ?? null),
+            'remark'             => $normalize($row['remark'] ?? null),
+        ];
+    }
+
+    /**
+     * @param array<string, string|null> $before
+     * @param array<string, string|null> $after
+     * @return array<int, array<string, string|null>>
+     */
+    private function buildAuditDetails(array $before, array $after): array
+    {
+        $fields = [
+            'performance_date'   => ['label' => '実績計上日',  'value_type' => 'DATE'],
+            'performance_type'   => ['label' => '実績区分',    'value_type' => 'STRING'],
+            'source_type'        => ['label' => '業務区分',    'value_type' => 'STRING'],
+            'customer_id'        => ['label' => '契約者ID',    'value_type' => 'NUMBER'],
+            'staff_id'           => ['label' => '担当者ID',    'value_type' => 'NUMBER'],
+            'insurer_name'       => ['label' => '保険会社名',  'value_type' => 'STRING'],
+            'insurance_category' => ['label' => '保険種類',    'value_type' => 'STRING'],
+            'product_type'       => ['label' => '種目',        'value_type' => 'STRING'],
+            'premium_amount'     => ['label' => '保険料',      'value_type' => 'NUMBER'],
+            'policy_no'          => ['label' => '証券番号',    'value_type' => 'STRING'],
+            'policy_start_date'  => ['label' => '始期日',      'value_type' => 'DATE'],
+            'application_date'   => ['label' => '申込日',      'value_type' => 'DATE'],
+            'receipt_no'         => ['label' => '領収証番号',  'value_type' => 'STRING'],
+            'settlement_month'   => ['label' => '精算月',      'value_type' => 'STRING'],
+            'installment_count'  => ['label' => '分割回数',    'value_type' => 'NUMBER'],
+            'contract_id'        => ['label' => '関連契約ID',  'value_type' => 'NUMBER'],
+            'renewal_case_id'    => ['label' => '関連満期案件ID', 'value_type' => 'NUMBER'],
+            'remark'             => ['label' => '備考',        'value_type' => 'STRING'],
+        ];
+
+        $details = [];
+        foreach ($fields as $fieldKey => $meta) {
+            $beforeValue = $before[$fieldKey] ?? null;
+            $afterValue  = $after[$fieldKey]  ?? null;
+            if ($beforeValue === $afterValue) {
+                continue;
+            }
+            $details[] = [
+                'field_key'         => $fieldKey,
+                'field_label'       => (string) $meta['label'],
+                'value_type'        => (string) $meta['value_type'],
+                'before_value_text' => $beforeValue,
+                'after_value_text'  => $afterValue,
+            ];
+        }
+
+        return $details;
+    }
+
+    private function insertAuditEvent(int $salesPerformanceId, int $changedBy, string $note): int
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO t_audit_event (
+                entity_type, entity_id, action_type, change_source, changed_by, note
+             ) VALUES (
+                "sales_performance", :entity_id, "UPDATE", "SCREEN", :changed_by, :note
+             )'
+        );
+        $stmt->execute([
+            'entity_id'  => $salesPerformanceId,
+            'changed_by' => $changedBy,
+            'note'       => $note,
+        ]);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    /**
+     * @param array<int, array<string, string|null>> $details
+     */
+    private function insertAuditEventDetails(int $auditEventId, array $details): void
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO t_audit_event_detail (
+                audit_event_id, field_key, field_label, value_type,
+                before_value_text, after_value_text
+             ) VALUES (
+                :audit_event_id, :field_key, :field_label, :value_type,
+                :before_value_text, :after_value_text
+             )'
+        );
+
+        foreach ($details as $detail) {
+            $stmt->execute([
+                'audit_event_id'    => $auditEventId,
+                'field_key'         => (string) ($detail['field_key'] ?? ''),
+                'field_label'       => (string) ($detail['field_label'] ?? ''),
+                'value_type'        => (string) ($detail['value_type'] ?? 'STRING'),
+                'before_value_text' => $detail['before_value_text'] ?? null,
+                'after_value_text'  => $detail['after_value_text'] ?? null,
+            ]);
+        }
+    }
+
+    /**
+     * @param array<int, int> $eventIds
+     * @return array<int, array<int, array<string, mixed>>>
+     */
+    private function findAuditEventDetails(array $eventIds): array
+    {
+        if ($eventIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(', ', array_fill(0, count($eventIds), '?'));
+        $stmt = $this->pdo->prepare(
+            'SELECT audit_event_id, field_key, field_label, value_type,
+                    before_value_text, after_value_text
+             FROM t_audit_event_detail
+             WHERE audit_event_id IN (' . $placeholders . ')
+             ORDER BY id ASC'
+        );
+
+        foreach ($eventIds as $index => $eventId) {
+            $stmt->bindValue($index + 1, $eventId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll();
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        $grouped = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $auditEventId = (int) ($row['audit_event_id'] ?? 0);
+            if ($auditEventId > 0) {
+                $grouped[$auditEventId][] = $row;
+            }
+        }
+
+        return $grouped;
     }
 
     public function softDelete(int $id, int $userId): int
@@ -616,7 +899,7 @@ final class SalesPerformanceRepository
                     premium_amount,
                     receipt_no,
                     settlement_month,
-                    staff_user_id,
+                    staff_id,
                     remark
              FROM t_sales_performance
              WHERE receipt_no = :receipt_no

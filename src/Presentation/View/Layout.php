@@ -128,6 +128,7 @@ final class Layout
             . '.helper-details[open] summary{margin-bottom:12px;}'
             . '.modal-dialog{width:min(640px,calc(100vw - 24px));border:none;border-radius:14px;padding:18px 18px 16px;background:#fff;box-shadow:0 20px 48px rgba(17,33,49,0.24);}'
             . '.modal-dialog-wide{width:min(920px,calc(100vw - 24px));}'
+            . '.modal-dialog-xl{width:min(1100px,calc(100vw - 24px));}'
             . '.modal-dialog::backdrop{background:rgba(16,42,67,0.46);}'
             . '.modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;}'
             . '.modal-head h2{margin:0;font-size:20px;}'
@@ -216,14 +217,14 @@ final class Layout
             . '.list-row-secondary{font-size:13px;color:#334e68;line-height:1.3;}'
             . '.list-policy-text{display:block;max-width:100%;min-width:0;font-size:13px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}'
             . '.list-row-tertiary{font-size:12px;color:#6b7c89;line-height:1.3;min-width:0;overflow-wrap:anywhere;word-break:break-word;}'
-            . '.list-table-renewal col.list-col-policy{width:148px;}'
-            . '.list-table-renewal col.list-col-customer{width:18%;}'
-            . '.list-table-renewal col.list-col-product{width:80px;}'
+            . '.list-table-renewal col.list-col-policy{width:160px;}'
+            . '.list-table-renewal col.list-col-customer{width:22%;}'
+            . '.list-table-renewal col.list-col-product{width:130px;}'
             . '.list-table-renewal col.list-col-date{width:100px;}'
-            . '.list-table-renewal col.list-col-days{width:68px;}'
-            . '.list-table-renewal col.list-col-early{width:100px;}'
-            . '.list-table-renewal col.list-col-user{width:80px;}'
-            . '.list-table-renewal col.list-col-status{width:106px;}'
+            . '.list-table-renewal col.list-col-early{width:112px;}'
+            . '.list-table-renewal col.list-col-user{width:96px;}'
+            . '.list-table-renewal col.list-col-status{width:100px;}'
+            . '.list-table-renewal col.list-col-action{width:40px;}'
             . '.list-table-accident col.list-col-customer{width:30%;}'
             . '.list-table-accident col.list-col-policy{width:240px;}'
             . '.list-table-accident col.list-col-product{width:120px;}'
@@ -364,13 +365,13 @@ final class Layout
         $dashboardUrl = self::escape((string) ($navLinks['dashboard'] ?? '#'));
 
         $mainItems = [
-            'dashboard' => 'ホーム',
-            'renewal'   => '満期一覧',
-            'customer'  => '顧客一覧',
-            'accident'  => '事故案件',
-            'sales'     => '実績管理',
-            'activity'  => '営業活動',
-            // 'sales_case' は Phase C-Lite 完了まで非表示
+            'dashboard'  => 'ホーム',
+            'renewal'    => '満期一覧',
+            'customer'   => '顧客一覧',
+            'accident'   => '事故案件',
+            'sales'      => '実績管理',
+            'activity'   => '営業日報',
+            'sales_case' => '見込案件',
         ];
 
         $hasSettings = self::isAdmin($auth) && isset($navLinks['settings']);

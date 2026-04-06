@@ -21,43 +21,59 @@
 
 ## 3. CSV カラム定義（全44列）
 
+カラムは **必須**・**任意**・**不使用** の3種に分類する。
+必須カラムが1つでも欠けている場合、そのヘッダを持つCSVは取込できない。
+任意カラムは存在すれば取り込み、なくてもエラーにしない。
+不使用カラムは読み飛ばす。
+
+### 必須カラム
+
 | 列番号 | 列名 | 取込用途 | 対応カラム |
 |---|---|---|---|
-| 1 (A) | 満期契約の識別 | 不使用 | — |
-| 2 (B) | 満期日（月） | 満期日組み立てに使用 | `t_renewal_case.maturity_date`（月） |
-| 3 (C) | 満期日（日） | 満期日組み立てに使用 | `t_renewal_case.maturity_date`（日） |
-| 4 (D) | 顧客名 | 顧客名寄せ・新規登録 | `m_customer.customer_name` |
-| 5 (E) | 生年月日 | 不使用 | — |
-| 6 (F) | 郵便番号 | 顧客新規登録時のみ使用 | `m_customer.postal_code` |
-| 7 (G) | 住所 | 顧客新規登録時のみ使用 | `m_customer.address1` |
-| 8 (H) | ＴＥＬ | 顧客新規登録時のみ使用 | `m_customer.phone` |
-| 9 (I) | ＦＡＸ | 不使用 | — |
-| 10 (J) | 携帯ＴＥＬ | 不使用 | — |
-| 11 (K) | 更改状況 | 不使用 | — |
-| 12 (L) | 世帯主名 | 不使用 | — |
-| 13 (M) | 続柄 | 不使用 | — |
-| 14 (N) | （空列） | スキップ | — |
-| 15 (O) | 保険会社 | 契約登録・更新 | `t_contract.insurer_name` |
-| 16 (P) | 保険始期 | 契約登録・更新 | `t_contract.policy_start_date` |
-| 17 (Q) | 保険終期 | 契約登録・更新 | `t_contract.policy_end_date` |
-| 18 (R) | 種目種類 | 契約登録・更新 | `t_contract.product_type` |
-| 19 (S) | 証券番号 | **取込の主キー** | `t_contract.policy_no` |
-| 20 (T) | 払込方法 | 契約登録・更新 | `t_contract.payment_cycle` |
-| 21 (U) | 回数 | 不使用 | — |
-| 22 (V) | 件数 | 不使用 | — |
-| 23 (W) | 合計保険料 | 契約登録・更新 | `t_contract.premium_amount` |
-| 24 (X) | 満期返れい金 | 不使用 | — |
-| 25〜30 | 保険金額1〜3・単位 | 不使用 | — |
-| 31 (AE) | 契約状況 | 不使用 | — |
-| 32〜36 | 事故・入替・質権・共保・代分 | 不使用 | — |
-| 37 (AK) | 保険の対象等 | 不使用 | — |
-| 38 (AL) | （空ラベル） | スキップ | — |
-| 39 (AM) | （空列） | スキップ | — |
-| 40 (AN) | 拠点コード | 不使用（参考） | — |
-| 41 (AO) | 拠点 | 不使用 | — |
-| 42 (AP) | 担当者コード | 不使用（参考） | `t_sjnet_import_row` に保持 |
-| 43 (AQ) | 担当者 | 参考保持のみ | `t_sjnet_import_row.sjnet_staff_name` |
-| 44 (AR) | 代理店コード | **担当者マッピング主キー** | `m_sjnet_staff_mapping` 経由で解決 |
+| 2 (B) | **満期日（月）** | 満期日組み立て（年は取込日から自動判定） | `t_renewal_case.maturity_date`（月） |
+| 3 (C) | **満期日（日）** | 満期日組み立て | `t_renewal_case.maturity_date`（日） |
+| 4 (D) | **顧客名** | 顧客名寄せ・新規登録 | `m_customer.customer_name` |
+| 15 (O) | **保険会社** | 契約登録・更新 | `t_contract.insurer_name` |
+| 16 (P) | **保険始期** | 契約登録・更新 | `t_contract.policy_start_date` |
+| 17 (Q) | **保険終期** | 契約の識別キー（policy_no との複合）・契約登録・更新 | `t_contract.policy_end_date` |
+| 18 (R) | **種目種類** | 契約登録・更新 | `t_contract.product_type` |
+| 19 (S) | **証券番号** | 契約の識別キー（policy_end_date との複合）| `t_contract.policy_no` |
+| 23 (W) | **合計保険料** | 契約登録・更新 | `t_contract.premium_amount` |
+| 44 (AR) | **代理店ｺｰﾄﾞ**（半角カタカナ） | 担当者マッピング主キー | `m_sjnet_staff_mapping` 経由で解決 |
+
+### 任意カラム
+
+| 列番号 | 列名 | 取込用途 | 対応カラム |
+|---|---|---|---|
+| 6 (F) | 郵便番号 | 顧客新規登録時のみ（既存顧客には反映しない） | `m_customer.postal_code` |
+| 7 (G) | 住所 | 同上 | `m_customer.address1` |
+| 8 (H) | ＴＥＬ | 同上 | `m_customer.phone` |
+| 20 (T) | 払込方法 | 契約の補助情報 | `t_contract.payment_cycle` |
+| 43 (AQ) | 担当者 | 参考保持のみ（担当者設定には代理店コードを使用） | `t_sjnet_import_row.sjnet_staff_name` |
+
+### 不使用カラム（読み飛ばし）
+
+| 列番号 | 列名 |
+|---|---|
+| 1 (A) | 満期契約の識別 |
+| 5 (E) | 生年月日 |
+| 9 (I) | ＦＡＸ |
+| 10 (J) | 携帯ＴＥＬ |
+| 11 (K) | 更改状況 |
+| 12 (L) | 世帯主名 |
+| 13 (M) | 続柄 |
+| 14 (N) | （空列） |
+| 21 (U) | 回数 |
+| 22 (V) | 件数 |
+| 24 (X) | 満期返れい金 |
+| 25〜30 | 保険金額1〜3・単位 |
+| 31 (AE) | 契約状況 |
+| 32〜36 | 事故・入替・質権・共保・代分 |
+| 37 (AK) | 保険の対象等 |
+| 38〜39 | （空列） |
+| 40 (AN) | 拠点コード |
+| 41 (AO) | 拠点 |
+| 42 (AP) | 担当者コード |
 
 ---
 
@@ -113,10 +129,11 @@ SJNETのCSVには満期日の「月」と「日」のみが含まれ、「年」
 【STEP 3】担当者の解決（列44: 代理店コード）
   → docs/policies/sjnet_staff_mapping_spec.md のルールに従って解決
 
-【STEP 4】契約の登録・更新（列19: 証券番号）
+【STEP 4】契約の登録・更新（列19: 証券番号 + 列17: 保険終期）
   ※ STEP 2 で ambiguous_customer となった行はこのステップを実行しない
-  → t_contract.policy_no で検索（is_deleted = 0）
-  → ヒット（UPDATE):
+  → t_contract を policy_no = 列19 AND policy_end_date = 列17（日付変換）AND is_deleted = 0 で検索
+    ※ 同一証券番号でも終期日が異なれば別の契約年度として扱う
+  → ヒット（UPDATE）: 同一年度の再取込
       insurer_name       = 列15
       policy_start_date  = 列16（日付変換）
       policy_end_date    = 列17（日付変換）
@@ -125,8 +142,8 @@ SJNETのCSVには満期日の「月」と「日」のみが含まれ、「年」
       premium_amount     = 列23（数値変換）
       sales_user_id      = resolved_staff_user_id（NULL の場合は上書きしない）
       last_sjnet_imported_at = 取込実行日時
-      ※ customer_id・customer_type は UPDATE しない（既存の顧客紐づけを維持する）
-  → ミス（INSERT):
+      ※ customer_id は UPDATE しない（既存の顧客紐づけを維持する）
+  → ミス（INSERT）: 新年度の契約として新規作成
       customer_id        = STEP 2 で解決した customer_id
       policy_no          = 列19
       insurer_name       = 列15
@@ -138,6 +155,10 @@ SJNETのCSVには満期日の「月」と「日」のみが含まれ、「年」
       sales_user_id      = resolved_staff_user_id
       status             = 'active'
       last_sjnet_imported_at = 取込実行日時
+      ※ INSERT 後、同一 policy_no の旧満期案件のうち
+        case_status IN ('renewed', 'lost') かつ maturity_date < 新案件の maturity_date
+        のものを case_status = 'closed' に自動更新する
+        対応途中（not_started / sj_requested 等）の旧案件は自動クローズしない
 
 【STEP 5】満期案件の登録・更新
   → contract_id + maturity_date（STEP 4 の contract_id と STEP から決定した満期日）で

@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS t_activity (
   id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'ID',
-  customer_id         BIGINT UNSIGNED NOT NULL COMMENT '顧客ID(m_customer.id)',
+  customer_id         BIGINT UNSIGNED NULL     COMMENT '顧客ID(m_customer.id)',
   contract_id         BIGINT UNSIGNED NULL     COMMENT '契約ID(t_contract.id)',
   renewal_case_id     BIGINT UNSIGNED NULL     COMMENT '満期案件ID(t_renewal_case.id)',
   accident_case_id    BIGINT UNSIGNED NULL     COMMENT '事故案件ID(t_accident_case.id)',
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS t_activity (
   next_action_date    DATE            NULL     COMMENT '次回予定日',
   next_action_note    VARCHAR(500)    NULL     COMMENT '次回アクション',
   result_type         VARCHAR(50)     NULL     COMMENT '結果区分',
-  staff_user_id       BIGINT UNSIGNED NULL     COMMENT '担当者ユーザーID(common.users.id)',
+  staff_id            BIGINT UNSIGNED NULL     COMMENT '担当者(m_staff.id)',
   is_deleted          TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '論理削除フラグ',
 
   created_by          BIGINT UNSIGNED NOT NULL COMMENT '作成者(common.users.id)',
@@ -36,9 +36,9 @@ CREATE TABLE IF NOT EXISTS t_activity (
   KEY idx_t_activity_07 (activity_type),
   KEY idx_t_activity_08 (purpose_type),
   KEY idx_t_activity_09 (next_action_date),
-  KEY idx_t_activity_10 (staff_user_id),
+  KEY idx_t_activity_10 (staff_id),
   KEY idx_t_activity_11 (customer_id, activity_date),
-  KEY idx_t_activity_12 (staff_user_id, activity_date),
+  KEY idx_t_activity_12 (staff_id, activity_date),
   KEY idx_t_activity_13 (is_deleted, activity_date)
 
 ) ENGINE=InnoDB

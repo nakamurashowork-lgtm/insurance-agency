@@ -7,6 +7,9 @@ use App\AppConfig;
 use App\Domain\Renewal\RenewalCaseRepository;
 use App\Domain\Renewal\SjnetCsvImportService;
 use App\Domain\Renewal\SjnetImportRepository;
+use App\Domain\Tenant\CaseStatusRepository;
+use App\Domain\Tenant\ProcedureMethodRepository;
+use App\Domain\Tenant\StaffRepository;
 use App\Http\Responses;
 use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
@@ -40,6 +43,7 @@ final class RenewalCaseController
         $importBatch = null;
         $importRows = [];
         $allUsers = [];
+        $renewalStatuses = [];
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
@@ -54,22 +58,19 @@ final class RenewalCaseController
             $rows = $result['rows'];
             $total = (int) ($result['total'] ?? 0);
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
-            // 行の assigned_user_id からユーザー名を一括取得して付与
-            $assignedUserIds = [];
-            foreach ($rows as $row) {
-                $uid = (int) ($row['assigned_user_id'] ?? 0);
-                if ($uid > 0) {
-                    $assignedUserIds[$uid] = true;
-                }
+            // フィルタ・表示用スタッフ一覧
+            $staffList = (new StaffRepository($pdo))->findActive();
+            $staffMap = [];
+            foreach ($staffList as $s) {
+                $staffMap[(int) $s['id']] = (string) $s['staff_name'];
             }
-            $assignedUserNames = $this->fetchUserNames(array_keys($assignedUserIds));
             foreach ($rows as $index => $row) {
-                $uid = (int) ($row['assigned_user_id'] ?? 0);
-                $rows[$index]['assigned_user_name'] = $uid > 0 ? ($assignedUserNames[$uid] ?? '') : '';
+                $sid = (int) ($row['assigned_staff_id'] ?? 0);
+                $rows[$index]['assigned_user_name'] = $sid > 0 ? ($staffMap[$sid] ?? '') : '';
             }
 
-            // フィルタ用の全ユーザー一覧
-            $allUsers = $this->fetchAllActiveUsers();
+            $allUsers = $staffList;
+            $renewalStatuses = (new CaseStatusRepository($pdo))->findByType('renewal');
 
             $importBatchId = (int) ($_GET['import_batch_id'] ?? 0);
             if ($importBatchId > 0) {
@@ -112,7 +113,8 @@ final class RenewalCaseController
             (string) ($_GET['filter_open'] ?? '') === '1',
             $allUsers,
             ControllerLayoutHelper::build($this->guard, $this->config, 'renewal'),
-            $flashSuccess
+            $flashSuccess,
+            $renewalStatuses
         ));
     }
 
@@ -143,17 +145,28 @@ final class RenewalCaseController
             $audits = $repository->findAuditEvents($renewalCaseId);
             $auditUserNames = $this->fetchUserNamesByRows($audits, 'changed_by');
             $audits = $this->attachAuditUserNames($audits, $auditUserNames);
-            $assignedUid = (int) ($detail['assigned_user_id'] ?? 0);
-            $officeUid   = (int) ($detail['office_user_id'] ?? 0);
-            $uidsTofetch = array_filter(array_unique([$assignedUid, $officeUid]));
-            $fetchedNames = $uidsTofetch !== [] ? $this->fetchUserNames($uidsTofetch) : [];
-            $detail['assigned_user_name'] = $assignedUid > 0 ? ($fetchedNames[$assignedUid] ?? '') : '';
-            $detail['office_user_name']   = $officeUid   > 0 ? ($fetchedNames[$officeUid]   ?? '') : '';
+            $assignedStaffId = (int) ($detail['assigned_staff_id'] ?? 0);
+            $officeStaffId   = (int) ($detail['office_staff_id'] ?? 0);
+            $staffRepo = new StaffRepository($pdo);
+            $staffMap = [];
+            foreach ([$assignedStaffId, $officeStaffId] as $sid) {
+                if ($sid > 0 && !isset($staffMap[$sid])) {
+                    $s = $staffRepo->findById($sid);
+                    if ($s !== null) {
+                        $staffMap[$sid] = (string) $s['staff_name'];
+                    }
+                }
+            }
+            $detail['assigned_user_name'] = $assignedStaffId > 0 ? ($staffMap[$assignedStaffId] ?? '') : '';
+            $detail['office_user_name']   = $officeStaffId   > 0 ? ($staffMap[$officeStaffId]   ?? '') : '';
+            $officeStaffList = $staffRepo->findForOffice();
+            $renewalStatuses = (new CaseStatusRepository($pdo))->findByType('renewal');
+            $procedureMethods = (new ProcedureMethodRepository($pdo))->findAll();
 
             $updateInput = $this->consumeUpdateInput($renewalCaseId);
             $fieldErrors = $this->consumeUpdateErrors($renewalCaseId);
             if (is_array($updateInput)) {
-                foreach (['case_status', 'next_action_date', 'renewal_result', 'renewal_method', 'procedure_method', 'lost_reason', 'remark', 'completed_date'] as $key) {
+                foreach (['case_status', 'next_action_date', 'renewal_method', 'procedure_method', 'completed_date', 'office_staff_id'] as $key) {
                     if (array_key_exists($key, $updateInput)) {
                         $detail[$key] = $updateInput[$key];
                     }
@@ -187,9 +200,12 @@ final class RenewalCaseController
                     [
                         ['label' => 'ホーム', 'url' => $this->config->routeUrl('dashboard')],
                         ['label' => '満期一覧', 'url' => $listUrl],
-                        ['label' => '契約詳細'],
+                        ['label' => '満期詳細'],
                     ]
-                )
+                ),
+                $officeStaffList,
+                $renewalStatuses,
+                $procedureMethods
             ));
         } catch (Throwable) {
             $this->guard->session()->setFlash('error', '満期詳細の取得に失敗しました。');
@@ -215,7 +231,16 @@ final class RenewalCaseController
         }
 
         $input = $this->collectUpdateInput($_POST);
-        $fieldErrors = $this->validateUpdateInput($input);
+        $allowedStatuses = [];
+        $allowedProcedureMethods = [];
+        try {
+            $pdoForValidation = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $allowedStatuses = (new CaseStatusRepository($pdoForValidation))->validCodes('renewal');
+            $allowedProcedureMethods = (new ProcedureMethodRepository($pdoForValidation))->findActiveLabels();
+        } catch (\Throwable) {
+            // fallback: no restriction
+        }
+        $fieldErrors = $this->validateUpdateInput($input, $allowedStatuses, $allowedProcedureMethods);
         if ($fieldErrors !== []) {
             $this->guard->session()->setFlash('error', '入力内容を確認してください。');
             $this->storeUpdateInput($renewalCaseId, $input);
@@ -340,9 +365,8 @@ final class RenewalCaseController
         $result = [];
         try {
             $pdo       = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $commonPdo = $this->commonConnectionFactory->create();
             $userId    = (int) ($auth['user_id'] ?? 0);
-            $service   = new SjnetCsvImportService($pdo, $commonPdo, $userId, new DateTimeImmutable('today'));
+            $service   = new SjnetCsvImportService($pdo, $userId, new DateTimeImmutable('today'));
             $result  = $service->import($tmpPath, $origName);
         } catch (Throwable $e) {
             $this->guard->session()->setFlash('import_error', 'CSV取込に失敗しました: ' . $e->getMessage());
@@ -363,34 +387,40 @@ final class RenewalCaseController
     private function collectUpdateInput(array $source): array
     {
         return [
-            'case_status'     => trim((string) ($source['case_status'] ?? '')),
+            'case_status'      => trim((string) ($source['case_status'] ?? '')),
             'next_action_date' => trim((string) ($source['next_action_date'] ?? '')),
-            'renewal_result'  => trim((string) ($source['renewal_result'] ?? '')),
-            'renewal_method'  => trim((string) ($source['renewal_method'] ?? '')),
+            'renewal_method'   => trim((string) ($source['renewal_method'] ?? '')),
             'procedure_method' => trim((string) ($source['procedure_method'] ?? '')),
-            'lost_reason'     => trim((string) ($source['lost_reason'] ?? '')),
-            'remark'          => trim((string) ($source['remark'] ?? '')),
-            'completed_date'  => trim((string) ($source['completed_date'] ?? '')),
+            'completed_date'   => trim((string) ($source['completed_date'] ?? '')),
+            'office_staff_id'  => trim((string) ($source['office_staff_id'] ?? '')),
         ];
     }
 
     /**
      * @param array<string, string> $input
+     * @param list<string> $allowedStatuses
+     * @param list<string> $allowedProcedureMethods
      * @return array<string, string>
      */
-    private function validateUpdateInput(array $input): array
+    private function validateUpdateInput(array $input, array $allowedStatuses = [], array $allowedProcedureMethods = []): array
     {
-        $errors = [];
-        $allowedStatuses = ['not_started', 'sj_requested', 'doc_prepared', 'waiting_return', 'quote_sent', 'waiting_payment', 'completed'];
+        if ($allowedStatuses === []) {
+            $allowedStatuses = ['not_started', 'sj_requested', 'doc_prepared', 'waiting_return', 'quote_sent', 'waiting_payment', 'completed'];
+        }
         $allowedResults = ['', 'pending', 'renewed', 'cancelled', 'lost'];
         $allowedRenewalMethods = ['', '対面', '郵送', '電話募集'];
-        $allowedProcedureMethods = ['', '対面', '対面ナビ', '電話ナビ', '電話募集', '署名・捺印', 'ケータイOR', 'マイページ'];
+        if ($allowedProcedureMethods === []) {
+            $allowedProcedureMethods = ['対面', '対面ナビ', '電話ナビ', '電話募集', '署名・捺印', 'ケータイOR', 'マイページ'];
+        }
+        $allowedProcedureMethods = array_merge([''], $allowedProcedureMethods);
 
         $caseStatus = $input['case_status'] ?? '';
         $nextActionDate = $input['next_action_date'] ?? '';
         $renewalResult = $input['renewal_result'] ?? '';
         $renewalMethod = $input['renewal_method'] ?? '';
         $procedureMethod = $input['procedure_method'] ?? '';
+
+        $errors = [];
 
         if (!in_array($caseStatus, $allowedStatuses, true)) {
             $errors['case_status'] = '対応ステータスを選択してください。';
@@ -446,7 +476,7 @@ final class RenewalCaseController
             'policy_no'        => trim((string) ($source['policy_no'] ?? '')),
             'case_status'      => trim((string) ($source['case_status'] ?? '')),
             'maturity_window'  => $window,
-            'assigned_user_id' => trim((string) ($source['assigned_user_id'] ?? '')),
+            'assigned_staff_id' => trim((string) ($source['assigned_staff_id'] ?? '')),
             'product_type'     => trim((string) ($source['product_type'] ?? '')),
         ];
     }
@@ -605,7 +635,7 @@ final class RenewalCaseController
         try {
             $pdo = $this->commonConnectionFactory->create();
             $stmt = $pdo->prepare(
-                'SELECT id, name
+                'SELECT id, COALESCE(NULLIF(display_name, ""), name) AS name
                  FROM users
                  WHERE status = 1
                    AND is_deleted = 0
@@ -645,7 +675,7 @@ final class RenewalCaseController
 
         $pdo = $this->commonConnectionFactory->create();
         $stmt = $pdo->prepare(
-            'SELECT id, name
+            'SELECT id, COALESCE(NULLIF(display_name, ""), name) AS name
              FROM users
              WHERE id IN (' . $placeholders . ')
                AND status = 1

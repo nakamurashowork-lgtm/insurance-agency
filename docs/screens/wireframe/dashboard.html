@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ホーム — 保険代理店システム</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif; font-size: 14px; background: #f4f3ee; color: #1a1a18; }
+
+:root {
+  --bg-primary:   #ffffff;
+  --bg-secondary: #f4f3ee;
+  --bg-tertiary:  #eceae3;
+  --bg-info:      #e6f1fb;
+  --bg-success:   #eaf3de;
+  --bg-warning:   #faeeda;
+  --bg-danger:    #fcebeb;
+  --text-primary:   #1a1a18;
+  --text-secondary: #6b6b67;
+  --text-info:      #185fa5;
+  --text-success:   #3b6d11;
+  --text-warning:   #854f0b;
+  --text-danger:    #a32d2d;
+  --border-light:  rgba(0,0,0,0.10);
+  --border-medium: rgba(0,0,0,0.18);
+  --border-info:   #378add;
+  --border-success:#639922;
+  --border-warning:#ba7517;
+  --border-danger: #e24b4a;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* ─── Nav ─── */
+.nav {
+  background: var(--bg-primary);
+  border-bottom: 0.5px solid var(--border-medium);
+  display: flex; align-items: center; padding: 0 20px; height: 50px;
+  position: sticky; top: 0; z-index: 100;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.nav-logo { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-right: 28px; white-space: nowrap; letter-spacing: -0.2px; }
+.nav-item {
+  padding: 0 14px; height: 50px; display: flex; align-items: center;
+  font-size: 12.5px; color: var(--text-secondary); cursor: pointer;
+  border-bottom: 2.5px solid transparent; white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s; text-decoration: none;
+}
+.nav-item:hover { color: var(--text-primary); }
+.nav-item.active { color: var(--text-info); border-bottom-color: var(--border-info); font-weight: 500; }
+.nav-spacer { margin-left: auto; }
+.nav-user { display: flex; flex-direction: column; align-items: flex-end; margin-right: 12px; }
+.nav-user-name { font-size: 12.5px; font-weight: 500; color: var(--text-primary); line-height: 1.3; }
+.nav-user-tenant { font-size: 11px; color: var(--text-secondary); line-height: 1.3; }
+.btn-logout {
+  padding: 5px 12px; border-radius: var(--radius-md);
+  font-size: 12px; cursor: pointer;
+  border: 0.5px solid var(--border-medium);
+  background: var(--bg-primary); color: var(--text-primary);
+  white-space: nowrap;
+}
+.btn-logout:hover { background: var(--bg-secondary); }
+
+/* ─── Content ─── */
+.content { flex: 1; padding: 20px 16px; max-width: 1280px; margin: 0 auto; width: 100%; }
+.page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; gap: 12px; }
+.page-title { font-size: 18px; font-weight: 500; color: var(--text-primary); }
+
+/* ─── Badges ─── */
+.badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+.badge-warn    { background: var(--bg-warning);  color: var(--text-warning); }
+.badge-info    { background: var(--bg-info);     color: var(--text-info); }
+.badge-success { background: var(--bg-success);  color: var(--text-success); }
+.badge-danger  { background: var(--bg-danger);   color: var(--text-danger); }
+.badge-gray    { background: var(--bg-secondary); color: var(--text-secondary); }
+
+/* ─── Cards ─── */
+.card {
+  background: var(--bg-primary);
+  border: 0.5px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+
+/* ─── Section title ─── */
+.section-title {
+  font-size: 11.5px; font-weight: 500; color: var(--text-secondary);
+  margin-bottom: 12px; padding-bottom: 5px;
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+
+/* ─── Alert cards (top section) ─── */
+.alert-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.alert-card {
+  border-radius: var(--radius-md); padding: 14px 18px;
+  cursor: pointer; transition: box-shadow 0.15s;
+  text-decoration: none; display: block;
+}
+.alert-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.alert-card-danger { background: var(--bg-danger); border: 0.5px solid var(--border-danger); }
+.alert-card-warning { background: var(--bg-warning); border: 0.5px solid var(--border-warning); }
+.alert-card-label { font-size: 11.5px; color: var(--text-secondary); margin-bottom: 4px; }
+.alert-card-danger .alert-card-label { color: var(--text-danger); }
+.alert-card-warning .alert-card-label { color: var(--text-warning); }
+.alert-card-value { font-size: 28px; font-weight: 500; line-height: 1.2; }
+.alert-card-danger .alert-card-value { color: var(--text-danger); }
+.alert-card-warning .alert-card-value { color: var(--text-warning); }
+.alert-card-sub { font-size: 11px; margin-top: 4px; }
+.alert-card-danger .alert-card-sub { color: var(--text-danger); opacity: 0.8; }
+.alert-card-warning .alert-card-sub { color: var(--text-warning); opacity: 0.8; }
+
+/* ─── Business cards (middle section) ─── */
+.biz-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+.biz-card {
+  background: var(--bg-primary); border: 0.5px solid var(--border-light);
+  border-radius: var(--radius-lg); padding: 16px 18px;
+  cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s;
+  text-decoration: none; display: block; color: inherit;
+}
+.biz-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.07); border-color: var(--border-medium); }
+.biz-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.biz-card-title { font-size: 12.5px; font-weight: 500; color: var(--text-primary); }
+.biz-card-arrow { font-size: 14px; color: var(--text-secondary); }
+.biz-card-metrics { display: flex; flex-direction: column; gap: 6px; }
+.biz-metric { display: flex; justify-content: space-between; align-items: baseline; }
+.biz-metric-label { font-size: 12px; color: var(--text-secondary); }
+.biz-metric-value { font-size: 14px; font-weight: 500; color: var(--text-primary); }
+.biz-metric-value.accent { color: var(--text-info); }
+.biz-metric-value.danger { color: var(--text-danger); }
+.biz-card-single { display: flex; align-items: center; justify-content: center; min-height: 52px; }
+.biz-card-single-text { font-size: 13px; color: var(--text-info); }
+
+/* ─── Performance card (large, spans full width) ─── */
+.perf-card {
+  background: var(--bg-primary); border: 0.5px solid var(--border-light);
+  border-radius: var(--radius-lg); padding: 18px 20px; margin-bottom: 14px;
+}
+.perf-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.perf-title { font-size: 12.5px; font-weight: 500; color: var(--text-primary); }
+.perf-toggle { display: flex; gap: 0; border: 0.5px solid var(--border-medium); border-radius: var(--radius-md); overflow: hidden; }
+.perf-toggle-btn {
+  padding: 4px 14px; font-size: 11.5px; cursor: pointer;
+  background: var(--bg-primary); color: var(--text-secondary);
+  border: none; transition: all 0.12s; font-family: inherit;
+}
+.perf-toggle-btn:not(:last-child) { border-right: 0.5px solid var(--border-medium); }
+.perf-toggle-btn.active { background: var(--bg-info); color: var(--text-info); font-weight: 500; }
+.perf-toggle-btn:hover:not(.active) { background: var(--bg-secondary); }
+
+.perf-body { display: grid; grid-template-columns: 1fr 1px 1fr; gap: 0; }
+.perf-divider { background: var(--border-light); }
+.perf-section { padding: 0 20px; }
+.perf-section:first-child { padding-left: 0; }
+.perf-section:last-child { padding-right: 0; }
+.perf-section-label {
+  font-size: 11.5px; font-weight: 500; color: var(--text-secondary);
+  margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.4px;
+}
+.perf-main-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.perf-main-value { font-size: 26px; font-weight: 500; color: var(--text-primary); line-height: 1; }
+.perf-main-unit { font-size: 12px; color: var(--text-secondary); }
+.perf-sub-rows { display: flex; flex-direction: column; gap: 4px; }
+.perf-sub-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; }
+.perf-sub-label { color: var(--text-secondary); }
+.perf-sub-value { font-weight: 500; color: var(--text-primary); }
+.perf-sub-value.up { color: var(--text-success); }
+.perf-sub-value.down { color: var(--text-danger); }
+
+/* ─── Monthly chart area ─── */
+.perf-chart { margin-top: 16px; padding-top: 14px; border-top: 0.5px solid var(--border-light); }
+.perf-chart-title { font-size: 11.5px; color: var(--text-secondary); margin-bottom: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.4px; }
+.chart-container { width: 100%; overflow-x: auto; }
+.chart-table { width: 100%; border-collapse: collapse; }
+.chart-table th {
+  font-size: 11px; color: var(--text-secondary); font-weight: 500;
+  padding: 4px 6px; text-align: center; white-space: nowrap;
+  border-bottom: 0.5px solid var(--border-light);
+}
+.chart-table th.current { color: var(--text-info); font-weight: 600; }
+.chart-table td {
+  font-size: 11.5px; padding: 5px 6px; text-align: right; white-space: nowrap;
+  border-bottom: 0.5px solid var(--border-light);
+}
+.chart-table td.row-header { text-align: left; color: var(--text-secondary); font-size: 11px; }
+.chart-table td.current { background: rgba(55,138,221,0.04); font-weight: 500; }
+.chart-table td.up { color: var(--text-success); }
+.chart-table td.down { color: var(--text-danger); }
+.chart-bar-cell { padding: 4px 4px !important; vertical-align: bottom; }
+.bar-group { display: flex; gap: 2px; align-items: flex-end; justify-content: center; height: 48px; }
+.bar { width: 12px; border-radius: 2px 2px 0 0; min-height: 2px; transition: height 0.3s; }
+.bar.this-year { background: var(--border-info); }
+.bar.last-year { background: var(--bg-tertiary); }
+
+/* ─── Activity card ─── */
+.activity-card {
+  background: var(--bg-primary); border: 0.5px solid var(--border-light);
+  border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 14px;
+}
+.activity-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.activity-title { font-size: 12.5px; font-weight: 500; color: var(--text-primary); }
+.activity-link { font-size: 12px; color: var(--text-info); cursor: pointer; text-decoration: none; }
+.activity-link:hover { text-decoration: underline; }
+.activity-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; }
+.activity-row:not(:last-child) { border-bottom: 0.5px solid var(--border-light); }
+.activity-label { font-size: 12.5px; color: var(--text-secondary); }
+.activity-value { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+
+/* ─── Admin section ─── */
+.admin-section { margin-top: 8px; padding-top: 14px; border-top: 0.5px solid var(--border-light); }
+.admin-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--text-secondary); cursor: pointer;
+  text-decoration: none; padding: 6px 0;
+}
+.admin-link:hover { color: var(--text-primary); }
+
+/* ─── Bottom row ─── */
+.bottom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* ─── Responsive ─── */
+@media (max-width: 760px) {
+  .alert-grid { grid-template-columns: 1fr; }
+  .biz-grid { grid-template-columns: 1fr; }
+  .perf-body { grid-template-columns: 1fr; gap: 14px; }
+  .perf-divider { display: none; }
+  .perf-section { padding: 0; }
+  .perf-section:last-child { padding-top: 14px; border-top: 0.5px solid var(--border-light); }
+  .bottom-grid { grid-template-columns: 1fr; }
+  .chart-container { overflow-x: scroll; -webkit-overflow-scrolling: touch; }
+  .chart-table { min-width: 620px; }
+  .nav-item { padding: 0 8px; font-size: 11.5px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ─── Navigation ─── -->
+<nav class="nav">
+  <div class="nav-logo">保険代理店システム</div>
+  <a class="nav-item active" href="#">ホーム</a>
+  <a class="nav-item" href="#">満期一覧</a>
+  <a class="nav-item" href="#">顧客一覧</a>
+  <a class="nav-item" href="#">事故案件</a>
+  <a class="nav-item" href="#">実績管理</a>
+  <a class="nav-item" href="#">営業活動</a>
+  <a class="nav-item" href="#">営業案件</a>
+  <div class="nav-spacer"></div>
+  <a class="nav-item" href="#">設定</a>
+  <div class="nav-user">
+    <span class="nav-user-name">田中 太郎</span>
+    <span class="nav-user-tenant">サンプル代理店</span>
+  </div>
+  <button class="btn-logout">ログアウト</button>
+</nav>
+
+<!-- ─── Main Content ─── -->
+<div class="content">
+
+  <!-- Page Header -->
+  <div class="page-header">
+    <div>
+      <div class="page-title">ホーム</div>
+    </div>
+    <div style="font-size: 12px; color: var(--text-secondary);">2026年4月5日（日）</div>
+  </div>
+
+  <!-- ═══ 上段: 重点確認エリア ═══ -->
+  <div class="section-title">要確認</div>
+  <div class="alert-grid">
+    <!-- 満期: 対応遅れ -->
+    <a href="#" class="alert-card alert-card-danger">
+      <div class="alert-card-label">満期 — 対応遅れ</div>
+      <div class="alert-card-value">7 <span style="font-size:13px; font-weight:400;">件</span></div>
+      <div class="alert-card-sub">満期日を過ぎて未完了の案件 → 満期一覧へ</div>
+    </a>
+    <!-- 事故: 高優先度未完了 -->
+    <a href="#" class="alert-card alert-card-warning">
+      <div class="alert-card-label">事故 — 高優先度未完了</div>
+      <div class="alert-card-value">3 <span style="font-size:13px; font-weight:400;">件</span></div>
+      <div class="alert-card-sub">優先度「高」で未完了の案件 → 事故案件一覧へ</div>
+    </a>
+  </div>
+
+  <!-- ═══ 中段: 業務カードエリア ═══ -->
+  <div class="section-title">業務入口</div>
+  <div class="biz-grid">
+    <!-- 満期業務 -->
+    <a href="#" class="biz-card">
+      <div class="biz-card-header">
+        <span class="biz-card-title">満期業務</span>
+        <span class="biz-card-arrow">→</span>
+      </div>
+      <div class="biz-card-metrics">
+        <div class="biz-metric">
+          <span class="biz-metric-label">今日期限</span>
+          <span class="biz-metric-value accent">2 件</span>
+        </div>
+        <div class="biz-metric">
+          <span class="biz-metric-label">今週期限</span>
+          <span class="biz-metric-value">8 件</span>
+        </div>
+        <div class="biz-metric">
+          <span class="biz-metric-label">対応遅れ</span>
+          <span class="biz-metric-value danger">7 件</span>
+        </div>
+      </div>
+    </a>
+    <!-- 事故案件 -->
+    <a href="#" class="biz-card">
+      <div class="biz-card-header">
+        <span class="biz-card-title">事故案件</span>
+        <span class="biz-card-arrow">→</span>
+      </div>
+      <div class="biz-card-metrics">
+        <div class="biz-metric">
+          <span class="biz-metric-label">高優先度未完了</span>
+          <span class="biz-metric-value danger">3 件</span>
+        </div>
+        <div class="biz-metric">
+          <span class="biz-metric-label">全未完了</span>
+          <span class="biz-metric-value">12 件</span>
+        </div>
+      </div>
+    </a>
+    <!-- 顧客 -->
+    <a href="#" class="biz-card">
+      <div class="biz-card-header">
+        <span class="biz-card-title">顧客一覧</span>
+        <span class="biz-card-arrow">→</span>
+      </div>
+      <div class="biz-card-single">
+        <span class="biz-card-single-text">顧客を探す</span>
+      </div>
+    </a>
+  </div>
+
+  <!-- ═══ 実績サマリカード ═══ -->
+  <div class="perf-card">
+    <div class="perf-header">
+      <div class="perf-title">実績サマリ（令和7年度）</div>
+      <div class="perf-toggle">
+        <button class="perf-toggle-btn active" onclick="toggleScope(this)">自分</button>
+        <button class="perf-toggle-btn" onclick="toggleScope(this)">全体</button>
+      </div>
+    </div>
+    <div class="perf-body">
+      <!-- 左: 今月の速報 -->
+      <div class="perf-section">
+        <div class="perf-section-label">今月（4月）</div>
+        <div class="perf-main-row">
+          <span class="perf-main-value">1,842</span>
+          <span class="perf-main-unit">千円 / 14件</span>
+        </div>
+        <div class="perf-sub-rows">
+          <div class="perf-sub-row">
+            <span class="perf-sub-label">目標</span>
+            <span class="perf-sub-value">4,341 千円</span>
+          </div>
+          <div class="perf-sub-row">
+            <span class="perf-sub-label">目標進捗</span>
+            <span class="perf-sub-value">42.4%</span>
+          </div>
+          <div class="perf-sub-row">
+            <span class="perf-sub-label">前年同月</span>
+            <span class="perf-sub-value">3,339 千円</span>
+          </div>
+        </div>
+      </div>
+      <div class="perf-divider"></div>
+      <!-- 右: 年度累計 -->
+      <div class="perf-section">
+        <div class="perf-section-label">年度累計（4月〜）</div>
+        <div class="perf-main-row">
+          <span class="perf-main-value">1,842</span>
+          <span class="perf-main-unit">千円</span>
+        </div>
+        <div class="perf-sub-rows">
+          <div class="perf-sub-row">
+            <span class="perf-sub-label">前年同期累計</span>
+            <span class="perf-sub-value">3,339 千円</span>
+          </div>
+          <div class="perf-sub-row">
+            <span class="perf-sub-label">前年比</span>
+            <span class="perf-sub-value down">55.2%</span>
+          </div>
+          <div class="perf-sub-row">
+            <span class="perf-sub-label">年度目標</span>
+            <span class="perf-sub-value">62,163 千円</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 月次推移テーブル -->
+    <div class="perf-chart">
+      <div class="perf-chart-title">月次推移（前年対比）</div>
+      <div class="chart-container">
+        <table class="chart-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th class="current">4月</th><th>5月</th><th>6月</th><th>7月</th><th>8月</th><th>9月</th>
+              <th>10月</th><th>11月</th><th>12月</th><th>1月</th><th>2月</th><th>3月</th><th>年間</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- ミニバーチャート行 -->
+            <tr>
+              <td class="row-header"></td>
+              <td class="chart-bar-cell current">
+                <div class="bar-group">
+                  <div class="bar this-year" style="height:28px;" title="R7: 1,842"></div>
+                  <div class="bar last-year" style="height:48px;" title="前年: 3,339"></div>
+                </div>
+              </td>
+              <td class="chart-bar-cell">
+                <div class="bar-group">
+                  <div class="bar this-year" style="height:0px;"></div>
+                  <div class="bar last-year" style="height:40px;" title="前年: 2,792"></div>
+                </div>
+              </td>
+              <td class="chart-bar-cell">
+                <div class="bar-group">
+                  <div class="bar this-year" style="height:0px;"></div>
+                  <div class="bar last-year" style="height:48px;" title="前年: 4,944"></div>
+                </div>
+              </td>
+              <td class="chart-bar-cell">
+                <div class="bar-group">
+                  <div class="bar this-year" style="height:0px;"></div>
+                  <div class="bar last-year" style="height:32px;" title="前年: 2,201"></div>
+                </div>
+              </td>
+              <td class="chart-bar-cell">
+                <div class="bar-group">
+                  <div class="bar this-year" style="height:0px;"></div>
+                  <div class="bar last-year" style="height:18px;" title="前年: 1,268"></div>
+                </div>
+              </td>
+              <td class="chart-bar-cell">
+                <div class="bar-group">
+                  <div class="bar this-year" style="height:0px;"></div>
+                  <div class="bar last-year" style="height:48px;" title="前年: 6,375"></div>
+                </div>
+              </td>
+              <td class="chart-bar-cell">
+                <div class="bar-group">
+                  <div class="bar this-year" style="height:0px;"></div>
+                  <div class="bar last-year" style="height:42px;" title="前年: 4,387"></div>
+                </div>
+              </td>
+              <td class="chart-bar-cell">
+                <div class="bar-group">
+                  <div class="bar this-year" style="height:0px;"></div>
+                  <div class="bar last-year" style="height:38px;" title="前年: 4,046"></div>
+                </div>
+              </td>
+              <td class="chart-bar-cell">
+                <div class="bar-group">
+                  <div class="bar this-year" style="height:0px;"></div>
+                  <div class="bar last-year" style="height:34px;" title="前年: 3,050"></div>
+                </div>
+              </td>
+              <td class="chart-bar-cell">
+                <div class="bar-group">
+                  <div class="bar this-year" style="height:0px;"></div>
+                  <div class="bar last-year" style="height:36px;" title="前年: 3,819"></div>
+                </div>
+              </td>
+              <td class="chart-bar-cell">
+                <div class="bar-group">
+                  <div class="bar this-year" style="height:0px;"></div>
+                  <div class="bar last-year" style="height:44px;" title="前年: 4,766"></div>
+                </div>
+              </td>
+              <td class="chart-bar-cell">
+                <div class="bar-group">
+                  <div class="bar this-year" style="height:0px;"></div>
+                  <div class="bar last-year" style="height:48px;" title="前年: 6,830"></div>
+                </div>
+              </td>
+              <td class="chart-bar-cell"></td>
+            </tr>
+            <tr>
+              <td class="row-header">R7 実績</td>
+              <td class="current">1,842</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+              <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>1,842</td>
+            </tr>
+            <tr>
+              <td class="row-header">前年</td>
+              <td class="current">3,339</td><td>2,792</td><td>4,944</td><td>2,201</td><td>1,268</td><td>6,375</td>
+              <td>4,387</td><td>4,046</td><td>3,050</td><td>3,819</td><td>4,766</td><td>6,830</td><td>47,817</td>
+            </tr>
+            <tr>
+              <td class="row-header">前年比</td>
+              <td class="current down">-1,497</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+              <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td class="down">-1,497</td>
+            </tr>
+            <tr>
+              <td class="row-header">目標</td>
+              <td class="current">4,341</td><td>3,630</td><td>6,427</td><td>2,861</td><td>1,648</td><td>8,288</td>
+              <td>5,703</td><td>5,260</td><td>3,965</td><td>4,965</td><td>6,196</td><td>8,879</td><td>62,163</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="display: flex; gap: 16px; margin-top: 8px; font-size: 11px; color: var(--text-secondary);">
+        <span><span class="bar this-year" style="display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:middle;"></span> R7 実績</span>
+        <span><span class="bar last-year" style="display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:middle;"></span> 前年</span>
+        <span style="margin-left: auto;">単位: 千円 ｜ <a href="#" style="color: var(--text-info); text-decoration: none;">実績管理一覧 →</a></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 下段: 営業活動 + 管理 ═══ -->
+  <div class="bottom-grid">
+    <!-- 営業活動カード -->
+    <div class="activity-card">
+      <div class="activity-header">
+        <span class="activity-title">営業活動</span>
+        <a href="#" class="activity-link">活動一覧 →</a>
+      </div>
+      <div class="activity-row">
+        <span class="activity-label">今日の活動</span>
+        <span class="activity-value">3 件</span>
+      </div>
+      <div class="activity-row">
+        <span class="activity-label">日報</span>
+        <span><span class="badge badge-warn">未提出</span></span>
+      </div>
+    </div>
+
+    <!-- 実績管理入口 -->
+    <a href="#" class="biz-card" style="margin-bottom:14px;">
+      <div class="biz-card-header">
+        <span class="biz-card-title">実績管理</span>
+        <span class="biz-card-arrow">→</span>
+      </div>
+      <div class="biz-card-metrics">
+        <div class="biz-metric">
+          <span class="biz-metric-label">今月計上件数</span>
+          <span class="biz-metric-value">14 件</span>
+        </div>
+        <div class="biz-metric">
+          <span class="biz-metric-label">今月保険料</span>
+          <span class="biz-metric-value accent">1,842 千円</span>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <!-- ═══ 管理・設定（管理者のみ） ═══ -->
+  <div class="admin-section">
+    <div class="section-title">管理</div>
+    <div style="display: flex; gap: 24px; flex-wrap: wrap;">
+      <a href="#" class="admin-link">
+        <span>⚙</span> テナント設定
+      </a>
+      <span style="font-size:12px; color:var(--text-secondary); display:flex; align-items:center; gap:8px;">
+        <span class="badge badge-info">管理者</span>
+        日報提出状況: 提出済 2名 / 未提出 1名
+      </span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function toggleScope(btn) {
+  document.querySelectorAll('.perf-toggle-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>

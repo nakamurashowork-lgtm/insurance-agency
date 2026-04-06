@@ -5,10 +5,11 @@ namespace App;
 
 final class SessionManager
 {
-    private const AUTH_KEY = 'auth';
-    private const FLASH_KEY = '_flash';
-    private const OAUTH_STATE_KEY = '_oauth_state';
-    private const CSRF_TOKENS_KEY = '_csrf_tokens';
+    private const AUTH_KEY          = 'auth';
+    private const FLASH_KEY         = '_flash';
+    private const OAUTH_STATE_KEY   = '_oauth_state';
+    private const CSRF_TOKENS_KEY   = '_csrf_tokens';
+    private const TOTP_PENDING_KEY  = '_totp_pending_user_id';
 
     public function __construct(private AppConfig $config)
     {
@@ -128,6 +129,28 @@ final class SessionManager
 
         return hash_equals($stored, $state);
     }
+
+    // -------------------------------------------------------------------------
+    // TOTP pending state
+    // -------------------------------------------------------------------------
+
+    public function setTotpPendingUserId(int $userId): void
+    {
+        $_SESSION[self::TOTP_PENDING_KEY] = $userId;
+    }
+
+    public function getTotpPendingUserId(): ?int
+    {
+        $value = $_SESSION[self::TOTP_PENDING_KEY] ?? null;
+        return is_int($value) ? $value : null;
+    }
+
+    public function clearTotpPending(): void
+    {
+        unset($_SESSION[self::TOTP_PENDING_KEY]);
+    }
+
+    // -------------------------------------------------------------------------
 
     public function issueCsrfToken(string $purpose): string
     {

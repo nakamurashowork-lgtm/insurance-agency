@@ -89,11 +89,11 @@ final class DailyReportRepository
                     a.next_action_date,
                     mc.customer_name
              FROM t_activity a
-             INNER JOIN m_customer mc
+             LEFT JOIN m_customer mc
                      ON mc.id = a.customer_id
                     AND mc.is_deleted = 0
              WHERE a.activity_date = :report_date
-               AND a.staff_user_id = :staff_user_id
+               AND a.staff_id = :staff_user_id
                AND a.is_deleted = 0
              ORDER BY a.start_time ASC, a.id ASC'
         );

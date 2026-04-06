@@ -57,7 +57,7 @@ final class RenewalCaseRepository
                     rc.early_renewal_deadline,
                     rc.case_status,
                     rc.next_action_date,
-                    rc.assigned_user_id,
+                    rc.assigned_staff_id,
                     rc.updated_at'
             . $query['sql']
             . ' ORDER BY ' . $this->buildOrderBy($sort, $direction)
@@ -92,9 +92,11 @@ final class RenewalCaseRepository
                     rc.case_status,
                     rc.next_action_date,
                     rc.renewal_result,
+                    rc.renewal_method,
+                    rc.procedure_method,
                     rc.lost_reason,
                     rc.remark,
-                    rc.office_user_id,
+                    rc.office_staff_id,
                     rc.completed_date,
                     c.policy_no,
                     c.insurer_name,
@@ -107,7 +109,7 @@ final class RenewalCaseRepository
                     c.remark AS contract_remark,
                     mc.id AS customer_id,
                     mc.customer_name,
-                    mc.assigned_user_id,
+                    mc.assigned_staff_id,
                     mc.phone,
                     mc.email,
                     mc.address1,
@@ -209,33 +211,27 @@ final class RenewalCaseRepository
                 'UPDATE t_renewal_case
                  SET case_status = :case_status,
                      next_action_date = :next_action_date,
-                     renewal_result = :renewal_result,
                      renewal_method = :renewal_method,
                      procedure_method = :procedure_method,
-                     lost_reason = :lost_reason,
-                     remark = :remark,
                      completed_date = :completed_date,
+                     office_staff_id = :office_staff_id,
                      updated_by = :updated_by
                  WHERE id = :renewal_case_id
                    AND is_deleted = 0'
             );
 
-            $nextActionDate = trim((string) ($input['next_action_date'] ?? ''));
-            $renewalResult  = trim((string) ($input['renewal_result'] ?? ''));
-            $renewalMethod  = trim((string) ($input['renewal_method'] ?? ''));
+            $nextActionDate  = trim((string) ($input['next_action_date'] ?? ''));
+            $renewalMethod   = trim((string) ($input['renewal_method'] ?? ''));
             $procedureMethod = trim((string) ($input['procedure_method'] ?? ''));
-            $lostReason     = trim((string) ($input['lost_reason'] ?? ''));
-            $remark         = trim((string) ($input['remark'] ?? ''));
-            $completedDate  = trim((string) ($input['completed_date'] ?? ''));
+            $completedDate   = trim((string) ($input['completed_date'] ?? ''));
+            $officeStaffId   = (int) trim((string) ($input['office_staff_id'] ?? ''));
 
             $stmt->bindValue(':case_status', (string) ($input['case_status'] ?? 'not_started'));
             $stmt->bindValue(':next_action_date', $nextActionDate !== '' ? $nextActionDate : null);
-            $stmt->bindValue(':renewal_result', $renewalResult !== '' ? $renewalResult : null);
             $stmt->bindValue(':renewal_method', $renewalMethod !== '' ? $renewalMethod : null);
             $stmt->bindValue(':procedure_method', $procedureMethod !== '' ? $procedureMethod : null);
-            $stmt->bindValue(':lost_reason', $lostReason !== '' ? $lostReason : null);
-            $stmt->bindValue(':remark', $remark !== '' ? $remark : null);
             $stmt->bindValue(':completed_date', $completedDate !== '' ? $completedDate : null);
+            $stmt->bindValue(':office_staff_id', $officeStaffId > 0 ? $officeStaffId : null, $officeStaffId > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
             $stmt->bindValue(':updated_by', $updatedBy, PDO::PARAM_INT);
             $stmt->bindValue(':renewal_case_id', $renewalCaseId, PDO::PARAM_INT);
             $stmt->execute();
@@ -320,7 +316,7 @@ final class RenewalCaseRepository
     private function findRenewalCaseForAudit(int $renewalCaseId): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT case_status, next_action_date, renewal_result, renewal_method, procedure_method, lost_reason, remark, completed_date
+            'SELECT case_status, next_action_date, renewal_method, procedure_method, completed_date, office_staff_id
              FROM t_renewal_case
              WHERE id = :renewal_case_id
                AND is_deleted = 0
@@ -339,9 +335,8 @@ final class RenewalCaseRepository
             'renewal_result'  => $this->normalizeAuditValue($row['renewal_result'] ?? null),
             'renewal_method'  => $this->normalizeAuditValue($row['renewal_method'] ?? null),
             'procedure_method' => $this->normalizeAuditValue($row['procedure_method'] ?? null),
-            'lost_reason'     => $this->normalizeAuditValue($row['lost_reason'] ?? null),
-            'remark'          => $this->normalizeAuditValue($row['remark'] ?? null),
             'completed_date'  => $this->normalizeAuditValue($row['completed_date'] ?? null),
+            'office_staff_id' => $this->normalizeAuditValue($row['office_staff_id'] ?? null),
         ];
     }
 
@@ -368,9 +363,8 @@ final class RenewalCaseRepository
             'renewal_result'  => ['label' => '更改結果', 'value_type' => 'STRING'],
             'renewal_method'  => ['label' => '更改方法', 'value_type' => 'STRING'],
             'procedure_method' => ['label' => '手続方法', 'value_type' => 'STRING'],
-            'lost_reason'     => ['label' => '失注理由', 'value_type' => 'STRING'],
-            'remark'          => ['label' => '備考', 'value_type' => 'STRING'],
             'completed_date'  => ['label' => '完了日', 'value_type' => 'DATE'],
+            'office_staff_id' => ['label' => '事務担当', 'value_type' => 'STRING'],
         ];
 
         $details = [];
@@ -523,10 +517,10 @@ final class RenewalCaseRepository
         }
         // 'all' の場合は絞り込みなし
 
-        $assignedUserId = trim((string) ($criteria['assigned_user_id'] ?? ''));
+        $assignedUserId = trim((string) ($criteria['assigned_staff_id'] ?? ''));
         if ($assignedUserId !== '' && ctype_digit($assignedUserId)) {
-            $sql .= ' AND rc.assigned_user_id = :assigned_user_id';
-            $params['assigned_user_id'] = $assignedUserId;
+            $sql .= ' AND rc.assigned_staff_id = :assigned_staff_id';
+            $params['assigned_staff_id'] = $assignedUserId;
         }
 
         $productType = trim((string) ($criteria['product_type'] ?? ''));

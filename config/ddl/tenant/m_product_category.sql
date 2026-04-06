@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS m_product_category (
   id           BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT 'ID',
   csv_value    VARCHAR(100)     NOT NULL COMMENT 'CSV種目種類値（SJ-NET出力値）',
   display_name VARCHAR(100)     NOT NULL COMMENT '表示名（自動車・火災・積立等）',
+  is_active    TINYINT(1)       NOT NULL DEFAULT 1 COMMENT '有効フラグ(1=有効/0=無効)',
   created_at   DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at   DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),

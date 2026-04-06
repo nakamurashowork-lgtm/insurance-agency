@@ -31,7 +31,7 @@ VALUES
 -- =============================================================================
 INSERT INTO m_customer
   (customer_type, customer_name, customer_name_kana, phone, email,
-   postal_code, address1, address2, assigned_user_id, status, note,
+   postal_code, address1, address2, assigned_staff_id, status, note,
    is_deleted, created_by, updated_by)
 VALUES
   -- 法人顧客
@@ -137,7 +137,7 @@ VALUES
 INSERT INTO t_contract
   (customer_id, policy_no, insurer_name, insurance_category, product_type,
    policy_start_date, policy_end_date, premium_amount, payment_cycle,
-   status, sales_user_id, is_deleted, created_by, updated_by)
+   status, sales_staff_id, is_deleted, created_by, updated_by)
 VALUES
   -- 田中商事 (customer_id=1)
   (1, 'TKM-2024-00101', '東京海上日動火災保険', '損害保険', '自動車保険',
@@ -227,7 +227,7 @@ VALUES
 INSERT INTO t_renewal_case
   (contract_id, maturity_date, case_status, last_contact_at, next_action_date,
    renewal_result, expected_premium_amount, actual_premium_amount,
-   assigned_user_id, remark, is_deleted, created_by, updated_by)
+   assigned_staff_id, remark, is_deleted, created_by, updated_by)
 VALUES
   -- 田中商事 火災保険 (contract_id=2) 満期2025-10-01
   (2, '2025-10-01', 'contacted', '2026-03-15 10:30:00', '2026-04-10',
@@ -286,7 +286,7 @@ INSERT INTO t_accident_case
   (customer_id, contract_id, accident_no, accepted_date, accident_date,
    insurance_category, product_type, accident_type, accident_summary,
    accident_location, has_counterparty, status, priority,
-   insurer_claim_no, resolved_date, assigned_user_id, remark,
+   insurer_claim_no, resolved_date, assigned_staff_id, remark,
    is_deleted, created_by, updated_by)
 VALUES
   -- 鈴木建設 工事中事故
@@ -341,7 +341,7 @@ INSERT INTO t_sales_performance
   (customer_id, contract_id, renewal_case_id, performance_date, performance_type,
    source_type, insurer_name, policy_no, policy_start_date,
    insurance_category, product_type, premium_amount,
-   settlement_month, staff_user_id, is_deleted, created_by, updated_by)
+   settlement_month, staff_id, is_deleted, created_by, updated_by)
 VALUES
   -- 2025年4月
   (3,  6, NULL, '2025-04-01', 'renewal',
@@ -422,7 +422,7 @@ INSERT INTO t_activity
   (customer_id, contract_id, renewal_case_id, accident_case_id,
    activity_date, start_time, end_time, activity_type, purpose_type,
    visit_place, interviewee_name, subject, content_summary, detail_text,
-   next_action_date, next_action_note, result_type, staff_user_id,
+   next_action_date, next_action_note, result_type, staff_id,
    is_deleted)
 VALUES
   -- 田中商事
@@ -579,7 +579,7 @@ VALUES
 INSERT INTO t_sales_case
   (customer_id, contract_id, case_name, case_type, product_type,
    status, prospect_rank, expected_premium, expected_contract_month,
-   referral_source, next_action_date, memo, staff_user_id, is_deleted)
+   referral_source, next_action_date, memo, staff_id, is_deleted)
 VALUES
   -- 青木物流 新規（貨物保険）
   (4, NULL, '青木物流 貨物保険 新規獲得',

@@ -6,8 +6,9 @@ namespace App\Controller;
 use App\AppConfig;
 use App\Domain\Tenant\ActivityPurposeTypeRepository;
 use App\Domain\Tenant\ProductCategoryRepository;
-use App\Domain\Tenant\RenewalCaseStatusRepository;
-use App\Domain\Tenant\StaffSjnetMappingRepository;
+use App\Domain\Tenant\CaseStatusRepository;
+use App\Domain\Tenant\ProcedureMethodRepository;
+use App\Domain\Tenant\StaffRepository;
 use App\Domain\Tenant\TenantSettingsRepository;
 use App\Http\Responses;
 use App\Infra\CommonConnectionFactory;
@@ -47,12 +48,15 @@ final class TenantSettingsController
                 'webhook_url' => '',
             ],
         ];
-        $phases              = [];
-        $purposeTypes        = [];
-        $staffMappings       = [];
-        $renewalCaseStatuses = [];
-        $productCategories   = [];
-        $error               = null;
+        $phases               = [];
+        $purposeTypes         = [];
+        $staffList            = [];
+        $renewalCaseStatuses  = [];
+        $accidentCaseStatuses = [];
+        $productCategories    = [];
+        $tenantUsers          = [];
+        $procedureMethods     = [];
+        $error                = null;
 
         try {
             $commonPdo  = $this->commonConnectionFactory->create();
@@ -62,10 +66,29 @@ final class TenantSettingsController
             $notifySettings      = $settingsRepo->findNotificationSettings((string) ($auth['tenant_code'] ?? ''));
             $phases              = $settingsRepo->findReminderPhases();
 
-            $purposeTypes        = (new ActivityPurposeTypeRepository($tenantPdo))->findAll();
-            $staffMappings       = (new StaffSjnetMappingRepository($tenantPdo))->findAll();
-            $renewalCaseStatuses = (new RenewalCaseStatusRepository($tenantPdo))->findAll();
-            $productCategories   = (new ProductCategoryRepository($tenantPdo))->findAll();
+            $purposeTypes         = (new ActivityPurposeTypeRepository($tenantPdo))->findAll();
+            $staffList            = (new StaffRepository($tenantPdo))->findAll();
+            $caseStatusRepo       = new CaseStatusRepository($tenantPdo);
+            $renewalCaseStatuses  = $caseStatusRepo->findByType('renewal');
+            $accidentCaseStatuses = $caseStatusRepo->findByType('accident');
+            $productCategories    = (new ProductCategoryRepository($tenantPdo))->findAll();
+            $procedureMethods     = (new ProcedureMethodRepository($tenantPdo))->findAll();
+
+            $tenantCode = (string) ($auth['tenant_code'] ?? '');
+            if ($tenantCode !== '') {
+                $stmt = $commonPdo->prepare(
+                    'SELECT u.id, u.name, u.display_name, u.email, ut.role
+                     FROM user_tenants ut
+                     INNER JOIN users u ON u.id = ut.user_id
+                     WHERE ut.tenant_code = :tenant_code
+                       AND ut.status = 1 AND ut.is_deleted = 0
+                       AND u.status = 1 AND u.is_deleted = 0
+                     ORDER BY COALESCE(u.display_name, u.name) ASC, u.id ASC'
+                );
+                $stmt->bindValue(':tenant_code', $tenantCode);
+                $stmt->execute();
+                $tenantUsers = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+            }
         } catch (Throwable) {
             $error = '管理・設定の取得に失敗しました。';
         }
@@ -74,40 +97,54 @@ final class TenantSettingsController
         $flashSuccess = $this->guard->session()->consumeFlash('success');
 
         $masterCsrfs = [
-            'purpose_type_create'  => $this->guard->session()->issueCsrfToken('tenant_purpose_type_create'),
-            'purpose_type_update'  => $this->guard->session()->issueCsrfToken('tenant_purpose_type_update'),
-            'purpose_type_delete'  => $this->guard->session()->issueCsrfToken('tenant_purpose_type_delete'),
-            'staff_create'         => $this->guard->session()->issueCsrfToken('tenant_staff_create'),
-            'staff_update'         => $this->guard->session()->issueCsrfToken('tenant_staff_update'),
-            'staff_delete'         => $this->guard->session()->issueCsrfToken('tenant_staff_delete'),
-            'status_create'        => $this->guard->session()->issueCsrfToken('tenant_status_create'),
-            'status_update_name'   => $this->guard->session()->issueCsrfToken('tenant_status_update_name'),
-            'status_delete'        => $this->guard->session()->issueCsrfToken('tenant_status_delete'),
-            'category_create'      => $this->guard->session()->issueCsrfToken('tenant_category_create'),
-            'category_update'      => $this->guard->session()->issueCsrfToken('tenant_category_update'),
-            'category_delete'      => $this->guard->session()->issueCsrfToken('tenant_category_delete'),
-            'notify_renewal'       => $this->guard->session()->issueCsrfToken('tenant_settings_renewal'),
-            'notify_accident'      => $this->guard->session()->issueCsrfToken('tenant_settings_accident'),
+            'purpose_type_create'      => $this->guard->session()->issueCsrfToken('tenant_purpose_type_create'),
+            'purpose_type_update'      => $this->guard->session()->issueCsrfToken('tenant_purpose_type_update'),
+            'purpose_type_deactivate'  => $this->guard->session()->issueCsrfToken('tenant_purpose_type_deactivate'),
+            'purpose_type_activate'    => $this->guard->session()->issueCsrfToken('tenant_purpose_type_activate'),
+            'staff_create'             => $this->guard->session()->issueCsrfToken('tenant_staff_create'),
+            'staff_update'             => $this->guard->session()->issueCsrfToken('tenant_staff_update'),
+            'staff_delete'             => $this->guard->session()->issueCsrfToken('tenant_staff_delete'),
+            'status_create'            => $this->guard->session()->issueCsrfToken('tenant_status_create'),
+            'status_update_name'       => $this->guard->session()->issueCsrfToken('tenant_status_update_name'),
+            'status_deactivate'        => $this->guard->session()->issueCsrfToken('tenant_status_deactivate'),
+            'status_activate'          => $this->guard->session()->issueCsrfToken('tenant_status_activate'),
+            'category_create'          => $this->guard->session()->issueCsrfToken('tenant_category_create'),
+            'category_update'          => $this->guard->session()->issueCsrfToken('tenant_category_update'),
+            'category_deactivate'      => $this->guard->session()->issueCsrfToken('tenant_category_deactivate'),
+            'category_activate'        => $this->guard->session()->issueCsrfToken('tenant_category_activate'),
+            'procedure_method_create'      => $this->guard->session()->issueCsrfToken('tenant_procedure_method_create'),
+            'procedure_method_update'      => $this->guard->session()->issueCsrfToken('tenant_procedure_method_update'),
+            'procedure_method_deactivate'  => $this->guard->session()->issueCsrfToken('tenant_procedure_method_deactivate'),
+            'procedure_method_activate'    => $this->guard->session()->issueCsrfToken('tenant_procedure_method_activate'),
+            'notify_renewal'               => $this->guard->session()->issueCsrfToken('tenant_settings_renewal'),
+            'notify_accident'              => $this->guard->session()->issueCsrfToken('tenant_settings_accident'),
+            'user_update_display_name'     => $this->guard->session()->issueCsrfToken('tenant_user_update_display_name'),
         ];
 
         $masterUrls = [
-            'purpose_type_create'  => $this->config->routeUrl('tenant/settings/purpose-type/create'),
-            'purpose_type_update'  => $this->config->routeUrl('tenant/settings/purpose-type/update'),
-            'purpose_type_delete'  => $this->config->routeUrl('tenant/settings/purpose-type/delete'),
-            'staff_create'         => $this->config->routeUrl('tenant/settings/staff/create'),
-            'staff_update'         => $this->config->routeUrl('tenant/settings/staff/update'),
-            'staff_delete'         => $this->config->routeUrl('tenant/settings/staff/delete'),
-            'status_create'        => $this->config->routeUrl('tenant/settings/status/create'),
-            'status_update_name'   => $this->config->routeUrl('tenant/settings/status/update-name'),
-            'status_delete'        => $this->config->routeUrl('tenant/settings/status/delete'),
-            'category_create'      => $this->config->routeUrl('tenant/settings/category/create'),
-            'category_update'      => $this->config->routeUrl('tenant/settings/category/update'),
-            'category_delete'      => $this->config->routeUrl('tenant/settings/category/delete'),
-            'notify_renewal'       => $this->config->routeUrl('tenant/settings/notify-renewal'),
-            'notify_accident'      => $this->config->routeUrl('tenant/settings/notify-accident'),
+            'purpose_type_create'      => $this->config->routeUrl('tenant/settings/purpose-type/create'),
+            'purpose_type_update'      => $this->config->routeUrl('tenant/settings/purpose-type/update'),
+            'purpose_type_deactivate'  => $this->config->routeUrl('tenant/settings/purpose-type/deactivate'),
+            'purpose_type_activate'    => $this->config->routeUrl('tenant/settings/purpose-type/activate'),
+            'staff_create'             => $this->config->routeUrl('tenant/settings/staff/create'),
+            'staff_update'             => $this->config->routeUrl('tenant/settings/staff/update'),
+            'staff_delete'             => $this->config->routeUrl('tenant/settings/staff/delete'),
+            'status_create'            => $this->config->routeUrl('tenant/settings/status/create'),
+            'status_update_name'       => $this->config->routeUrl('tenant/settings/status/update-name'),
+            'status_deactivate'        => $this->config->routeUrl('tenant/settings/status/deactivate'),
+            'status_activate'          => $this->config->routeUrl('tenant/settings/status/activate'),
+            'category_create'          => $this->config->routeUrl('tenant/settings/category/create'),
+            'category_update'          => $this->config->routeUrl('tenant/settings/category/update'),
+            'category_deactivate'      => $this->config->routeUrl('tenant/settings/category/deactivate'),
+            'category_activate'        => $this->config->routeUrl('tenant/settings/category/activate'),
+            'procedure_method_create'      => $this->config->routeUrl('tenant/settings/procedure-method/create'),
+            'procedure_method_update'      => $this->config->routeUrl('tenant/settings/procedure-method/update'),
+            'procedure_method_deactivate'  => $this->config->routeUrl('tenant/settings/procedure-method/deactivate'),
+            'procedure_method_activate'    => $this->config->routeUrl('tenant/settings/procedure-method/activate'),
+            'notify_renewal'               => $this->config->routeUrl('tenant/settings/notify-renewal'),
+            'notify_accident'              => $this->config->routeUrl('tenant/settings/notify-accident'),
+            'user_update_display_name'     => $this->config->routeUrl('tenant/settings/user/update-display-name'),
         ];
-
-        $allUsers = $this->fetchAllActiveUsers();
 
         Responses::html(TenantSettingsView::render(
             $auth,
@@ -118,13 +155,140 @@ final class TenantSettingsController
             $flashSuccess,
             ControllerLayoutHelper::build($this->guard, $this->config, 'settings'),
             $purposeTypes,
-            $staffMappings,
+            $staffList,
             $renewalCaseStatuses,
             $productCategories,
             $masterCsrfs,
             $masterUrls,
-            $allUsers
+            $accidentCaseStatuses,
+            $tenantUsers,
+            $procedureMethods
         ));
+    }
+
+    // ---- 手続方法マスタ ----
+
+    public function procedureMethodCreate(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+        $this->assertAdmin($auth);
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_procedure_method_create', $token)) {
+            $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
+            Responses::redirect($this->settingsRedirectUrl('procedure'));
+        }
+
+        $label = trim((string) ($_POST['label'] ?? ''));
+        if ($label === '') {
+            $this->guard->session()->setFlash('error', '表示名は必須です。');
+            Responses::redirect($this->settingsRedirectUrl('procedure'));
+        }
+
+        try {
+            $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            (new ProcedureMethodRepository($tenantPdo))->create($label);
+            $this->guard->session()->setFlash('success', '手続方法を追加しました。');
+        } catch (Throwable $e) {
+            $msg = $e->getMessage();
+            if (str_contains($msg, 'Duplicate') || str_contains($msg, 'duplicate')) {
+                $this->guard->session()->setFlash('error', '「' . $label . '」は既に登録されています。');
+            } else {
+                $this->guard->session()->setFlash('error', '手続方法の追加に失敗しました。');
+            }
+        }
+
+        Responses::redirect($this->settingsRedirectUrl('procedure'));
+    }
+
+    public function procedureMethodUpdate(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+        $this->assertAdmin($auth);
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_procedure_method_update', $token)) {
+            $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
+            Responses::redirect($this->settingsRedirectUrl('procedure'));
+        }
+
+        $id    = (int) ($_POST['id'] ?? 0);
+        $label = trim((string) ($_POST['label'] ?? ''));
+
+        if ($id <= 0 || $label === '') {
+            $this->guard->session()->setFlash('error', 'IDと表示名は必須です。');
+            Responses::redirect($this->settingsRedirectUrl('procedure'));
+        }
+
+        try {
+            $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $updated = (new ProcedureMethodRepository($tenantPdo))->update($id, $label);
+            if ($updated > 0) {
+                $this->guard->session()->setFlash('success', '手続方法を更新しました。');
+            } else {
+                $this->guard->session()->setFlash('error', '更新対象が見つかりません。');
+            }
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '手続方法の更新に失敗しました。');
+        }
+
+        Responses::redirect($this->settingsRedirectUrl('procedure'));
+    }
+
+    public function procedureMethodDeactivate(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+        $this->assertAdmin($auth);
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_procedure_method_deactivate', $token)) {
+            $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
+            Responses::redirect($this->settingsRedirectUrl('procedure'));
+        }
+
+        $id = (int) ($_POST['id'] ?? 0);
+        if ($id <= 0) {
+            $this->guard->session()->setFlash('error', 'IDが指定されていません。');
+            Responses::redirect($this->settingsRedirectUrl('procedure'));
+        }
+
+        try {
+            $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            (new ProcedureMethodRepository($tenantPdo))->setActive($id, 0);
+            $this->guard->session()->setFlash('success', '手続方法を無効化しました。');
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '手続方法の無効化に失敗しました。');
+        }
+
+        Responses::redirect($this->settingsRedirectUrl('procedure'));
+    }
+
+    public function procedureMethodActivate(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+        $this->assertAdmin($auth);
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_procedure_method_activate', $token)) {
+            $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
+            Responses::redirect($this->settingsRedirectUrl('procedure'));
+        }
+
+        $id = (int) ($_POST['id'] ?? 0);
+        if ($id <= 0) {
+            $this->guard->session()->setFlash('error', 'IDが指定されていません。');
+            Responses::redirect($this->settingsRedirectUrl('procedure'));
+        }
+
+        try {
+            $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            (new ProcedureMethodRepository($tenantPdo))->setActive($id, 1);
+            $this->guard->session()->setFlash('success', '手続方法を有効化しました。');
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '手続方法の有効化に失敗しました。');
+        }
+
+        Responses::redirect($this->settingsRedirectUrl('procedure'));
     }
 
     // ---- 用件区分マスタ ----
@@ -194,13 +358,13 @@ final class TenantSettingsController
         Responses::redirect($this->settingsRedirectUrl());
     }
 
-    public function purposeTypeDelete(): void
+    public function purposeTypeDeactivate(): void
     {
         $auth = $this->guard->requireAuthenticated();
         $this->assertAdmin($auth);
 
         $token = (string) ($_POST['_csrf_token'] ?? '');
-        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_purpose_type_delete', $token)) {
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_purpose_type_deactivate', $token)) {
             $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
             Responses::redirect($this->settingsRedirectUrl());
         }
@@ -213,10 +377,38 @@ final class TenantSettingsController
 
         try {
             $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            (new ActivityPurposeTypeRepository($tenantPdo))->delete($code);
-            $this->guard->session()->setFlash('success', '用件区分を削除しました。');
+            (new ActivityPurposeTypeRepository($tenantPdo))->setActive($code, 0);
+            $this->guard->session()->setFlash('success', '用件区分を無効化しました。');
         } catch (Throwable) {
-            $this->guard->session()->setFlash('error', '用件区分の削除に失敗しました。');
+            $this->guard->session()->setFlash('error', '用件区分の無効化に失敗しました。');
+        }
+
+        Responses::redirect($this->settingsRedirectUrl());
+    }
+
+    public function purposeTypeActivate(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+        $this->assertAdmin($auth);
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_purpose_type_activate', $token)) {
+            $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
+            Responses::redirect($this->settingsRedirectUrl());
+        }
+
+        $code = trim((string) ($_POST['code'] ?? ''));
+        if ($code === '') {
+            $this->guard->session()->setFlash('error', 'コードが指定されていません。');
+            Responses::redirect($this->settingsRedirectUrl());
+        }
+
+        try {
+            $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            (new ActivityPurposeTypeRepository($tenantPdo))->setActive($code, 1);
+            $this->guard->session()->setFlash('success', '用件区分を有効化しました。');
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '用件区分の有効化に失敗しました。');
         }
 
         Responses::redirect($this->settingsRedirectUrl());
@@ -235,20 +427,23 @@ final class TenantSettingsController
             Responses::redirect($this->settingsRedirectUrl());
         }
 
-        $sjnetCode   = trim((string) ($_POST['sjnet_code'] ?? ''));
         $staffName   = trim((string) ($_POST['staff_name'] ?? ''));
-        $isActive    = (int) isset($_POST['is_active']);
-        $note        = trim((string) ($_POST['note'] ?? ''));
+        $isSales     = isset($_POST['is_sales']) ? 1 : 0;
+        $isOffice    = isset($_POST['is_office']) ? 1 : 0;
+        $sjnetCode   = trim((string) ($_POST['sjnet_code'] ?? ''));
+        $isActive    = isset($_POST['is_active']) ? 1 : 0;
+        $sortOrder   = (int) ($_POST['sort_order'] ?? 0);
+        $linkedUserId = (int) ($_POST['user_id'] ?? 0) ?: null;
         $actorUserId = (int) ($auth['user_id'] ?? 0);
 
-        if ($sjnetCode === '' || $staffName === '') {
-            $this->guard->session()->setFlash('error', 'SJNETコードと担当者名は必須です。');
+        if ($staffName === '') {
+            $this->guard->session()->setFlash('error', '担当者名は必須です。');
             Responses::redirect($this->settingsRedirectUrl());
         }
 
         try {
             $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            (new StaffSjnetMappingRepository($tenantPdo))->create($sjnetCode, $staffName, 0, $isActive, $note !== '' ? $note : null, $actorUserId);
+            (new StaffRepository($tenantPdo))->create($staffName, $isSales, $isOffice, $linkedUserId, $sjnetCode !== '' ? $sjnetCode : null, $isActive, $sortOrder, $actorUserId);
             $this->guard->session()->setFlash('success', '担当者を登録しました。');
         } catch (Throwable $e) {
             $msg = $e->getMessage();
@@ -274,20 +469,23 @@ final class TenantSettingsController
         }
 
         $id          = (int) ($_POST['id'] ?? 0);
-        $sjnetCode   = trim((string) ($_POST['sjnet_code'] ?? ''));
         $staffName   = trim((string) ($_POST['staff_name'] ?? ''));
-        $isActive    = (int) isset($_POST['is_active']);
-        $note        = trim((string) ($_POST['note'] ?? ''));
+        $isSales     = isset($_POST['is_sales']) ? 1 : 0;
+        $isOffice    = isset($_POST['is_office']) ? 1 : 0;
+        $sjnetCode   = trim((string) ($_POST['sjnet_code'] ?? ''));
+        $isActive    = isset($_POST['is_active']) ? 1 : 0;
+        $sortOrder   = (int) ($_POST['sort_order'] ?? 0);
+        $linkedUserId = (int) ($_POST['user_id'] ?? 0) ?: null;
         $actorUserId = (int) ($auth['user_id'] ?? 0);
 
-        if ($id <= 0 || $sjnetCode === '' || $staffName === '') {
+        if ($id <= 0 || $staffName === '') {
             $this->guard->session()->setFlash('error', '入力値が不正です。');
             Responses::redirect($this->settingsRedirectUrl());
         }
 
         try {
             $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $updated = (new StaffSjnetMappingRepository($tenantPdo))->update($id, $sjnetCode, $staffName, 0, $isActive, $note !== '' ? $note : null, $actorUserId);
+            $updated = (new StaffRepository($tenantPdo))->update($id, $staffName, $isSales, $isOffice, $linkedUserId, $sjnetCode !== '' ? $sjnetCode : null, $isActive, $sortOrder, $actorUserId);
             if ($updated > 0) {
                 $this->guard->session()->setFlash('success', '担当者を更新しました。');
             } else {
@@ -324,7 +522,7 @@ final class TenantSettingsController
 
         try {
             $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            (new StaffSjnetMappingRepository($tenantPdo))->delete($id);
+            (new StaffRepository($tenantPdo))->delete($id);
             $this->guard->session()->setFlash('success', '担当者を削除しました。');
         } catch (Throwable) {
             $this->guard->session()->setFlash('error', '担当者の削除に失敗しました。');
@@ -347,7 +545,12 @@ final class TenantSettingsController
         }
 
         $displayName = trim((string) ($_POST['display_name'] ?? ''));
+        $caseType    = trim((string) ($_POST['case_type'] ?? 'renewal'));
         $actorUserId = (int) ($auth['user_id'] ?? 0);
+
+        if (!in_array($caseType, ['renewal', 'accident'], true)) {
+            $caseType = 'renewal';
+        }
 
         if ($displayName === '') {
             $this->guard->session()->setFlash('error', '表示名は必須です。');
@@ -356,7 +559,7 @@ final class TenantSettingsController
 
         try {
             $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            (new RenewalCaseStatusRepository($tenantPdo))->create($displayName, $actorUserId);
+            (new CaseStatusRepository($tenantPdo))->create($caseType, $displayName, $actorUserId);
             $this->guard->session()->setFlash('success', '対応状況を追加しました。');
         } catch (Throwable) {
             $this->guard->session()->setFlash('error', '対応状況の追加に失敗しました。');
@@ -387,11 +590,11 @@ final class TenantSettingsController
 
         try {
             $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $updated = (new RenewalCaseStatusRepository($tenantPdo))->updateDisplayName($id, $displayName, $actorUserId);
+            $updated = (new CaseStatusRepository($tenantPdo))->updateDisplayName($id, $displayName, $actorUserId);
             if ($updated > 0) {
                 $this->guard->session()->setFlash('success', '対応状況を更新しました。');
             } else {
-                $this->guard->session()->setFlash('error', '更新対象が見つからないか、固定ステータスです。');
+                $this->guard->session()->setFlash('error', '更新対象が見つからないか、システム固定ステータスです。');
             }
         } catch (Throwable) {
             $this->guard->session()->setFlash('error', '対応状況の更新に失敗しました。');
@@ -400,13 +603,13 @@ final class TenantSettingsController
         Responses::redirect($this->settingsRedirectUrl());
     }
 
-    public function statusDelete(): void
+    public function statusDeactivate(): void
     {
         $auth = $this->guard->requireAuthenticated();
         $this->assertAdmin($auth);
 
         $token = (string) ($_POST['_csrf_token'] ?? '');
-        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_status_delete', $token)) {
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_status_deactivate', $token)) {
             $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
             Responses::redirect($this->settingsRedirectUrl());
         }
@@ -419,14 +622,46 @@ final class TenantSettingsController
 
         try {
             $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $deleted = (new RenewalCaseStatusRepository($tenantPdo))->delete($id);
-            if ($deleted > 0) {
-                $this->guard->session()->setFlash('success', '対応状況を削除しました。');
+            $updated = (new CaseStatusRepository($tenantPdo))->setActive($id, 0);
+            if ($updated > 0) {
+                $this->guard->session()->setFlash('success', '対応状況を無効化しました。');
             } else {
-                $this->guard->session()->setFlash('error', '削除対象が見つからないか、固定ステータスのため削除できません。');
+                $this->guard->session()->setFlash('error', '対象が見つからないか、システム固定ステータスのため無効化できません。');
             }
         } catch (Throwable) {
-            $this->guard->session()->setFlash('error', '対応状況の削除に失敗しました。');
+            $this->guard->session()->setFlash('error', '対応状況の無効化に失敗しました。');
+        }
+
+        Responses::redirect($this->settingsRedirectUrl());
+    }
+
+    public function statusActivate(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+        $this->assertAdmin($auth);
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_status_activate', $token)) {
+            $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
+            Responses::redirect($this->settingsRedirectUrl());
+        }
+
+        $id = (int) ($_POST['id'] ?? 0);
+        if ($id <= 0) {
+            $this->guard->session()->setFlash('error', 'IDが指定されていません。');
+            Responses::redirect($this->settingsRedirectUrl());
+        }
+
+        try {
+            $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $updated = (new CaseStatusRepository($tenantPdo))->setActive($id, 1);
+            if ($updated > 0) {
+                $this->guard->session()->setFlash('success', '対応状況を有効化しました。');
+            } else {
+                $this->guard->session()->setFlash('error', '対象が見つからないか、システム固定ステータスのため有効化できません。');
+            }
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '対応状況の有効化に失敗しました。');
         }
 
         Responses::redirect($this->settingsRedirectUrl());
@@ -506,13 +741,13 @@ final class TenantSettingsController
         Responses::redirect($this->settingsRedirectUrl());
     }
 
-    public function categoryDelete(): void
+    public function categoryDeactivate(): void
     {
         $auth = $this->guard->requireAuthenticated();
         $this->assertAdmin($auth);
 
         $token = (string) ($_POST['_csrf_token'] ?? '');
-        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_category_delete', $token)) {
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_category_deactivate', $token)) {
             $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
             Responses::redirect($this->settingsRedirectUrl());
         }
@@ -525,10 +760,38 @@ final class TenantSettingsController
 
         try {
             $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            (new ProductCategoryRepository($tenantPdo))->delete($id);
-            $this->guard->session()->setFlash('success', '種目を削除しました。');
+            (new ProductCategoryRepository($tenantPdo))->setActive($id, 0);
+            $this->guard->session()->setFlash('success', '種目を無効化しました。');
         } catch (Throwable) {
-            $this->guard->session()->setFlash('error', '種目の削除に失敗しました。');
+            $this->guard->session()->setFlash('error', '種目の無効化に失敗しました。');
+        }
+
+        Responses::redirect($this->settingsRedirectUrl());
+    }
+
+    public function categoryActivate(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+        $this->assertAdmin($auth);
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_category_activate', $token)) {
+            $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
+            Responses::redirect($this->settingsRedirectUrl());
+        }
+
+        $id = (int) ($_POST['id'] ?? 0);
+        if ($id <= 0) {
+            $this->guard->session()->setFlash('error', 'IDが指定されていません。');
+            Responses::redirect($this->settingsRedirectUrl());
+        }
+
+        try {
+            $tenantPdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            (new ProductCategoryRepository($tenantPdo))->setActive($id, 1);
+            $this->guard->session()->setFlash('success', '種目を有効化しました。');
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '種目の有効化に失敗しました。');
         }
 
         Responses::redirect($this->settingsRedirectUrl());
@@ -789,11 +1052,70 @@ final class TenantSettingsController
     /**
      * @param array<string, mixed> $auth
      */
-    private function settingsRedirectUrl(): string
+    // ---- ユーザー管理 ----
+
+    public function userUpdateDisplayName(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+        $this->assertAdmin($auth);
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('tenant_user_update_display_name', $token)) {
+            $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
+            Responses::redirect($this->settingsRedirectUrl());
+        }
+
+        $userId      = (int) ($_POST['user_id'] ?? 0);
+        $displayName = trim((string) ($_POST['display_name'] ?? ''));
+        $tenantCode  = (string) ($auth['tenant_code'] ?? '');
+
+        if ($userId <= 0 || $tenantCode === '') {
+            $this->guard->session()->setFlash('error', '入力値が不正です。');
+            Responses::redirect($this->settingsRedirectUrl());
+        }
+
+        try {
+            $commonPdo = $this->commonConnectionFactory->create();
+
+            // テナント所属確認
+            $chk = $commonPdo->prepare(
+                'SELECT 1 FROM user_tenants
+                 WHERE user_id = :user_id AND tenant_code = :tenant_code
+                   AND status = 1 AND is_deleted = 0 LIMIT 1'
+            );
+            $chk->bindValue(':user_id', $userId, \PDO::PARAM_INT);
+            $chk->bindValue(':tenant_code', $tenantCode);
+            $chk->execute();
+            if ($chk->fetchColumn() === false) {
+                $this->guard->session()->setFlash('error', '対象ユーザーが見つかりません。');
+                Responses::redirect($this->settingsRedirectUrl());
+            }
+
+            $newValue = $displayName !== '' ? $displayName : null;
+            $stmt = $commonPdo->prepare(
+                'UPDATE users SET display_name = :display_name, updated_by = :updated_by WHERE id = :id'
+            );
+            $stmt->bindValue(':display_name', $newValue, $newValue !== null ? \PDO::PARAM_STR : \PDO::PARAM_NULL);
+            $stmt->bindValue(':updated_by', (int) ($auth['user_id'] ?? 0), \PDO::PARAM_INT);
+            $stmt->bindValue(':id', $userId, \PDO::PARAM_INT);
+            $stmt->execute();
+
+            $this->guard->session()->setFlash('success', '業務表示名を更新しました。');
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '業務表示名の更新に失敗しました。');
+        }
+
+        Responses::redirect($this->settingsRedirectUrl());
+    }
+
+    private function settingsRedirectUrl(string $tabFallback = ''): string
     {
         $tab = trim((string) ($_POST['_tab'] ?? ''));
+        if ($tab === '') {
+            $tab = $tabFallback;
+        }
         $url = $this->config->routeUrl('tenant/settings');
-        return $tab !== '' ? $url . '?tab=' . urlencode($tab) : $url;
+        return $tab !== '' ? $url . '&tab=' . urlencode($tab) : $url;
     }
 
     private function assertAdmin(array $auth): void
@@ -848,38 +1170,4 @@ final class TenantSettingsController
         return (int) $text;
     }
 
-    /**
-     * @return array<int, string>  [user_id => name]
-     */
-    private function fetchAllActiveUsers(): array
-    {
-        try {
-            $pdo = $this->commonConnectionFactory->create();
-            $stmt = $pdo->prepare(
-                'SELECT id, name
-                 FROM users
-                 WHERE status = 1
-                   AND is_deleted = 0
-                 ORDER BY name ASC'
-            );
-            $stmt->execute();
-            $names = [];
-            $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-            if (is_array($rows)) {
-                foreach ($rows as $row) {
-                    if (!is_array($row)) {
-                        continue;
-                    }
-                    $id = (int) ($row['id'] ?? 0);
-                    $name = trim((string) ($row['name'] ?? ''));
-                    if ($id > 0 && $name !== '') {
-                        $names[$id] = $name;
-                    }
-                }
-            }
-            return $names;
-        } catch (\Throwable) {
-            return [];
-        }
-    }
 }

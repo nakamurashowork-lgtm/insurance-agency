@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS m_customer (
   postal_code         VARCHAR(20)     NULL COMMENT '郵便番号',
   address1            VARCHAR(255)    NULL COMMENT '住所1',
   address2            VARCHAR(255)    NULL COMMENT '住所2',
-  assigned_user_id    BIGINT UNSIGNED NULL COMMENT '主担当者(common.users.id)',
   status              VARCHAR(20)     NOT NULL DEFAULT 'active' COMMENT '状態(prospect/active/inactive/closed)',
   note                TEXT            NULL COMMENT '備考',
   is_deleted          TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '削除フラグ',
@@ -20,9 +19,8 @@ CREATE TABLE IF NOT EXISTS m_customer (
 
   PRIMARY KEY (id),
   KEY idx_m_customer_01 (customer_name),
-  KEY idx_m_customer_02 (assigned_user_id),
-  KEY idx_m_customer_03 (status),
-  KEY idx_m_customer_04 (is_deleted),
+  KEY idx_m_customer_02 (status),
+  KEY idx_m_customer_03 (is_deleted),
   CONSTRAINT chk_m_customer_01 CHECK (customer_type IN ('individual', 'corporate')),
   CONSTRAINT chk_m_customer_02 CHECK (status IN ('prospect', 'active', 'inactive', 'closed'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='顧客';

@@ -11,7 +11,7 @@ final class ActivityRepository
         'activity_date',
         'activity_type',
         'customer_name',
-        'staff_user_id',
+        'staff_id',
         'next_action_date',
     ];
 
@@ -59,18 +59,18 @@ final class ActivityRepository
                     a.next_action_date,
                     a.next_action_note,
                     a.result_type,
-                    a.staff_user_id,
+                    a.staff_id,
                     a.created_at,
                     a.updated_at,
                     mc.customer_name,
                     COALESCE(dr.is_submitted, 0) AS daily_is_submitted
              FROM t_activity a
-             INNER JOIN m_customer mc
+             LEFT JOIN m_customer mc
                      ON mc.id = a.customer_id
                     AND mc.is_deleted = 0
              LEFT JOIN t_daily_report dr
                      ON dr.report_date = a.activity_date
-                    AND dr.staff_user_id = a.staff_user_id
+                    AND dr.staff_user_id = a.staff_id
                     AND dr.is_deleted = 0'
             . $whereSql
             . $this->buildOrderBy($sort, $direction)
@@ -119,12 +119,12 @@ final class ActivityRepository
                     a.next_action_date,
                     a.next_action_note,
                     a.result_type,
-                    a.staff_user_id,
+                    a.staff_id,
                     a.created_at,
                     a.updated_at,
                     mc.customer_name
              FROM t_activity a
-             INNER JOIN m_customer mc
+             LEFT JOIN m_customer mc
                      ON mc.id = a.customer_id
                     AND mc.is_deleted = 0
              WHERE a.id = :id
@@ -147,12 +147,12 @@ final class ActivityRepository
                 (customer_id, contract_id, renewal_case_id, accident_case_id, sales_case_id,
                  activity_date, start_time, end_time, activity_type, purpose_type,
                  visit_place, interviewee_name, subject, content_summary, detail_text,
-                 next_action_date, next_action_note, result_type, staff_user_id)
+                 next_action_date, next_action_note, result_type, staff_id)
              VALUES
                 (:customer_id, :contract_id, :renewal_case_id, :accident_case_id, :sales_case_id,
                  :activity_date, :start_time, :end_time, :activity_type, :purpose_type,
                  :visit_place, :interviewee_name, :subject, :content_summary, :detail_text,
-                 :next_action_date, :next_action_note, :result_type, :staff_user_id)'
+                 :next_action_date, :next_action_note, :result_type, :staff_id)'
         );
         $this->bindActivityParams($stmt, $input, $actorUserId);
         $stmt->execute();
@@ -185,7 +185,7 @@ final class ActivityRepository
                 next_action_date  = :next_action_date,
                 next_action_note  = :next_action_note,
                 result_type       = :result_type,
-                staff_user_id     = :staff_user_id
+                staff_id     = :staff_id
              WHERE id = :id
                AND is_deleted = 0'
         );
@@ -212,8 +212,12 @@ final class ActivityRepository
      */
     public function fetchCustomers(int $limit = 1000): array
     {
+        // 「（社内・顧客なし）」を先頭に固定し、残りを customer_name 昇順で返す
         $stmt = $this->pdo->prepare(
-            'SELECT id, customer_name FROM m_customer WHERE is_deleted = 0 ORDER BY customer_name LIMIT :limit'
+            'SELECT id, customer_name FROM m_customer
+             WHERE is_deleted = 0
+             ORDER BY (customer_name = \'（社内・顧客なし）\') DESC, customer_name ASC
+             LIMIT :limit'
         );
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
@@ -254,10 +258,10 @@ final class ActivityRepository
             $params['activity_type'] = $activityType;
         }
 
-        $staffUserId = trim((string) ($criteria['staff_user_id'] ?? ''));
+        $staffUserId = trim((string) ($criteria['staff_id'] ?? ''));
         if ($staffUserId !== '' && ctype_digit($staffUserId)) {
-            $sql .= ' AND a.staff_user_id = :staff_user_id';
-            $params['staff_user_id'] = (int) $staffUserId;
+            $sql .= ' AND a.staff_id = :staff_id';
+            $params['staff_id'] = (int) $staffUserId;
         }
 
         $dailyReportStatus = trim((string) ($criteria['daily_report_status'] ?? ''));
@@ -278,12 +282,12 @@ final class ActivityRepository
         $stmt = $this->pdo->prepare(
             'SELECT COUNT(*)
              FROM t_activity a
-             INNER JOIN m_customer mc
+             LEFT JOIN m_customer mc
                      ON mc.id = a.customer_id
                     AND mc.is_deleted = 0
              LEFT JOIN t_daily_report dr
                      ON dr.report_date = a.activity_date
-                    AND dr.staff_user_id = a.staff_user_id
+                    AND dr.staff_user_id = a.staff_id
                     AND dr.is_deleted = 0'
             . $whereSql
         );
@@ -326,7 +330,7 @@ final class ActivityRepository
         };
 
         $customerId = $nullableInt($input['customer_id'] ?? null);
-        $staffUserId = $nullableInt($input['staff_user_id'] ?? null) ?? $actorUserId;
+        $staffUserId = $nullableInt($input['staff_id'] ?? null) ?? $actorUserId;
 
         $stmt->bindValue(':customer_id', $customerId, $customerId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
         $stmt->bindValue(':contract_id', $nullableInt($input['contract_id'] ?? null), PDO::PARAM_INT);
@@ -346,6 +350,6 @@ final class ActivityRepository
         $stmt->bindValue(':next_action_date', $nullableStr($input['next_action_date'] ?? null));
         $stmt->bindValue(':next_action_note', $nullableStr($input['next_action_note'] ?? null));
         $stmt->bindValue(':result_type', $nullableStr($input['result_type'] ?? null));
-        $stmt->bindValue(':staff_user_id', $staffUserId, PDO::PARAM_INT);
+        $stmt->bindValue(':staff_id', $staffUserId, PDO::PARAM_INT);
     }
 }

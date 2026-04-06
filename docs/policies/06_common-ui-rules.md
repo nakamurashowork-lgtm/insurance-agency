@@ -191,6 +191,126 @@
 
 ---
 
+## 12. 一覧画面共通テンプレート（ListPageRenderer）
+
+### 12-1. 概要
+
+`src/Presentation/View/ListPageRenderer.php` に、全一覧画面で共通するHTML生成ロジックを集約している。  
+各 `*ListView` クラスは画面固有の部分（フィルター内容・テーブル定義・ダイアログ）のみを持ち、
+共通構造はすべて `ListPageRenderer`（エイリアス `LP`）に委譲する。
+
+### 12-2. 対象画面
+
+以下の6画面が `ListPageRenderer` を使用している。
+
+| 画面 | Viewクラス |
+|------|-----------|
+| 満期一覧 | `RenewalCaseListView` |
+| 顧客一覧 | `CustomerListView` |
+| 事故案件一覧 | `AccidentCaseListView` |
+| 実績管理一覧 | `SalesPerformanceListView` |
+| 活動一覧 | `ActivityListView` |
+| 見込案件一覧 | `SalesCaseListView` |
+
+### 12-3. 基本的な使い方
+
+```php
+use App\Presentation\View\ListPageRenderer as LP;
+use App\Presentation\View\ListViewHelper;
+
+// 1. ページ状態を初期化
+$perPage    = (int) ($listState['per_page'] ?? ListViewHelper::DEFAULT_PER_PAGE);
+$pager      = ListViewHelper::buildPager((int) ($listState['page'] ?? '1'), $perPage, $total);
+$listState['page'] = (string) ($pager['currentPage'] ?? 1);
+
+// 2. ツールバー・ページャーを生成
+$topToolbar  = LP::toolbar($url, $criteria, $listState, $pager, $total, $perPage, $sortSummary);
+$bottomPager = LP::bottomPager($url, $criteria, $listState, $pager);
+
+// 3. フィルターフォームHTML・テーブルHTMLを画面固有で組み立て
+$filterFormHtml = '<form method="get" ...> ... </form>';
+$tableHtml      = '<div class="table-wrap"><table ...>...</table></div>';
+
+// 4. ページ全体を組み立て
+$content = '<div class="list-page-frame">'
+    . LP::pageHeader('画面タイトル', '<button ...>ボタン</button>')
+    . $noticeHtml
+    . LP::filterCard($filterFormHtml, $filterOpen)
+    . LP::tableCard($topToolbar, $tableHtml, $bottomPager)
+    . '</div>'
+    . $dialogHtml       // ダイアログはフレームの外
+    . '<script>...</script>';
+```
+
+### 12-4. 提供メソッド一覧
+
+#### レイアウト部品
+
+| メソッド | 説明 |
+|---------|------|
+| `pageHeader(title, actionsHtml)` | `list-page-header` ブロックを生成（`list-page-frame` の開閉は呼び出し側） |
+| `filterCard(formHtml, filterOpen, errorHtml)` | 折りたたみ可能な検索条件カードを生成 |
+| `tableCard(toolbarHtml, tableHtml, bottomPagerHtml)` | テーブルを包む `div.card` を生成 |
+
+#### ツールバー・ページング
+
+| メソッド | 説明 |
+|---------|------|
+| `toolbar(url, criteria, listState, pager, total, perPage, sortSummary)` | 件数表示 + 表示件数切替 + 上部ページャー。`sortSummary` は省略可 |
+| `bottomPager(url, criteria, listState, pager)` | 下部ページャー（1ページのみなら空文字） |
+| `pager(url, criteria, listState, pager)` | ページャーナビ単体 |
+| `perPageForm(url, criteria, listState, perPage)` | 表示件数切替フォーム |
+| `summaryText(total, pager)` | 件数表示テキスト（例: 「25件中 11-20件を表示」） |
+
+#### ソートリンク
+
+| メソッド | 説明 |
+|---------|------|
+| `sortLink(label, column, url, criteria, listState)` | ソート可能なカラムヘッダーリンクを生成 |
+
+#### クエリパラメータ・URL
+
+| メソッド | 説明 |
+|---------|------|
+| `queryParams(criteria, listState, includePage, includeSort)` | 一覧URLのクエリパラメータ配列を組み立て |
+| `hiddenInputs(params)` | パラメータ配列を `<input type="hidden">` 群に変換 |
+| `formAction(url)` | URLのパス部分のみを返す（フォーム `action` 用） |
+| `routeInput(url)` | URLのクエリ文字列パラメータを hidden input 群に変換（ルーティング維持用） |
+
+### 12-5. HTML構造の標準パターン
+
+一覧画面のHTML構造は以下に統一する。
+
+```html
+<div class="list-page-frame">
+  <div class="list-page-header">
+    <h1 class="title">画面タイトル</h1>
+    <div class="list-page-header-actions"><!-- ボタン群 --></div>
+  </div>
+  <!-- フラッシュメッセージ -->
+  <details class="card details-panel list-filter-card">
+    <summary class="list-filter-toggle">...</summary>
+    <!-- フィルターフォーム -->
+  </details>
+  <div class="card">
+    <!-- ツールバー（件数 + 表示件数切替 + 上部ページャー） -->
+    <div class="table-wrap"><table>...</table></div>
+    <!-- 下部ページャー -->
+  </div>
+</div>
+<!-- ダイアログ（フレームの外） -->
+<!-- スクリプト -->
+```
+
+### 12-6. 新規一覧画面の追加手順
+
+1. 新しい `*ListView` クラスを作成し、`use App\Presentation\View\ListPageRenderer as LP;` を追加
+2. `render()` メソッド内で `LP::toolbar()` / `LP::bottomPager()` / `LP::filterCard()` / `LP::tableCard()` / `LP::pageHeader()` を使って骨格を組む
+3. フィルターフォーム内容とテーブル定義のみ画面固有で実装する
+4. ダイアログが必要な場合は `list-page-frame` の外に配置する
+
+---
+
 ## 付録A. 現行画面との主な未整合メモ（初回整理）
 
 * 一覧右上コントロール群の幅、余白にばらつきがある

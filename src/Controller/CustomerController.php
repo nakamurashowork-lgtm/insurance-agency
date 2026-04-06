@@ -7,13 +7,11 @@ use App\AppConfig;
 use App\Domain\Customer\CustomerRepository;
 use App\Domain\SalesCase\SalesCaseRepository;
 use App\Http\Responses;
-use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
 use App\Presentation\CustomerDetailView;
 use App\Presentation\CustomerListView;
 use App\Presentation\View\ListViewHelper;
 use App\Security\AuthGuard;
-use PDO;
 use Throwable;
 
 final class CustomerController
@@ -28,7 +26,6 @@ final class CustomerController
     public function __construct(
         private AuthGuard $guard,
         private TenantConnectionFactory $tenantConnectionFactory,
-        private CommonConnectionFactory $commonConnectionFactory,
         private AppConfig $config
     ) {
     }
@@ -70,8 +67,6 @@ final class CustomerController
             $listError = '顧客一覧の取得に失敗しました。接続設定を確認してください。';
         }
 
-        $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
-
         Responses::html(CustomerListView::render(
             $rows,
             $total,
@@ -87,7 +82,6 @@ final class CustomerController
             $flashSuccess,
             $openModal,
             $createDraft,
-            $staffUsers,
             ControllerLayoutHelper::build($this->guard, $this->config, 'customer')
         ));
     }
@@ -120,19 +114,10 @@ final class CustomerController
                 Responses::redirect($listUrl);
             }
 
-            $assignedUid = (int) ($detail['assigned_user_id'] ?? 0);
-            if ($assignedUid > 0) {
-                $allUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
-                $userMap = array_column($allUsers, 'name', 'id');
-                $detail['assigned_user_name'] = $userMap[$assignedUid] ?? '';
-            } else {
-                $detail['assigned_user_name'] = '';
-            }
-
-            $contracts = $repository->findContracts($customerId);
-            $activities = $repository->findActivities($customerId, 5);
-            $salesCases = (new SalesCaseRepository($pdo))->findByCustomerId($customerId);
-            $staffUsers = $this->fetchAssignableUsers((string) ($auth['tenant_code'] ?? ''));
+            $contracts     = $repository->findContracts($customerId);
+            $activities    = $repository->findActivities($customerId, 5);
+            $accidentCases = $repository->findAccidentCases($customerId);
+            $salesCases    = (new SalesCaseRepository($pdo))->findByCustomerId($customerId);
             $flashError   = $this->guard->session()->consumeFlash('error');
             $flashSuccess = $this->guard->session()->consumeFlash('success');
             $editDraft    = $this->consumeEditDraft($customerId);
@@ -144,6 +129,7 @@ final class CustomerController
                 $detail,
                 $contracts,
                 $activities,
+                $accidentCases,
                 $salesCases,
                 $listUrl,
                 $detailUrl,
@@ -154,7 +140,6 @@ final class CustomerController
                 $this->config->routeUrl('sales-case/detail'),
                 $this->config->routeUrl('customer/update'),
                 $editCsrf,
-                $staffUsers,
                 $editDraft,
                 $editErrors,
                 $flashError,
@@ -197,13 +182,6 @@ final class CustomerController
 
         $input  = $this->collectUpdateInput();
         $errors = $this->validateUpdateInput($input);
-        if ($input['assigned_user_id'] !== null) {
-            $tenantCode = (string) ($auth['tenant_code'] ?? '');
-            $validIds   = array_column($this->fetchAssignableUsers($tenantCode), 'id');
-            if (!in_array($input['assigned_user_id'], $validIds, true)) {
-                $input['assigned_user_id'] = null;
-            }
-        }
 
         if ($errors !== []) {
             $this->guard->session()->setFlash('error', implode(' ', $errors));
@@ -238,14 +216,6 @@ final class CustomerController
 
         $input  = $this->collectCreateInput();
         $errors = $this->validateCreateInput($input);
-        // assigned_user_id をテナント所属ユーザーのみに限定（他テナントIDの直打ち防止）
-        if ($input['assigned_user_id'] !== null) {
-            $tenantCode = (string) ($auth['tenant_code'] ?? '');
-            $validIds   = array_column($this->fetchAssignableUsers($tenantCode), 'id');
-            if (!in_array($input['assigned_user_id'], $validIds, true)) {
-                $input['assigned_user_id'] = null;
-            }
-        }
 
         if ($errors !== []) {
             $this->guard->session()->setFlash('error', implode(' ', $errors));
@@ -275,12 +245,8 @@ final class CustomerController
      */
     private function extractCriteria(array $source): array
     {
-        $assignedUserId = (int) ($source['assigned_user_id'] ?? 0);
         return [
-            'customer_name'    => trim((string) ($source['customer_name'] ?? '')),
-            'phone'            => trim((string) ($source['phone'] ?? '')),
-            'email'            => trim((string) ($source['email'] ?? '')),
-            'assigned_user_id' => $assignedUserId > 0 ? (string) $assignedUserId : '',
+            'customer_name' => trim((string) ($source['customer_name'] ?? '')),
         ];
     }
 
@@ -378,7 +344,6 @@ final class CustomerController
             'postal_code'        => $this->nullableText($_POST['postal_code'] ?? null),
             'address1'           => $this->nullableText($_POST['address1'] ?? null),
             'address2'           => $this->nullableText($_POST['address2'] ?? null),
-            'assigned_user_id'   => $this->nullableInt($_POST['assigned_user_id'] ?? null),
             'note'               => $this->nullableText($_POST['note'] ?? null),
         ];
     }
@@ -443,16 +408,7 @@ final class CustomerController
     private function collectUpdateInput(): array
     {
         return [
-            'customer_type'      => trim((string) ($_POST['customer_type'] ?? '')),
-            'customer_name'      => trim((string) ($_POST['customer_name'] ?? '')),
-            'customer_name_kana' => $this->nullableText($_POST['customer_name_kana'] ?? null),
-            'phone'              => $this->nullableText($_POST['phone'] ?? null),
-            'email'              => $this->nullableText($_POST['email'] ?? null),
-            'postal_code'        => $this->nullableText($_POST['postal_code'] ?? null),
-            'address1'           => $this->nullableText($_POST['address1'] ?? null),
-            'address2'           => $this->nullableText($_POST['address2'] ?? null),
-            'assigned_user_id'   => $this->nullableInt($_POST['assigned_user_id'] ?? null),
-            'note'               => $this->nullableText($_POST['note'] ?? null),
+            'note' => $this->nullableText($_POST['note'] ?? null),
         ];
     }
 
@@ -462,28 +418,7 @@ final class CustomerController
      */
     private function validateUpdateInput(array $input): array
     {
-        $errors = [];
-
-        $customerType = (string) ($input['customer_type'] ?? '');
-        if (!in_array($customerType, ['individual', 'corporate'], true)) {
-            $errors[] = '顧客区分を選択してください。';
-        }
-
-        $customerName = (string) ($input['customer_name'] ?? '');
-        if ($customerName === '') {
-            $errors[] = '顧客名は必須です。';
-        } elseif (mb_strlen($customerName) > 200) {
-            $errors[] = '顧客名は200文字以内で入力してください。';
-        }
-
-        $email = $input['email'] ?? null;
-        if ($email !== null && $email !== '') {
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $errors[] = 'メールアドレスの形式が正しくありません。';
-            }
-        }
-
-        return $errors;
+        return [];
     }
 
     /**
@@ -552,53 +487,4 @@ final class CustomerController
         return is_array($decoded) ? $decoded : null;
     }
 
-    /**
-     * @return array<int, array{id: int, name: string}>
-     */
-    private function fetchAssignableUsers(string $tenantCode): array
-    {
-        $tenantCode = trim($tenantCode);
-        if ($tenantCode === '') {
-            return [];
-        }
-
-        try {
-            $pdo = $this->commonConnectionFactory->create();
-            $stmt = $pdo->prepare(
-                'SELECT u.id, u.name
-                 FROM user_tenants ut
-                 INNER JOIN users u ON u.id = ut.user_id
-                 WHERE ut.tenant_code = :tenant_code
-                   AND ut.status = 1
-                   AND ut.is_deleted = 0
-                   AND u.status = 1
-                   AND u.is_deleted = 0
-                 ORDER BY u.name ASC, u.id ASC'
-            );
-            $stmt->bindValue(':tenant_code', $tenantCode);
-            $stmt->execute();
-
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            if (!is_array($rows)) {
-                return [];
-            }
-
-            $result = [];
-            foreach ($rows as $row) {
-                if (!is_array($row)) {
-                    continue;
-                }
-
-                $id   = (int) ($row['id'] ?? 0);
-                $name = trim((string) ($row['name'] ?? ''));
-                if ($id > 0 && $name !== '') {
-                    $result[] = ['id' => $id, 'name' => $name];
-                }
-            }
-
-            return $result;
-        } catch (Throwable) {
-            return [];
-        }
-    }
 }

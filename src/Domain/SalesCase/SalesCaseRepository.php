@@ -59,10 +59,10 @@ final class SalesCaseRepository
             $params[':customer_name'] = '%' . $customerName . '%';
         }
 
-        $staffUserId = trim((string) ($criteria['staff_user_id'] ?? ''));
+        $staffUserId = trim((string) ($criteria['staff_id'] ?? ''));
         if ($staffUserId !== '' && ctype_digit($staffUserId) && (int) $staffUserId > 0) {
-            $where[] = 'sc.staff_user_id = :staff_user_id';
-            $params[':staff_user_id'] = (int) $staffUserId;
+            $where[] = 'sc.staff_id = :staff_id';
+            $params[':staff_id'] = (int) $staffUserId;
         }
 
         $status = trim((string) ($criteria['status'] ?? ''));
@@ -101,7 +101,7 @@ final class SalesCaseRepository
 
         $dataSql = "SELECT sc.id, sc.customer_id, sc.case_name, sc.case_type, sc.product_type,
                            sc.status, sc.prospect_rank, sc.expected_premium,
-                           sc.expected_contract_month, sc.staff_user_id, sc.next_action_date,
+                           sc.expected_contract_month, sc.staff_id, sc.next_action_date,
                            sc.created_at,
                            mc.customer_name
                     FROM t_sales_case sc
@@ -211,7 +211,7 @@ final class SalesCaseRepository
     {
         $stmt = $this->pdo->prepare(
             'SELECT a.id, a.activity_date, a.activity_type, a.subject, a.content_summary,
-                    a.next_action_date, a.staff_user_id
+                    a.next_action_date, a.staff_id
              FROM t_activity a
              WHERE a.sales_case_id = :sales_case_id AND a.is_deleted = 0
              ORDER BY a.activity_date DESC, a.id DESC
@@ -231,12 +231,12 @@ final class SalesCaseRepository
             'INSERT INTO t_sales_case
                 (customer_id, contract_id, case_name, case_type, product_type, status,
                  prospect_rank, expected_premium, expected_contract_month,
-                 referral_source, next_action_date, lost_reason, memo, staff_user_id,
+                 referral_source, next_action_date, lost_reason, memo, staff_id,
                  created_by, updated_by)
              VALUES
                 (:customer_id, :contract_id, :case_name, :case_type, :product_type, :status,
                  :prospect_rank, :expected_premium, :expected_contract_month,
-                 :referral_source, :next_action_date, :lost_reason, :memo, :staff_user_id,
+                 :referral_source, :next_action_date, :lost_reason, :memo, :staff_id,
                  :created_by, :updated_by)'
         );
         $this->bindInputValues($stmt, $input, $actorUserId);
@@ -264,7 +264,7 @@ final class SalesCaseRepository
                 next_action_date        = :next_action_date,
                 lost_reason             = :lost_reason,
                 memo                    = :memo,
-                staff_user_id           = :staff_user_id,
+                staff_id           = :staff_id,
                 updated_by              = :updated_by
              WHERE id = :id AND is_deleted = 0'
         );
@@ -301,7 +301,7 @@ final class SalesCaseRepository
         };
 
         $customerId  = $nullableInt($input['customer_id'] ?? null);
-        $staffUserId = $nullableInt($input['staff_user_id'] ?? null) ?? $actorUserId;
+        $staffUserId = $nullableInt($input['staff_id'] ?? null) ?? $actorUserId;
 
         $stmt->bindValue(':customer_id', $customerId, $customerId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
         $stmt->bindValue(':contract_id', $nullableInt($input['contract_id'] ?? null), PDO::PARAM_INT);
@@ -320,6 +320,6 @@ final class SalesCaseRepository
         $stmt->bindValue(':next_action_date', $nullableStr($input['next_action_date'] ?? null));
         $stmt->bindValue(':lost_reason', $nullableStr($input['lost_reason'] ?? null));
         $stmt->bindValue(':memo', $nullableStr($input['memo'] ?? null));
-        $stmt->bindValue(':staff_user_id', $staffUserId, PDO::PARAM_INT);
+        $stmt->bindValue(':staff_id', $staffUserId, PDO::PARAM_INT);
     }
 }

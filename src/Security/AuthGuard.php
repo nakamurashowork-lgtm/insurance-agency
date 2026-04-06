@@ -31,4 +31,19 @@ final class AuthGuard
 
         return $auth;
     }
+
+    /**
+     * Ensure the request is in the TOTP-pending state (Google auth done, TOTP not yet verified).
+     * Redirects to login if the session has no pending user.
+     */
+    public function requireTotpPending(): int
+    {
+        $pendingUserId = $this->session->getTotpPendingUserId();
+        if ($pendingUserId === null) {
+            $this->session->setFlash('error', 'セッションが無効です。もう一度ログインしてください。');
+            Responses::redirect($this->config->routeUrl('login'));
+        }
+
+        return $pendingUserId;
+    }
 }

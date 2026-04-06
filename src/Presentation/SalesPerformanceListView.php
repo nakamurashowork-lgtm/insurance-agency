@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Presentation;
 
 use App\Presentation\View\Layout;
+use App\Presentation\View\ListPageRenderer as LP;
 use App\Presentation\View\ListViewHelper;
 
 final class SalesPerformanceListView
@@ -16,11 +17,11 @@ final class SalesPerformanceListView
     * @param array<int, array<string, mixed>> $staffUsers
      * @param array<int, array<string, mixed>> $contracts
      * @param array<int, array<string, mixed>> $renewalCases
+     * @param array<int, string> $performanceMonths
      * @param array<string, mixed>|null $createDraft
      * @param array<int, string> $allowedTypes
      * @param array<string, mixed>|null $importBatch
      * @param array<int, array<string, mixed>> $importRows
-     * @param array{non_life_month: int, non_life_ytd: int, general_month: int, total_count_month: int} $metrics
      * @param array<string, mixed> $layoutOptions
      */
     public static function render(
@@ -32,6 +33,7 @@ final class SalesPerformanceListView
         array $staffUsers,
         array $contracts,
         array $renewalCases,
+        array $performanceMonths,
         ?array $createDraft,
         string $openModal,
         string $listUrl,
@@ -46,28 +48,26 @@ final class SalesPerformanceListView
         array $allowedTypes,
         ?array $importBatch,
         array $importRows,
-        array $metrics,
         bool $forceFilterOpen,
         array $layoutOptions
     ): string {
-        $errorHtml = '';
+        $noticeHtml = '';
         if (is_string($flashError) && $flashError !== '') {
-            $errorHtml .= '<div class="error">' . Layout::escape($flashError) . '</div>';
+            $noticeHtml .= '<div class="error">' . Layout::escape($flashError) . '</div>';
         }
         if (is_string($fatalError) && $fatalError !== '') {
-            $errorHtml .= '<div class="error">' . Layout::escape($fatalError) . '</div>';
+            $noticeHtml .= '<div class="error">' . Layout::escape($fatalError) . '</div>';
         }
-
-        $successHtml = '';
         if (is_string($flashSuccess) && $flashSuccess !== '') {
-            $successHtml = '<div class="notice">' . Layout::escape($flashSuccess) . '</div>';
+            $noticeHtml .= '<div class="notice">' . Layout::escape($flashSuccess) . '</div>';
         }
 
-        $perPage = (int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE);
-        $sort = (string) ($listState['sort'] ?? '');
-        $direction = (string) ($listState['direction'] ?? 'asc');
-        $filterOpen = $forceFilterOpen || ListViewHelper::hasActiveFilters($criteria) || $errorHtml !== '';
-        $pager = ListViewHelper::buildPager((int) ($listState['page'] ?? '1'), $perPage, $totalCount);
+        $perPage    = (int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE);
+        $sort       = (string) ($listState['sort'] ?? '');
+        $direction  = (string) ($listState['direction'] ?? 'asc');
+        // performance_fiscal_year / performance_month_num はデフォルト値を持つため、アクティブフィルター判定から除外する
+        $filterOpen = $forceFilterOpen || ListViewHelper::hasActiveFilters(array_diff_key($criteria, ['performance_fiscal_year' => true, 'performance_month_num' => true])) || $noticeHtml !== '';
+        $pager      = ListViewHelper::buildPager((int) ($listState['page'] ?? '1'), $perPage, $totalCount);
         $listState['page'] = (string) ($pager['currentPage'] ?? 1);
 
         $activeModal = in_array($openModal, ['create', 'import'], true) ? $openModal : '';
@@ -75,7 +75,6 @@ final class SalesPerformanceListView
             $activeModal = 'create';
         }
 
-        $searchForm = self::renderSearchForm($criteria, $listState, $staffUsers, $listUrl, $filterOpen);
         $createForm = self::renderCreateForm(
             $createDraft,
             $customers,
@@ -88,43 +87,36 @@ final class SalesPerformanceListView
             ListViewHelper::buildUrl($listUrl, ['open_modal' => 'create'])
         );
 
-        $rowsHtml = self::renderRows($rows, $criteria, $listState, $detailBaseUrl);
+        $rowsHtml    = self::renderRows($rows, $criteria, $listState, $detailBaseUrl);
         $sortSummary = self::renderSortSummary($sort, $direction);
-        $topToolbar = self::renderToolbar($listUrl, $criteria, $listState, $pager, $totalCount, $perPage, $sortSummary);
-        $bottomPager = self::renderBottomPager($listUrl, $criteria, $listState, $pager);
+        $topToolbar  = LP::toolbar($listUrl, $criteria, $listState, $pager, $totalCount, $perPage, $sortSummary);
+        $bottomPager = LP::bottomPager($listUrl, $criteria, $listState, $pager);
+
         $importReturnTo = ListViewHelper::buildUrl($listUrl, ['open_modal' => 'import']);
 
-        $metricsHtml = self::renderMetrics($metrics);
+        $filterFormHtml = self::renderSearchForm($criteria, $listState, $staffUsers, $performanceMonths, $listUrl);
 
-        $content = ''
-            . '<div class="list-page-frame">'
-            . '<div class="list-page-header">'
-            . '<h1 class="title">実績管理一覧</h1>'
-            . '<div class="list-page-header-actions">'
-            . '<button class="btn" type="button" data-open-dialog="sales-create-dialog">実績を追加</button>'
-            . '</div>'
-            . '</div>'
-            . $errorHtml
-            . $successHtml
-            . $searchForm
-            . '<div class="card">'
-            . $metricsHtml
-            . $topToolbar
-            . '<div class="table-wrap">'
+        $tableHtml =
+            '<div class="table-wrap">'
             . '<table class="table-fixed table-card list-table">'
             . '<thead><tr>'
-            . '<th>' . self::renderSortLink('計上日', 'performance_date', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('契約者名', 'customer_name', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('担当者名', 'staff_user_id', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('業務区分', 'source_type', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('種目', 'product_type', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . self::renderSortLink('保険料', 'premium_amount', $listUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('計上日', 'performance_date', $listUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('契約者名', 'customer_name', $listUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('担当者名', 'staff_id', $listUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('業務区分', 'source_type', $listUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('種目', 'product_type', $listUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('保険料', 'premium_amount', $listUrl, $criteria, $listState) . '</th>'
             . '</tr></thead>'
             . '<tbody>' . $rowsHtml . '</tbody>'
             . '</table>'
-            . '</div>'
-            . $bottomPager
-            . '</div>'
+            . '</div>';
+
+        $content =
+            '<div class="list-page-frame">'
+            . LP::pageHeader('実績管理一覧', '<button class="btn" type="button" data-open-dialog="sales-create-dialog">実績を追加</button>')
+            . $noticeHtml
+            . LP::filterCard($filterFormHtml, $filterOpen)
+            . LP::tableCard($topToolbar, $tableHtml, $bottomPager)
             . '</div>'
             . '<dialog id="sales-create-dialog" class="modal-dialog modal-dialog-wide">'
             . '<form method="dialog" class="modal-close-form"><button type="submit" class="modal-close" aria-label="閉じる">×</button></form>'
@@ -148,106 +140,75 @@ final class SalesPerformanceListView
     }
 
     /**
-     * @param array{non_life_month: int, non_life_ytd: int, general_month: int, total_count_month: int} $metrics
-     */
-    private static function renderMetrics(array $metrics): string
-    {
-        $fmt = static fn(int $v): string => number_format((int) round($v / 1000)) . '千';
-
-        return '<div class="metric-grid" style="margin-bottom:14px;">'
-            . '<div class="metric">'
-            . '<div class="metric-label">当月損保挙積</div>'
-            . '<div class="metric-value">' . Layout::escape($fmt($metrics['non_life_month'])) . '</div>'
-            . '</div>'
-            . '<div class="metric">'
-            . '<div class="metric-label">損保挙積累計（年度）</div>'
-            . '<div class="metric-value">' . Layout::escape($fmt($metrics['non_life_ytd'])) . '</div>'
-            . '</div>'
-            . '<div class="metric">'
-            . '<div class="metric-label">一般種目（当月）</div>'
-            . '<div class="metric-value">' . Layout::escape($fmt($metrics['general_month'])) . '</div>'
-            . '</div>'
-            . '<div class="metric">'
-            . '<div class="metric-label">計上件数（当月）</div>'
-            . '<div class="metric-value">' . Layout::escape((string) $metrics['total_count_month']) . '件</div>'
-            . '</div>'
-            . '</div>';
-    }
-
-    /**
      * @param array<string, string> $criteria
      * @param array<string, string> $listState
+     * @param array<int, array<string, mixed>> $staffUsers
+     * @param array<int, string> $performanceMonths
      */
-    private static function renderSearchForm(array $criteria, array $listState, array $staffUsers, string $listUrl, bool $filterOpen): string
+    private static function renderSearchForm(array $criteria, array $listState, array $staffUsers, array $performanceMonths, string $listUrl): string
     {
-        $dateFrom = Layout::escape((string) ($criteria['performance_date_from'] ?? ''));
-        $dateTo = Layout::escape((string) ($criteria['performance_date_to'] ?? ''));
-        $customerName = Layout::escape((string) ($criteria['customer_name'] ?? ''));
-        $staffUserId = (string) ($criteria['staff_user_id'] ?? '');
-        $sourceType = (string) ($criteria['source_type'] ?? '');
-        $performanceType = (string) ($criteria['performance_type'] ?? '');
-        $insurerName = Layout::escape((string) ($criteria['insurer_name'] ?? ''));
-        $policyNo = Layout::escape((string) ($criteria['policy_no'] ?? ''));
-        $productType = Layout::escape((string) ($criteria['product_type'] ?? ''));
-        $settlementMonth = Layout::escape((string) ($criteria['settlement_month'] ?? ''));
+        $selectedFY       = (string) ($criteria['performance_fiscal_year'] ?? '');
+        $selectedMonthNum = (string) ($criteria['performance_month_num'] ?? '');
+        $customerName     = Layout::escape((string) ($criteria['customer_name'] ?? ''));
+        $staffUserId      = (string) ($criteria['staff_id'] ?? '');
+        $productType      = Layout::escape((string) ($criteria['product_type'] ?? ''));
+
+        // 年度セレクト: DB実績月から年度を逆算（月>=4: その年、月<=3: 前年）
+        $fiscalYears = [];
+        foreach ($performanceMonths as $ym) {
+            if (!preg_match('/^(\d{4})-(\d{2})$/', $ym, $m)) {
+                continue;
+            }
+            $fy = (int) $m[2] >= 4 ? (int) $m[1] : (int) $m[1] - 1;
+            $fyStr = (string) $fy;
+            if (!in_array($fyStr, $fiscalYears, true)) {
+                $fiscalYears[] = $fyStr;
+            }
+        }
+        if ($selectedFY !== '' && !in_array($selectedFY, $fiscalYears, true)) {
+            $fiscalYears[] = $selectedFY;
+        }
+        rsort($fiscalYears);
+        $fyOptions = '<option value="">すべて</option>';
+        foreach ($fiscalYears as $fy) {
+            $sel       = $fy === $selectedFY ? ' selected' : '';
+            $fyOptions .= '<option value="' . Layout::escape($fy) . '"' . $sel . '>' . Layout::escape($fy . '年度') . '</option>';
+        }
+
+        // 月セレクト: 年度の流れに合わせ 4〜3月 の順で表示
+        $monthOptions = '<option value="">すべて</option>';
+        foreach ([4,5,6,7,8,9,10,11,12,1,2,3] as $mn) {
+            $sel           = (string) $mn === $selectedMonthNum ? ' selected' : '';
+            $monthOptions .= '<option value="' . $mn . '"' . $sel . '>' . $mn . '月</option>';
+        }
 
         $staffOptions = '<option value="">すべて</option>';
         foreach ($staffUsers as $user) {
-            $id = (int) ($user['id'] ?? 0);
-            $name = trim((string) ($user['name'] ?? ''));
+            $id   = (int) ($user['id'] ?? 0);
+            $name = trim((string) ($user['staff_name'] ?? $user['name'] ?? ''));
             if ($id <= 0 || $name === '') {
                 continue;
             }
-
-            $selected = $staffUserId !== '' && (int) $staffUserId === $id ? ' selected' : '';
-            $staffOptions .= '<option value="' . $id . '"' . $selected . '>' . Layout::escape($name) . '</option>';
+            $sel          = $staffUserId !== '' && (int) $staffUserId === $id ? ' selected' : '';
+            $staffOptions .= '<option value="' . $id . '"' . $sel . '>' . Layout::escape($name) . '</option>';
         }
 
-        $sourceOptions = '';
-        $sourceMap = [
-            '' => 'すべて',
-            'non_life' => '損保',
-            'life' => '生保',
-        ];
-        foreach ($sourceMap as $value => $label) {
-            $selected = $sourceType === $value ? ' selected' : '';
-            $sourceOptions .= '<option value="' . Layout::escape($value) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
-        }
-
-        $performanceOptions = '';
-        $performanceMap = [
-            '' => 'すべて',
-            'new' => '新規',
-            'renewal' => '更改',
-            'addition' => '追加',
-            'change' => '異動',
-            'cancel_deduction' => '解約控除',
-        ];
-        foreach ($performanceMap as $value => $label) {
-            $selected = $performanceType === $value ? ' selected' : '';
-            $performanceOptions .= '<option value="' . Layout::escape($value) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
-        }
-
-        return ''
-            . '<details class="card details-panel list-filter-card"' . ($filterOpen ? ' open' : '') . '>'
-            . '<summary class="list-filter-toggle"><span class="list-filter-toggle-label is-closed">検索条件を開く</span><span class="list-filter-toggle-label is-open">検索条件を閉じる</span></summary>'
-            . '<form method="get" action="' . Layout::escape(self::buildFormAction($listUrl)) . '">'
-            . self::renderRouteInput($listUrl)
+        return '<form method="get" action="' . Layout::escape(LP::formAction($listUrl)) . '">'
+            . LP::routeInput($listUrl)
             . '<input type="hidden" name="filter_open" value="1">'
-            . self::renderHiddenInputs(self::buildListQueryParams([], $listState, false, true))
+            . LP::hiddenInputs(LP::queryParams([], $listState, false, true))
             . '<div class="list-filter-grid">'
-            . '<label class="list-filter-field"><span>実績計上日From</span><input type="date" name="performance_date_from" value="' . $dateFrom . '"></label>'
-            . '<label class="list-filter-field"><span>実績計上日To</span><input type="date" name="performance_date_to" value="' . $dateTo . '"></label>'
+            . '<label class="list-filter-field"><span>年度</span><select name="performance_fiscal_year">' . $fyOptions . '</select></label>'
+            . '<label class="list-filter-field"><span>月</span><select name="performance_month_num">' . $monthOptions . '</select></label>'
             . '<label class="list-filter-field"><span>契約者名</span><input type="text" name="customer_name" value="' . $customerName . '"></label>'
-            . '<label class="list-filter-field"><span>担当者</span><select name="staff_user_id">' . $staffOptions . '</select></label>'
+            . '<label class="list-filter-field"><span>担当者</span><select name="staff_id">' . $staffOptions . '</select></label>'
             . '<label class="list-filter-field"><span>種目</span><input type="text" name="product_type" value="' . $productType . '"></label>'
             . '</div>'
             . '<div class="actions list-filter-actions">'
             . '<button class="btn" type="submit">検索</button>'
             . '<a class="btn btn-secondary" href="' . Layout::escape(ListViewHelper::buildUrl($listUrl, ['filter_open' => '1'])) . '">条件クリア</a>'
             . '</div>'
-            . '</form>'
-            . '</details>';
+            . '</form>';
     }
 
     /**
@@ -269,51 +230,50 @@ final class SalesPerformanceListView
         string $csrfToken,
         string $returnTo
     ): string {
-        $customerId = (int) ($record['customer_id'] ?? 0);
-        $contractId = (int) ($record['contract_id'] ?? 0);
-        $renewalCaseId = (int) ($record['renewal_case_id'] ?? 0);
-        $performanceDate = Layout::escape((string) ($record['performance_date'] ?? date('Y-m-d')));
-        $performanceType = (string) ($record['performance_type'] ?? 'new');
-        $sourceType = (string) ($record['source_type'] ?? '');
-        $insurerName = Layout::escape((string) ($record['insurer_name'] ?? ''));
-        $policyNo = Layout::escape((string) ($record['policy_no'] ?? ''));
-        $policyStartDate = Layout::escape((string) ($record['policy_start_date'] ?? ''));
-        $applicationDate = Layout::escape((string) ($record['application_date'] ?? ''));
+        $customerId       = (int) ($record['customer_id'] ?? 0);
+        $contractId       = (int) ($record['contract_id'] ?? 0);
+        $renewalCaseId    = (int) ($record['renewal_case_id'] ?? 0);
+        $performanceDate  = Layout::escape((string) ($record['performance_date'] ?? date('Y-m-d')));
+        $performanceType  = (string) ($record['performance_type'] ?? 'new');
+        $sourceType       = (string) ($record['source_type'] ?? '');
+        $insurerName      = Layout::escape((string) ($record['insurer_name'] ?? ''));
+        $policyNo         = Layout::escape((string) ($record['policy_no'] ?? ''));
+        $policyStartDate  = Layout::escape((string) ($record['policy_start_date'] ?? ''));
+        $applicationDate  = Layout::escape((string) ($record['application_date'] ?? ''));
         $insuranceCategory = Layout::escape((string) ($record['insurance_category'] ?? ''));
-        $productType = Layout::escape((string) ($record['product_type'] ?? ''));
-        $premiumAmount = Layout::escape((string) ($record['premium_amount'] ?? '0'));
+        $productType      = Layout::escape((string) ($record['product_type'] ?? ''));
+        $premiumAmount    = Layout::escape((string) ($record['premium_amount'] ?? '0'));
         $installmentCount = Layout::escape((string) ($record['installment_count'] ?? ''));
-        $receiptNo = Layout::escape((string) ($record['receipt_no'] ?? ''));
-        $settlementMonth = Layout::escape((string) ($record['settlement_month'] ?? ''));
-        $staffUserId = (int) ($record['staff_user_id'] ?? 0);
-        $remark = Layout::escape((string) ($record['remark'] ?? ''));
+        $receiptNo        = Layout::escape((string) ($record['receipt_no'] ?? ''));
+        $settlementMonth  = Layout::escape((string) ($record['settlement_month'] ?? ''));
+        $staffUserId      = (int) ($record['staff_id'] ?? 0);
+        $remark           = Layout::escape((string) ($record['remark'] ?? ''));
 
         $customerOptions = '<option value="">選択してください</option>';
         foreach ($customers as $row) {
-            $id = (int) ($row['id'] ?? 0);
-            $selected = $id === $customerId ? ' selected' : '';
-            $label = (string) ($row['customer_name'] ?? '');
+            $id              = (int) ($row['id'] ?? 0);
+            $selected        = $id === $customerId ? ' selected' : '';
+            $label           = (string) ($row['customer_name'] ?? '');
             $customerOptions .= '<option value="' . $id . '"' . $selected . '>' . Layout::escape($label) . '</option>';
         }
 
         $staffOptions = '<option value="">未設定</option>';
         foreach ($staffUsers as $user) {
-            $id = (int) ($user['id'] ?? 0);
-            $name = trim((string) ($user['name'] ?? ''));
+            $id   = (int) ($user['id'] ?? 0);
+            $name = trim((string) ($user['staff_name'] ?? $user['name'] ?? ''));
             if ($id <= 0 || $name === '') {
                 continue;
             }
-
-            $selected = $id === $staffUserId ? ' selected' : '';
+            $selected     = $id === $staffUserId ? ' selected' : '';
             $staffOptions .= '<option value="' . $id . '"' . $selected . '>' . Layout::escape($name) . '</option>';
         }
 
         $contractOptions = '<option value="">未設定</option>';
         foreach ($contracts as $row) {
-            $id = (int) ($row['id'] ?? 0);
-            $selected = $id === $contractId ? ' selected' : '';
-            $policyNoText = (string) ($row['policy_no'] ?? '');
-            $customerName = (string) ($row['customer_name'] ?? '');
+            $id            = (int) ($row['id'] ?? 0);
+            $selected      = $id === $contractId ? ' selected' : '';
+            $policyNoText  = (string) ($row['policy_no'] ?? '');
+            $customerName  = (string) ($row['customer_name'] ?? '');
             $contractOptions .= '<option value="' . $id . '"' . $selected
                 . ' data-customer-id="' . (int) ($row['customer_id'] ?? 0) . '"'
                 . ' data-insurer-name="' . Layout::escape((string) ($row['insurer_name'] ?? '')) . '"'
@@ -326,10 +286,10 @@ final class SalesPerformanceListView
 
         $renewalOptions = '<option value="">未設定</option>';
         foreach ($renewalCases as $row) {
-            $id = (int) ($row['id'] ?? 0);
-            $selected = $id === $renewalCaseId ? ' selected' : '';
-            $policyNoText = (string) ($row['policy_no'] ?? '');
-            $maturityDate = (string) ($row['maturity_date'] ?? '');
+            $id            = (int) ($row['id'] ?? 0);
+            $selected      = $id === $renewalCaseId ? ' selected' : '';
+            $policyNoText  = (string) ($row['policy_no'] ?? '');
+            $maturityDate  = (string) ($row['maturity_date'] ?? '');
             $renewalOptions .= '<option value="' . $id . '"' . $selected
                 . ' data-contract-id="' . (int) ($row['contract_id'] ?? 0) . '"'
                 . ' data-customer-id="' . (int) ($row['customer_id'] ?? 0) . '"'
@@ -338,13 +298,13 @@ final class SalesPerformanceListView
 
         $typeOptions = '';
         foreach ($allowedTypes as $type) {
-            $selected = $type === $performanceType ? ' selected' : '';
+            $selected    = $type === $performanceType ? ' selected' : '';
             $typeOptions .= '<option value="' . Layout::escape($type) . '"' . $selected . '>' . Layout::escape(self::performanceTypeLabel($type)) . '</option>';
         }
 
         $sourceOptions = '<option value="">未選択</option>';
         foreach (['non_life' => '損保', 'life' => '生保'] as $value => $label) {
-            $selected = $value === $sourceType ? ' selected' : '';
+            $selected      = $value === $sourceType ? ' selected' : '';
             $sourceOptions .= '<option value="' . $value . '"' . $selected . '>' . $label . '</option>';
         }
 
@@ -359,7 +319,7 @@ final class SalesPerformanceListView
             . '<label class="list-filter-field"><span>実績区分 <strong class="required-mark">*</strong></span><select name="performance_type" required>' . $typeOptions . '</select></label>'
             . '<label class="list-filter-field"><span>業務区分</span><select name="source_type" data-role="source-type">' . $sourceOptions . '</select></label>'
             . '<label class="list-filter-field"><span>契約者名 <strong class="required-mark">*</strong></span><select name="customer_id" required>' . $customerOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>担当者</span><select name="staff_user_id">' . $staffOptions . '</select></label>'
+            . '<label class="list-filter-field"><span>担当者</span><select name="staff_id">' . $staffOptions . '</select></label>'
             . '<label class="list-filter-field"><span>契約</span><select name="contract_id">' . $contractOptions . '</select></label>'
             . '<label class="list-filter-field"><span>満期案件</span><select name="renewal_case_id">' . $renewalOptions . '</select></label>'
             . '</div>'
@@ -464,14 +424,13 @@ final class SalesPerformanceListView
         $rowsHtml = '';
 
         foreach ($rows as $row) {
-            $id = (int) ($row['id'] ?? 0);
-            $params = self::buildListQueryParams($criteria, $listState);
-            $detailUrl = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, array_merge(['id' => (string) $id], $params)));
-
+            $id           = (int) ($row['id'] ?? 0);
+            $params       = LP::queryParams($criteria, $listState);
+            $detailUrl    = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, array_merge(['id' => (string) $id], $params)));
             $customerName = (string) ($row['customer_name'] ?? '');
-            $premium = (int) ($row['premium_amount'] ?? 0);
+            $premium      = (int) ($row['premium_amount'] ?? 0);
             $premiumFormatted = number_format($premium) . '円';
-            $premiumHtml = $premium < 0
+            $premiumHtml  = $premium < 0
                 ? '<span style="color:var(--text-danger);">' . Layout::escape($premiumFormatted) . '</span>'
                 : Layout::escape($premiumFormatted);
             $rowsHtml .= '<tr>'
@@ -491,174 +450,6 @@ final class SalesPerformanceListView
         return $rowsHtml;
     }
 
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     * @return array<string, string>
-     */
-    private static function buildListQueryParams(array $criteria, array $listState, bool $includePage = true, bool $includeSort = true): array
-    {
-        $params = $criteria;
-
-        if ($includePage && (int) ($listState['page'] ?? '1') > 1) {
-            $params['page'] = (string) $listState['page'];
-        }
-
-        if ((int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE) !== ListViewHelper::DEFAULT_PER_PAGE) {
-            $params['per_page'] = (string) $listState['per_page'];
-        }
-
-        if ($includeSort && ($listState['sort'] ?? '') !== '') {
-            $params['sort'] = (string) $listState['sort'];
-            $params['direction'] = (string) ($listState['direction'] ?? 'asc');
-        }
-
-        return $params;
-    }
-
-    /**
-     * @param array<string, string> $params
-     */
-    private static function renderHiddenInputs(array $params): string
-    {
-        $html = '';
-        foreach ($params as $name => $value) {
-            if (trim($value) === '') {
-                continue;
-            }
-
-            $html .= '<input type="hidden" name="' . Layout::escape($name) . '" value="' . Layout::escape($value) . '">';
-        }
-
-        return $html;
-    }
-
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     * @param array<string, mixed> $pager
-     */
-    private static function renderToolbar(string $listUrl, array $criteria, array $listState, array $pager, int $totalCount, int $perPage, string $sortSummary): string
-    {
-        return '<div class="list-toolbar">'
-            . '<div class="list-summary">'
-            . '<p class="summary-count">' . Layout::escape(self::renderSummaryText($totalCount, $pager)) . '</p>'
-            . '</div>'
-            . '<div class="list-toolbar-actions">'
-            . '<p class="muted list-sort-summary">' . Layout::escape($sortSummary) . '</p>'
-            . self::renderPerPageForm($listUrl, $criteria, $listState, $perPage)
-            . self::renderPager($listUrl, $criteria, $listState, $pager)
-            . '</div>'
-            . '</div>';
-    }
-
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     * @param array<string, mixed> $pager
-     */
-    private static function renderBottomPager(string $listUrl, array $criteria, array $listState, array $pager): string
-    {
-        $pagerHtml = self::renderPager($listUrl, $criteria, $listState, $pager);
-        if ($pagerHtml === '') {
-            return '';
-        }
-
-        return '<div class="list-toolbar list-toolbar-bottom"><div class="list-toolbar-actions">' . $pagerHtml . '</div></div>';
-    }
-
-    private static function renderSummaryText(int $totalCount, array $pager): string
-    {
-        if ($totalCount <= 0) {
-            return '0件';
-        }
-
-        return $totalCount . '件中 ' . (int) ($pager['start'] ?? 0) . '-' . (int) ($pager['end'] ?? 0) . '件を表示';
-    }
-
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     */
-    private static function renderPerPageForm(string $listUrl, array $criteria, array $listState, int $perPage): string
-    {
-        $optionsHtml = '';
-        foreach ([10, 50, 100] as $option) {
-            $selected = $perPage === $option ? ' selected' : '';
-            $optionsHtml .= '<option value="' . $option . '"' . $selected . '>' . $option . '</option>';
-        }
-
-        return '<form method="get" action="' . Layout::escape(self::buildFormAction($listUrl)) . '" class="list-per-page-form">'
-            . self::renderRouteInput($listUrl)
-            . self::renderHiddenInputs(self::buildListQueryParams($criteria, $listState, false))
-            . '<label class="list-select-inline"><span>表示件数</span><select name="per_page" onchange="this.form.submit()">' . $optionsHtml . '</select></label>'
-            . '<noscript><button class="btn btn-ghost btn-small" type="submit">更新</button></noscript>'
-            . '</form>';
-    }
-
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     * @param array<string, mixed> $pager
-     */
-    private static function renderPager(string $listUrl, array $criteria, array $listState, array $pager): string
-    {
-        if ((int) ($pager['totalPages'] ?? 0) <= 1) {
-            return '';
-        }
-
-        $links = '';
-        if (!empty($pager['hasPrevious'])) {
-            $links .= self::renderPagerLink('前へ', (int) ($pager['previousPage'] ?? 1), $listUrl, $criteria, $listState);
-        }
-
-        foreach ((array) ($pager['pages'] ?? []) as $pageNumber) {
-            $page = (int) $pageNumber;
-            if ($page === (int) ($pager['currentPage'] ?? 1)) {
-                $links .= '<span class="list-pager-link is-current">' . $page . '</span>';
-                continue;
-            }
-
-            $links .= self::renderPagerLink((string) $page, $page, $listUrl, $criteria, $listState);
-        }
-
-        if (!empty($pager['hasNext'])) {
-            $links .= self::renderPagerLink('次へ', (int) ($pager['nextPage'] ?? 1), $listUrl, $criteria, $listState);
-        }
-
-        return '<nav class="list-pager" aria-label="ページャー">' . $links . '</nav>';
-    }
-
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     */
-    private static function renderPagerLink(string $label, int $page, string $listUrl, array $criteria, array $listState): string
-    {
-        $params = self::buildListQueryParams($criteria, array_merge($listState, ['page' => (string) $page]));
-        $url = Layout::escape(ListViewHelper::buildUrl($listUrl, $params));
-
-        return '<a class="list-pager-link" href="' . $url . '">' . Layout::escape($label) . '</a>';
-    }
-
-    /**
-     * @param array<string, string> $criteria
-     * @param array<string, string> $listState
-     */
-    private static function renderSortLink(string $label, string $column, string $listUrl, array $criteria, array $listState): string
-    {
-        $isCurrent = ($listState['sort'] ?? '') === $column;
-        $nextDirection = $isCurrent && ($listState['direction'] ?? 'asc') === 'asc' ? 'desc' : 'asc';
-        $params = self::buildListQueryParams($criteria, array_merge($listState, ['sort' => $column, 'direction' => $nextDirection]));
-        $url = Layout::escape(ListViewHelper::buildUrl($listUrl, $params));
-        $indicator = '';
-        if ($isCurrent) {
-            $indicator = '<span class="list-sort-indicator">' . (($listState['direction'] ?? 'asc') === 'asc' ? '&#9650;' : '&#9660;') . '</span>';
-        }
-
-        return '<a class="list-sort-link' . ($isCurrent ? ' is-active' : '') . '" href="' . $url . '">' . Layout::escape($label) . $indicator . '</a>';
-    }
-
     private static function renderSortSummary(string $sort, string $direction): string
     {
         if ($sort === '') {
@@ -667,48 +458,26 @@ final class SalesPerformanceListView
 
         $label = match ($sort) {
             'performance_date' => '計上日',
-            'customer_name' => '契約者名',
-            'staff_user_id' => '担当者名',
-            'source_type' => '業務区分',
-            'product_type' => '種目',
-            'premium_amount' => '保険料',
-            default => '計上日',
+            'customer_name'    => '契約者名',
+            'staff_id'         => '担当者名',
+            'source_type'      => '業務区分',
+            'product_type'     => '種目',
+            'premium_amount'   => '保険料',
+            default            => '計上日',
         };
 
         return '並び順: ' . $label . ' ' . ($direction === 'desc' ? '降順' : '昇順');
     }
 
-    private static function buildFormAction(string $url): string
-    {
-        $path = (string) parse_url($url, PHP_URL_PATH);
-        return $path !== '' ? $path : '';
-    }
-
-    private static function renderRouteInput(string $url): string
-    {
-        $query = (string) parse_url($url, PHP_URL_QUERY);
-        if ($query === '') {
-            return '';
-        }
-
-        parse_str($query, $params);
-        $route = trim((string) ($params['route'] ?? ''));
-        if ($route === '') {
-            return '';
-        }
-
-        return '<input type="hidden" name="route" value="' . Layout::escape($route) . '">';
-    }
-
     private static function performanceTypeLabel(string $type): string
     {
         return match ($type) {
-            'new' => '新規',
-            'renewal' => '更改',
-            'addition' => '追加',
-            'change' => '異動',
+            'new'              => '新規',
+            'renewal'          => '更改',
+            'addition'         => '追加',
+            'change'           => '異動',
             'cancel_deduction' => '解約控除',
-            default => $type,
+            default            => $type,
         };
     }
 
@@ -716,8 +485,8 @@ final class SalesPerformanceListView
     {
         return match ($sourceType) {
             'non_life' => '損保',
-            'life' => '生保',
-            default => '',
+            'life'     => '生保',
+            default    => '',
         };
     }
 }

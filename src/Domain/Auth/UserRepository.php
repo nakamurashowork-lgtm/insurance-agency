@@ -18,7 +18,8 @@ final class UserRepository
     {
         $pdo = $this->commonFactory->create();
         $stmt = $pdo->prepare(
-            'SELECT id, google_sub, email, name, is_system_admin
+            'SELECT id, google_sub, email, name, display_name, is_system_admin,
+                    totp_secret, totp_enabled, totp_verified_at
              FROM users
              WHERE google_sub = :google_sub
                AND status = 1
@@ -32,13 +33,57 @@ final class UserRepository
     }
 
     /**
+     * @return array<string, mixed>|null
+     */
+    public function findActiveById(int $userId): ?array
+    {
+        $pdo  = $this->commonFactory->create();
+        $stmt = $pdo->prepare(
+            'SELECT id, google_sub, email, name, display_name, is_system_admin,
+                    totp_secret, totp_enabled, totp_verified_at
+             FROM users
+             WHERE id = :id
+               AND status = 1
+               AND is_deleted = 0
+             LIMIT 1'
+        );
+        $stmt->execute(['id' => $userId]);
+
+        $user = $stmt->fetch();
+        return is_array($user) ? $user : null;
+    }
+
+    public function saveTotpSecret(int $userId, string $base32Secret): void
+    {
+        $pdo  = $this->commonFactory->create();
+        $stmt = $pdo->prepare(
+            'UPDATE users
+             SET totp_secret = :secret, totp_enabled = 0, updated_by = :updated_by
+             WHERE id = :id'
+        );
+        $stmt->execute(['secret' => $base32Secret, 'updated_by' => $userId, 'id' => $userId]);
+    }
+
+    public function enableTotp(int $userId): void
+    {
+        $pdo  = $this->commonFactory->create();
+        $stmt = $pdo->prepare(
+            'UPDATE users
+             SET totp_enabled = 1, totp_verified_at = NOW(), updated_by = :updated_by
+             WHERE id = :id'
+        );
+        $stmt->execute(['updated_by' => $userId, 'id' => $userId]);
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public function findActiveByEmail(string $email): array
     {
         $pdo = $this->commonFactory->create();
         $stmt = $pdo->prepare(
-            'SELECT id, google_sub, email, name, is_system_admin
+            'SELECT id, google_sub, email, name, display_name, is_system_admin,
+                    totp_secret, totp_enabled, totp_verified_at
              FROM users
              WHERE email = :email
                AND status = 1

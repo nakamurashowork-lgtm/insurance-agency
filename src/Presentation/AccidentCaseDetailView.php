@@ -13,6 +13,7 @@ final class AccidentCaseDetailView
      * @param array<int, array<string, mixed>> $audits
      * @param array<int, array{id: int, name: string}> $assignedUsers
      * @param array<string, mixed> $layoutOptions
+     * @param array<int, array<string, mixed>> $allStatuses
      */
     public static function render(
         array $detail,
@@ -29,7 +30,8 @@ final class AccidentCaseDetailView
         string $renewalDetailBaseUrl,
         ?string $flashError,
         ?string $flashSuccess,
-        array $layoutOptions
+        array $layoutOptions,
+        array $allStatuses = []
     ): string {
         $errorHtml = '';
         if (is_string($flashError) && $flashError !== '') {
@@ -41,14 +43,22 @@ final class AccidentCaseDetailView
             $successHtml = '<div class="notice">' . Layout::escape($flashSuccess) . '</div>';
         }
 
-        $statusLabels = [
-            'accepted'     => '受付',
-            'linked'       => '対応開始',
-            'in_progress'  => '対応中',
-            'waiting_docs' => '保留',
-            'resolved'     => '解決',
-            'closed'       => 'クローズ',
-        ];
+        // Build status labels map from master data or fallback
+        if ($allStatuses !== []) {
+            $statusLabels = [];
+            foreach ($allStatuses as $sRow) {
+                $statusLabels[(string) ($sRow['code'] ?? '')] = (string) ($sRow['display_name'] ?? '');
+            }
+        } else {
+            $statusLabels = [
+                'accepted'     => '受付',
+                'linked'       => '対応開始',
+                'in_progress'  => '対応中',
+                'waiting_docs' => '保留',
+                'resolved'     => '解決',
+                'closed'       => 'クローズ',
+            ];
+        }
         $currentStatus = (string) ($detail['status'] ?? 'accepted');
         $statusHtml = '';
         foreach ($statusLabels as $value => $label) {
@@ -69,12 +79,12 @@ final class AccidentCaseDetailView
             $priorityHtml .= '<option value="' . Layout::escape($value) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
         }
 
-        $assignedUserId = (int) ($detail['assigned_user_id'] ?? 0);
+        $assignedUserId = (int) ($detail['assigned_staff_id'] ?? 0);
         $assignedUserOptions = '<option value="">未設定</option>';
         $selectedExists = false;
         foreach ($assignedUsers as $user) {
             $uid = (int) ($user['id'] ?? 0);
-            $uname = trim((string) ($user['name'] ?? ''));
+            $uname = trim((string) ($user['staff_name'] ?? $user['name'] ?? ''));
             if ($uid <= 0 || $uname === '') {
                 continue;
             }
@@ -92,10 +102,17 @@ final class AccidentCaseDetailView
         $assignedName = '';
         foreach ($assignedUsers as $user) {
             if ((int) ($user['id'] ?? 0) === $assignedUserId) {
-                $assignedName = (string) ($user['name'] ?? '');
+                $assignedName = trim((string) ($user['staff_name'] ?? $user['name'] ?? ''));
                 break;
             }
         }
+
+        // 住所
+        $postalCode = trim((string) ($detail['postal_code'] ?? ''));
+        $address1   = trim((string) ($detail['address1'] ?? ''));
+        $address2   = trim((string) ($detail['address2'] ?? ''));
+        $addressParts = array_filter([$postalCode !== '' ? '〒' . $postalCode : '', $address1, $address2]);
+        $address = implode(' ', $addressParts);
 
         // ステータスバッジ
         $statusBadgeClass = match ($currentStatus) {
@@ -149,75 +166,70 @@ final class AccidentCaseDetailView
             $commentsHtml = '<li class="muted">0件</li>';
         }
 
-        // 変更履歴
-        $actionLabels = [
-            'INSERT'        => '登録',
-            'UPDATE'        => '更新',
-            'DELETE'        => '削除',
-            'IMPORT'        => '取込',
-            'SYSTEM_UPDATE' => 'システム更新',
-        ];
-        $sourceLabels = [
-            'SCREEN'       => '画面操作',
-            'SJNET_IMPORT' => 'SJネット取込',
-            'BATCH'        => 'バッチ処理',
-            'API'          => 'API',
-        ];
+        // 変更履歴 — タイムライン形式
+        $statusTranslate = array_merge($statusLabels, [
+            'low' => '低', 'normal' => '通常', 'high' => '高', 'urgent' => '急',
+        ]);
 
-        $auditsHtml = '';
+        $auditItems = [];
         foreach ($audits as $row) {
             $changedAt = self::formatDate((string) ($row['changed_at'] ?? ''));
             $changedBy = trim((string) ($row['changed_by_name'] ?? '')) ?: '不明なユーザー';
-            $actionLabel = $actionLabels[strtoupper((string) ($row['action_type'] ?? ''))] ?? (string) ($row['action_type'] ?? '');
-            $sourceLabel = $sourceLabels[strtoupper((string) ($row['change_source'] ?? ''))] ?? (string) ($row['change_source'] ?? '');
-            $note = trim((string) ($row['note'] ?? ''));
 
-            $detailsHtml = '';
             $details = $row['details'] ?? [];
+            $diffItems = [];
+            $eventCategory = 'other';
+
             if (is_array($details)) {
                 foreach ($details as $detailRow) {
                     if (!is_array($detailRow)) {
                         continue;
                     }
-                    $fieldLabel = trim((string) ($detailRow['field_label'] ?? '')) ?: (string) ($detailRow['field_key'] ?? '');
-                    $valueType = strtoupper(trim((string) ($detailRow['value_type'] ?? '')));
-                    if ($valueType === 'JSON') {
-                        $beforeRaw = $detailRow['before_value_json'] ?? null;
-                        $afterRaw  = $detailRow['after_value_json'] ?? null;
-                        $beforeValue = $beforeRaw !== null ? (string) json_encode(json_decode((string) $beforeRaw), JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) : '';
-                        $afterValue  = $afterRaw  !== null ? (string) json_encode(json_decode((string) $afterRaw),  JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) : '';
-                    } else {
-                        $beforeValue = trim((string) ($detailRow['before_value_text'] ?? ''));
-                        $afterValue  = trim((string) ($detailRow['after_value_text'] ?? ''));
-                    }
-                    $beforeValue = $beforeValue !== '' ? $beforeValue : '未設定';
-                    $afterValue  = $afterValue  !== '' ? $afterValue  : '未設定';
+                    $fieldKey   = trim((string) ($detailRow['field_key'] ?? ''));
+                    $fieldLabel = trim((string) ($detailRow['field_label'] ?? '')) ?: $fieldKey;
+                    $beforeValue = trim((string) ($detailRow['before_value_text'] ?? ''));
+                    $afterValue  = trim((string) ($detailRow['after_value_text'] ?? ''));
 
-                    $detailsHtml .= '<tr>'
-                        . '<td>' . Layout::escape($fieldLabel) . '</td>'
-                        . '<td>' . Layout::escape($beforeValue) . '</td>'
-                        . '<td>' . Layout::escape($afterValue) . '</td>'
-                        . '</tr>';
+                    // 値を日本語ラベルに変換
+                    if (isset($statusTranslate[$beforeValue])) { $beforeValue = $statusTranslate[$beforeValue]; }
+                    if (isset($statusTranslate[$afterValue]))  { $afterValue  = $statusTranslate[$afterValue]; }
+
+                    if ($beforeValue === '') { $beforeValue = '未設定'; }
+                    if ($afterValue  === '') { $afterValue  = '未設定'; }
+
+                    if ($fieldKey === 'status') {
+                        $eventCategory = 'status';
+                    } elseif ($fieldKey === 'assigned_staff_id' && $eventCategory !== 'status') {
+                        $eventCategory = 'staff';
+                    }
+
+                    $diffItems[] = [
+                        'label'  => $fieldLabel,
+                        'key'    => $fieldKey,
+                        'before' => $beforeValue,
+                        'after'  => $afterValue,
+                    ];
                 }
             }
-            if ($detailsHtml !== '') {
-                $detailsHtml = '<div class="history-detail-table-wrap"><table class="history-detail-table"><thead><tr><th>変更項目</th><th>変更前</th><th>変更後</th></tr></thead><tbody>' . $detailsHtml . '</tbody></table></div>';
+
+            if ($diffItems === []) {
+                continue;
             }
 
-            $auditsHtml .= '<li class="history-item">'
-                . '<div class="history-meta">'
-                . '<span>' . Layout::escape($changedAt) . '</span>'
-                . '<span>変更者: ' . Layout::escape($changedBy) . '</span>'
-                . '<span>変更種別: ' . Layout::escape($actionLabel) . '</span>'
-                . '<span>変更元: ' . Layout::escape($sourceLabel) . '</span>'
-                . '</div>'
-                . ($note !== '' ? '<div class="history-summary">内容: ' . Layout::escape($note) . '</div>' : '')
-                . $detailsHtml
-                . '</li>';
+            $auditItems[] = [
+                'changed_at' => $changedAt,
+                'changed_by' => $changedBy,
+                'category'   => $eventCategory,
+                'diff_items' => $diffItems,
+            ];
         }
-        if ($auditsHtml === '') {
-            $auditsHtml = '<li class="muted">0件</li>';
-        }
+
+        $auditsHtml = self::renderTimeline($auditItems);
+
+        // 顧客情報エリア用 URL
+        $customerUrl = $customerId > 0
+            ? Layout::escape($customerDetailBaseUrl . '&id=' . $customerId)
+            : '';
 
         $content = $errorHtml
             . $successHtml
@@ -239,18 +251,9 @@ final class AccidentCaseDetailView
             // 事故基本情報
             . '<div class="card">'
             . '<div class="detail-section-title">事故基本情報</div>'
-            . '<div class="kv"><span class="kv-key">顧客</span><span class="kv-val">' . $customerCell . '</span></div>'
-            . '<div class="kv"><span class="kv-key">関連契約</span><span class="kv-val">' . $contractCell . '</span></div>'
+            . '<div class="kv"><span class="kv-key">お客さま名</span><span class="kv-val">' . ($customerUrl !== '' ? '<a class="kv-link" href="' . $customerUrl . '">' . Layout::escape($customerName) . '</a>' : Layout::escape($customerName)) . '</span></div>'
             . '<div class="kv"><span class="kv-key">受付日</span><span class="kv-val">' . Layout::escape((string) ($detail['accepted_date'] ?? '')) . '</span></div>'
             . '<div class="kv"><span class="kv-key">事故発生日</span><span class="kv-val">' . (trim((string) ($detail['accident_date'] ?? '')) !== '' ? Layout::escape((string) $detail['accident_date']) : '<span class="muted">未設定</span>') . '</span></div>'
-            . '<div class="kv"><span class="kv-key">保険種類</span><span class="kv-val">' . ($insuranceCategory !== '' ? Layout::escape($insuranceCategory) : '<span class="muted">未設定</span>') . '</span></div>'
-            . '<div class="kv"><span class="kv-key">種目</span><span class="kv-val">' . ($productType !== '' ? Layout::escape($productType) : '<span class="muted">未設定</span>') . '</span></div>'
-            . '<div class="kv"><span class="kv-key">事故種別</span><span class="kv-val">' . (trim((string) ($detail['accident_type'] ?? '')) !== '' ? Layout::escape((string) $detail['accident_type']) : '<span class="muted">未設定</span>') . '</span></div>'
-            . '<div class="kv"><span class="kv-key">事故場所</span><span class="kv-val">' . (trim((string) ($detail['accident_location'] ?? '')) !== '' ? Layout::escape((string) $detail['accident_location']) : '<span class="muted">未設定</span>') . '</span></div>'
-            . '<div class="kv"><span class="kv-key">担当者</span><span class="kv-val">' . ($assignedName !== '' ? Layout::escape($assignedName) : '<span class="muted">未設定</span>') . '</span></div>'
-            . '<div class="kv"><span class="kv-key">保険会社受付番号</span><span class="kv-val">' . (trim((string) ($detail['insurer_claim_no'] ?? '')) !== '' ? Layout::escape((string) $detail['insurer_claim_no']) : '<span class="muted">未設定</span>') . '</span></div>'
-            . '<div class="kv"><span class="kv-key">解決日</span><span class="kv-val">' . (trim((string) ($detail['resolved_date'] ?? '')) !== '' ? Layout::escape((string) $detail['resolved_date']) : '<span class="muted">未設定</span>') . '</span></div>'
-            . '<div class="kv"><span class="kv-key">備考</span><span class="kv-val">' . (trim((string) ($detail['remark'] ?? '')) !== '' ? Layout::escape((string) $detail['remark']) : '<span class="muted">未設定</span>') . '</span></div>'
             . '</div>'
             // 対応状況更新フォーム
             . '<div class="card">'
@@ -259,12 +262,10 @@ final class AccidentCaseDetailView
             . '<input type="hidden" name="id" value="' . (int) ($detail['id'] ?? 0) . '">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($updateCsrf) . '">'
             . '<input type="hidden" name="return_to" value="' . Layout::escape($returnToUrl) . '">'
-            . '<div class="form-row"><div class="form-label">状態 <strong class="required-mark">*</strong></div><select class="form-select" name="status" required>' . $statusHtml . '</select></div>'
+            . '<div class="form-row"><div class="form-label">対応状況 <strong class="required-mark">*</strong></div><select class="form-select" name="status" required>' . $statusHtml . '</select></div>'
             . '<div class="form-row"><div class="form-label">優先度</div><select class="form-select" name="priority">' . $priorityHtml . '</select></div>'
-            . '<div class="form-row"><div class="form-label">担当者</div><select class="form-select" name="assigned_user_id">' . $assignedUserOptions . '</select></div>'
+            . '<div class="form-row"><div class="form-label">担当者</div><select class="form-select" name="assigned_staff_id">' . $assignedUserOptions . '</select></div>'
             . '<div class="form-row"><div class="form-label">解決日</div><input class="form-input" type="date" name="resolved_date" value="' . Layout::escape((string) ($detail['resolved_date'] ?? '')) . '"></div>'
-            . '<div class="form-row"><div class="form-label">保険会社受付番号</div><input class="form-input" type="text" name="insurer_claim_no" value="' . Layout::escape((string) ($detail['insurer_claim_no'] ?? '')) . '" maxlength="100"></div>'
-            . '<div class="form-row"><div class="form-label">備考</div><textarea class="form-input" name="remark" rows="4">' . Layout::escape((string) ($detail['remark'] ?? '')) . '</textarea></div>'
             . '<div class="dialog-actions"><button class="btn btn-primary" type="submit">保存する</button></div>'
             . '</form>'
             . '</div>'
@@ -286,9 +287,9 @@ final class AccidentCaseDetailView
             . '</div>'
             . '</details>'
             // 変更履歴
-            . '<details class="card details-panel details-compact">'
+            . '<details class="card details-panel details-compact" open>'
             . '<summary><span>変更履歴</span><span class="muted">' . count($audits) . '件</span></summary>'
-            . '<div class="details-compact-body"><ul class="panel-list">' . $auditsHtml . '</ul></div>'
+            . '<div class="details-compact-body">' . $auditsHtml . '</div>'
             . '</details>'
             . '</div>'
             . '</div>';
@@ -307,5 +308,62 @@ final class AccidentCaseDetailView
             return $value;
         }
         return date('Y-m-d H:i', $ts);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $items
+     */
+    private static function renderTimeline(array $items): string
+    {
+        $html = '';
+        foreach ($items as $item) {
+            $cat = (string) ($item['category'] ?? 'other');
+            $diffItems = $item['diff_items'] ?? [];
+            if ($diffItems === []) {
+                continue;
+            }
+
+            $borderColor = match ($cat) {
+                'status' => 'var(--color-primary, #2563eb)',
+                'staff'  => 'var(--color-info, #0891b2)',
+                default  => 'var(--border-color, #d1d5db)',
+            };
+
+            $diffHtml = '';
+            foreach ($diffItems as $d) {
+                $key    = (string) ($d['key'] ?? '');
+                $label  = Layout::escape((string) ($d['label'] ?? ''));
+                $before = Layout::escape((string) ($d['before'] ?? ''));
+                $after  = Layout::escape((string) ($d['after'] ?? ''));
+
+                $isStatus = $key === 'status';
+                $isStaff  = $key === 'assigned_staff_id';
+
+                $afterStyle = $isStatus
+                    ? 'font-weight:700;color:var(--color-primary,#2563eb);'
+                    : ($isStaff ? 'font-weight:600;color:var(--color-info,#0891b2);' : 'font-weight:600;');
+
+                $diffHtml .= '<div style="display:flex;align-items:baseline;gap:6px;margin:3px 0;font-size:12.5px;">'
+                    . '<span style="min-width:90px;color:var(--text-muted,#6b7280);">' . $label . '</span>'
+                    . '<span style="color:var(--text-muted,#9ca3af);text-decoration:line-through;">' . $before . '</span>'
+                    . '<span style="color:var(--text-muted,#9ca3af);">→</span>'
+                    . '<span style="' . $afterStyle . '">' . $after . '</span>'
+                    . '</div>';
+            }
+
+            $html .= '<div style="border-left:3px solid ' . $borderColor . ';padding:8px 10px 8px 12px;margin-bottom:10px;background:var(--bg-card,#fff);border-radius:0 4px 4px 0;">'
+                . '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'
+                . '<span style="font-size:12px;color:var(--text-muted,#6b7280);">' . Layout::escape((string) ($item['changed_at'] ?? '')) . '</span>'
+                . '<span style="font-size:12px;color:var(--text-muted,#6b7280);">' . Layout::escape((string) ($item['changed_by'] ?? '')) . '</span>'
+                . '</div>'
+                . $diffHtml
+                . '</div>';
+        }
+
+        if ($html === '') {
+            $html = '<div class="muted" style="font-size:12.5px;">該当する変更履歴はありません。</div>';
+        }
+
+        return $html;
     }
 }
