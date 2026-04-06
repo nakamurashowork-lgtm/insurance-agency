@@ -75,11 +75,6 @@ final class AccidentNotificationBatchService
                             continue;
                         }
 
-                        if ($this->repository->hasDeliveryForSchedule($accidentCaseId, $ruleId, $runDate)) {
-                            $skipCount++;
-                            continue;
-                        }
-
                         $retryTargets[] = $failedRow;
                     } catch (Throwable $deliveryException) {
                         $this->repository->updateDeliveryForRetry(
@@ -162,11 +157,6 @@ final class AccidentNotificationBatchService
                             if ($inserted) {
                                 $skipCount++;
                             }
-                            continue;
-                        }
-
-                        if ($this->repository->hasDeliveryForSchedule($accidentCaseId, $ruleId, $runDate)) {
-                            $skipCount++;
                             continue;
                         }
 

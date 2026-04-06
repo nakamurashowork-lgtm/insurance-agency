@@ -408,6 +408,11 @@ final class AccidentCaseRepository
                 $this->insertAccidentAuditEventDetails($eventId, $details);
             }
 
+            // ステータスが closed になった場合はリマインドを自動無効化
+            if ($input['status'] === 'closed') {
+                $this->disableReminderOnClose($id, $updatedBy, $eventId);
+            }
+
             $this->pdo->commit();
             return $affected;
         } catch (\Throwable $e) {
@@ -415,6 +420,32 @@ final class AccidentCaseRepository
                 $this->pdo->rollBack();
             }
             throw $e;
+        }
+    }
+
+    private function disableReminderOnClose(int $accidentCaseId, int $updatedBy, int $auditEventId): void
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE t_accident_reminder_rule
+             SET is_enabled = 0,
+                 updated_by = :updated_by
+             WHERE accident_case_id = :accident_case_id
+               AND is_enabled = 1
+               AND is_deleted = 0'
+        );
+        $stmt->execute([
+            'accident_case_id' => $accidentCaseId,
+            'updated_by'       => $updatedBy,
+        ]);
+
+        if ($stmt->rowCount() > 0) {
+            $this->insertAccidentAuditEventDetails($auditEventId, [[
+                'field_key'         => 'reminder',
+                'field_label'       => 'リマインド',
+                'value_type'        => 'STRING',
+                'before_value_text' => '有効',
+                'after_value_text'  => '自動無効化（完了）',
+            ]]);
         }
     }
 
@@ -662,6 +693,160 @@ final class AccidentCaseRepository
         }
 
         return $result;
+    }
+
+    /**
+     * @return array<string, mixed>|null  rule + 'weekdays' => int[]
+     */
+    public function findReminderRuleByAccidentCaseId(int $accidentCaseId): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, accident_case_id, is_enabled, interval_weeks,
+                    base_date, start_date, end_date, last_notified_on
+             FROM t_accident_reminder_rule
+             WHERE accident_case_id = :accident_case_id
+               AND is_deleted = 0
+             LIMIT 1'
+        );
+        $stmt->execute(['accident_case_id' => $accidentCaseId]);
+        $row = $stmt->fetch();
+        if (!is_array($row)) {
+            return null;
+        }
+
+        $rule = $row;
+        $rule['weekdays'] = $this->findReminderWeekdays((int) ($rule['id'] ?? 0));
+
+        return $rule;
+    }
+
+    /**
+     * @return int[]
+     */
+    private function findReminderWeekdays(int $ruleId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT weekday_cd
+             FROM t_accident_reminder_rule_weekday
+             WHERE accident_reminder_rule_id = :rule_id
+             ORDER BY weekday_cd ASC'
+        );
+        $stmt->execute(['rule_id' => $ruleId]);
+        $rows = $stmt->fetchAll();
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        return array_map(fn($r) => (int) ($r['weekday_cd'] ?? 0), $rows);
+    }
+
+    /**
+     * @param array<string, mixed> $input  keys: is_enabled, interval_weeks, weekdays[], start_date, end_date
+     */
+    public function saveReminderRule(int $accidentCaseId, array $input, int $userId): void
+    {
+        $existing = $this->findReminderRuleByAccidentCaseId($accidentCaseId);
+
+        $isEnabled     = (int) ($input['is_enabled'] ?? 0);
+        $intervalWeeks = max(1, (int) ($input['interval_weeks'] ?? 1));
+        $startDate     = isset($input['start_date']) && $input['start_date'] !== '' ? $input['start_date'] : null;
+        $endDate       = isset($input['end_date'])   && $input['end_date']   !== '' ? $input['end_date']   : null;
+        $weekdays      = array_values(array_filter(
+            array_map('intval', (array) ($input['weekdays'] ?? [])),
+            fn($w) => $w >= 0 && $w <= 6
+        ));
+
+        $this->pdo->beginTransaction();
+        try {
+            if ($existing === null) {
+                $stmt = $this->pdo->prepare(
+                    'INSERT INTO t_accident_reminder_rule (
+                        accident_case_id, is_enabled, interval_weeks, base_date,
+                        start_date, end_date, created_by, updated_by
+                     ) VALUES (
+                        :accident_case_id, :is_enabled, :interval_weeks, CURDATE(),
+                        :start_date, :end_date, :created_by, :updated_by
+                     )'
+                );
+                $stmt->execute([
+                    'accident_case_id' => $accidentCaseId,
+                    'is_enabled'       => $isEnabled,
+                    'interval_weeks'   => $intervalWeeks,
+                    'start_date'       => $startDate,
+                    'end_date'         => $endDate,
+                    'created_by'       => $userId,
+                    'updated_by'       => $userId,
+                ]);
+                $ruleId = (int) $this->pdo->lastInsertId();
+            } else {
+                $ruleId = (int) ($existing['id'] ?? 0);
+                $stmt = $this->pdo->prepare(
+                    'UPDATE t_accident_reminder_rule
+                     SET is_enabled      = :is_enabled,
+                         interval_weeks  = :interval_weeks,
+                         start_date      = :start_date,
+                         end_date        = :end_date,
+                         updated_by      = :updated_by
+                     WHERE id = :id
+                       AND is_deleted = 0'
+                );
+                $stmt->execute([
+                    'id'             => $ruleId,
+                    'is_enabled'     => $isEnabled,
+                    'interval_weeks' => $intervalWeeks,
+                    'start_date'     => $startDate,
+                    'end_date'       => $endDate,
+                    'updated_by'     => $userId,
+                ]);
+            }
+
+            // 曜日: DELETE + INSERT
+            $this->pdo->prepare(
+                'DELETE FROM t_accident_reminder_rule_weekday WHERE accident_reminder_rule_id = :rule_id'
+            )->execute(['rule_id' => $ruleId]);
+
+            if ($weekdays !== []) {
+                $wdStmt = $this->pdo->prepare(
+                    'INSERT INTO t_accident_reminder_rule_weekday
+                        (accident_reminder_rule_id, weekday_cd, created_by, updated_by)
+                     VALUES
+                        (:rule_id, :weekday_cd, :created_by, :updated_by)'
+                );
+                foreach ($weekdays as $wd) {
+                    $wdStmt->execute([
+                        'rule_id'    => $ruleId,
+                        'weekday_cd' => $wd,
+                        'created_by' => $userId,
+                        'updated_by' => $userId,
+                    ]);
+                }
+            }
+
+            // 監査ログ
+            $beforeEnabled = $existing !== null ? (string) ($existing['is_enabled'] ?? '0') : null;
+            $afterEnabled  = (string) $isEnabled;
+            $eventId = $this->insertAccidentAuditEvent($accidentCaseId, $userId, 'リマインド設定を保存');
+            $auditDetails = [];
+            if ($existing === null || $beforeEnabled !== $afterEnabled) {
+                $auditDetails[] = [
+                    'field_key'         => 'reminder_is_enabled',
+                    'field_label'       => 'リマインド有効/無効',
+                    'value_type'        => 'STRING',
+                    'before_value_text' => $existing === null ? null : ($beforeEnabled === '1' ? '有効' : '無効'),
+                    'after_value_text'  => $afterEnabled === '1' ? '有効' : '無効',
+                ];
+            }
+            if ($auditDetails !== []) {
+                $this->insertAccidentAuditEventDetails($eventId, $auditDetails);
+            }
+
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     public function createComment(int $accidentCaseId, string $commentBody, int $userId): void

@@ -155,10 +155,6 @@ $insCustomer = $pdoA->prepare(
     "INSERT INTO m_customer (customer_type, customer_name, phone, email, address1, status, created_by, updated_by)
      VALUES ('individual', :name, :phone, :email, :address1, :status, :uid, :uid)"
 );
-$insContact = $pdoA->prepare(
-    "INSERT INTO m_customer_contact (customer_id, contact_name, phone, email, is_primary, sort_order, created_by, updated_by)
-     VALUES (:customer_id, :contact_name, :phone, :email, :is_primary, :sort_order, :uid, :uid)"
-);
 $insContract = $pdoA->prepare(
     "INSERT INTO t_contract (customer_id, policy_no, insurer_name, product_type, policy_start_date, policy_end_date, premium_amount, payment_cycle, status, created_by, updated_by)
      VALUES (:customer_id, :policy_no, 'AcceptanceIns', 'auto', :start_date, :end_date, :premium, 'annual', 'active', :uid, :uid)"
@@ -188,25 +184,6 @@ $insCustomer->execute([
     'uid' => $userId,
 ]);
 $mainCustomerId = (int) $pdoA->lastInsertId();
-
-$insContact->execute([
-    'customer_id' => $mainCustomerId,
-    'contact_name' => $mark . '_MAIN_CONTACT_1',
-    'phone' => '08011110001',
-    'email' => strtolower($mark) . '_c1@example.com',
-    'is_primary' => 1,
-    'sort_order' => 1,
-    'uid' => $userId,
-]);
-$insContact->execute([
-    'customer_id' => $mainCustomerId,
-    'contact_name' => $mark . '_MAIN_CONTACT_2',
-    'phone' => '08011110002',
-    'email' => strtolower($mark) . '_c2@example.com',
-    'is_primary' => 0,
-    'sort_order' => 2,
-    'uid' => $userId,
-]);
 
 $policyA1 = $mark . '_POL_A1';
 $insContract->execute([

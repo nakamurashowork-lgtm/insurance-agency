@@ -83,11 +83,11 @@ final class AccidentCaseListView
             $statusFilterOptions = [
                 ''             => 'すべて',
                 'accepted'     => '受付',
-                'linked'       => '対応開始',
+                'linked'       => '保険会社連絡済み',
                 'in_progress'  => '対応中',
-                'waiting_docs' => '保留',
-                'resolved'     => '解決',
-                'closed'       => 'クローズ',
+                'waiting_docs' => '書類待ち',
+                'resolved'     => '解決済み',
+                'closed'       => '完了',
             ];
         }
         $statusHtml = '';
@@ -205,11 +205,11 @@ final class AccidentCaseListView
         } else {
             $statusLabels = [
                 'accepted'     => '受付',
-                'linked'       => '対応開始',
+                'linked'       => '保険会社連絡済み',
                 'in_progress'  => '対応中',
-                'waiting_docs' => '保留',
-                'resolved'     => '解決',
-                'closed'       => 'クローズ',
+                'waiting_docs' => '書類待ち',
+                'resolved'     => '解決済み',
+                'closed'       => '完了',
             ];
             foreach (array_keys($statusLabels) as $s) {
                 $selected = $s === $currentStatus ? ' selected' : '';
@@ -291,11 +291,11 @@ final class AccidentCaseListView
         } else {
             $label = match ($status) {
                 'accepted'     => '受付',
-                'linked'       => '対応開始',
+                'linked'       => '保険会社連絡済み',
                 'in_progress'  => '対応中',
-                'waiting_docs' => '保留',
-                'resolved'     => '解決',
-                'closed'       => 'クローズ',
+                'waiting_docs' => '書類待ち',
+                'resolved'     => '解決済み',
+                'closed'       => '完了',
                 default        => '未設定',
             };
         }

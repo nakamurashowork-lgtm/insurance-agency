@@ -11,7 +11,6 @@ TRUNCATE TABLE t_accident_case;
 TRUNCATE TABLE t_renewal_case;
 TRUNCATE TABLE t_sales_case;
 TRUNCATE TABLE t_contract;
-TRUNCATE TABLE m_customer_contact;
 TRUNCATE TABLE m_customer;
 TRUNCATE TABLE m_renewal_reminder_phase;
 SET FOREIGN_KEY_CHECKS = 1;
@@ -100,36 +99,6 @@ VALUES
    '03-0000-1111', 'taro.yamada@example.com',
    '100-0001', '東京都千代田区千代田1-1', NULL,
    1, 'closed', '転居により解約済み。', 0, 1, 1);
-
--- =============================================================================
--- m_customer_contact (顧客連絡先)
--- =============================================================================
-INSERT INTO m_customer_contact
-  (customer_id, contact_name, department, position_name, phone, email,
-   is_primary, sort_order, is_deleted, created_by, updated_by)
-VALUES
-  -- 田中商事 (id=1)
-  (1, '田中 一郎',   '総務部',     '部長',       '03-3456-7891', 'ichiro.tanaka@tanaka-shoji.co.jp',   1, 1, 0, 1, 1),
-  (1, '田中 花子',   '経理部',     '課長',       '03-3456-7892', 'hanako.tanaka@tanaka-shoji.co.jp',   0, 2, 0, 1, 1),
-
-  -- 山本製造 (id=2)
-  (2, '山本 次郎',   '総務部',     '総務課長',   '06-6789-0124', 'jiro.yamamoto@yamamoto-mfg.co.jp',   1, 1, 0, 1, 1),
-  (2, '中島 さとみ', '総務部',     '担当',       '06-6789-0125', 's.nakashima@yamamoto-mfg.co.jp',     0, 2, 0, 1, 1),
-
-  -- 鈴木建設 (id=3)
-  (3, '鈴木 三郎',   '管理部',     '部長',       '052-876-5433', 'saburo.suzuki@suzuki-const.co.jp',   1, 1, 0, 1, 1),
-
-  -- 青木物流 (id=4)
-  (4, '青木 四郎',   '経営管理部', '社長',       '045-321-9877', 'shiro.aoki@aoki-logistics.co.jp',    1, 1, 0, 1, 1),
-
-  -- 中村食品 (id=5)
-  (5, '中村 五郎',   '総務・経理', '主任',       '092-555-4322', 'goro.nakamura@nakamura-food.co.jp',  1, 1, 0, 1, 1),
-
-  -- 伊藤クリニック (id=6)
-  (6, '伊藤 六子',   '事務局',     '事務長',     '03-5678-9013', 'rokuko.ito@ito-clinic.jp',           1, 1, 0, 1, 1),
-
-  -- 小林運輸 (id=7)
-  (7, '小林 七男',   '総務部',     '係長',       '048-765-2346', 'nanao.kobayashi@kobayashi-transport.co.jp', 1, 1, 0, 1, 1);
 
 -- =============================================================================
 -- t_contract (契約)

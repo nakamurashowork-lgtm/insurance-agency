@@ -52,6 +52,28 @@ final class RenewalNotificationBatchRepository
     }
 
     /**
+     * 通知トリガーフェーズ（from_days_before = to_days_before の単日トリガー）を返す。
+     * EARLY / URGENT のみ対象とし、設定画面で指定した日数をDBから動的に取得する。
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function findNotificationTriggerPhases(): array
+    {
+        $stmt = $this->pdo->query(
+            "SELECT id, phase_code, phase_name, from_days_before
+             FROM m_renewal_reminder_phase
+             WHERE is_enabled = 1
+               AND is_deleted = 0
+               AND from_days_before = to_days_before
+               AND phase_code IN ('EARLY', 'URGENT')
+             ORDER BY from_days_before DESC"
+        );
+        $rows = $stmt->fetchAll();
+
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     public function findPhaseForDaysBefore(int $daysBefore): ?array
@@ -85,7 +107,7 @@ final class RenewalNotificationBatchRepository
                     DATEDIFF(rc.maturity_date, :run_date) AS days_before
              FROM t_renewal_case rc
              WHERE rc.is_deleted = 0
-               AND rc.case_status IN ("open", "contacted", "quoted", "waiting")
+               AND rc.case_status NOT IN ("completed")
                AND DATEDIFF(rc.maturity_date, :run_date) BETWEEN :to_days_before AND :from_days_before
              ORDER BY rc.maturity_date ASC, rc.id ASC'
         );
@@ -119,7 +141,7 @@ final class RenewalNotificationBatchRepository
                      ON c.id = ct.customer_id
                     AND c.is_deleted = 0
              WHERE rc.is_deleted = 0
-               AND rc.case_status IN ("open", "contacted", "quoted", "waiting")
+               AND rc.case_status NOT IN ("completed")
                AND DATEDIFF(rc.maturity_date, :run_date) = :days_before
              ORDER BY rc.maturity_date ASC, c.customer_name ASC, rc.id ASC'
         );
@@ -179,7 +201,7 @@ final class RenewalNotificationBatchRepository
     public function insertDeliverySuccess(int $runId, int $renewalCaseId, int $phaseId, string $runDate): bool
     {
         $stmt = $this->pdo->prepare(
-            'INSERT IGNORE INTO t_notification_delivery (
+            'INSERT INTO t_notification_delivery (
                 notification_run_id,
                 notification_type,
                 renewal_case_id,
@@ -201,7 +223,12 @@ final class RenewalNotificationBatchRepository
                 NOW(),
                 "success",
                 NULL
-             )'
+             )
+             ON DUPLICATE KEY UPDATE
+                notification_run_id = VALUES(notification_run_id),
+                notified_at         = NOW(),
+                delivery_status     = "success",
+                error_message       = NULL'
         );
         $stmt->execute([
             'run_id' => $runId,
@@ -210,7 +237,7 @@ final class RenewalNotificationBatchRepository
             'scheduled_date' => $runDate,
         ]);
 
-        return $stmt->rowCount() === 1;
+        return true;
     }
 
     public function hasDeliveryForSchedule(int $renewalCaseId, int $phaseId, string $runDate): bool

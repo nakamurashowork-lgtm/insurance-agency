@@ -165,24 +165,6 @@ final class CustomerRepository
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function findContacts(int $customerId): array
-    {
-        $stmt = $this->pdo->prepare(
-            'SELECT contact_name, department, position_name, phone, email, is_primary, sort_order
-             FROM m_customer_contact
-             WHERE customer_id = :customer_id
-               AND is_deleted = 0
-             ORDER BY is_primary DESC, sort_order ASC, id ASC'
-        );
-        $stmt->execute(['customer_id' => $customerId]);
-        $rows = $stmt->fetchAll();
-
-        return is_array($rows) ? $rows : [];
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
     public function findContracts(int $customerId): array
     {
         $stmt = $this->pdo->prepare(
@@ -221,60 +203,32 @@ final class CustomerRepository
      */
     public function create(array $input, int $userId): int
     {
-        $this->pdo->beginTransaction();
-        try {
-            $stmt = $this->pdo->prepare(
-                'INSERT INTO m_customer
-                    (customer_type, customer_name, customer_name_kana, phone, email,
-                     postal_code, address1, address2, status, note,
-                     created_by, updated_by)
-                 VALUES
-                    (:customer_type, :customer_name, :customer_name_kana, :phone, :email,
-                     :postal_code, :address1, :address2, :status, :note,
-                     :created_by, :updated_by)'
-            );
-            $stmt->execute([
-                'customer_type'      => (string) ($input['customer_type'] ?? 'individual'),
-                'customer_name'      => (string) ($input['customer_name'] ?? ''),
-                'customer_name_kana' => $input['customer_name_kana'] ?? null,
-                'phone'              => $input['phone'] ?? null,
-                'email'              => $input['email'] ?? null,
-                'postal_code'        => $input['postal_code'] ?? null,
-                'address1'           => $input['address1'] ?? null,
-                'address2'           => $input['address2'] ?? null,
-                'status'             => 'active',
-                'note'               => $input['note'] ?? null,
-                'created_by'         => $userId,
-                'updated_by'         => $userId,
-            ]);
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO m_customer
+                (customer_type, customer_name, customer_name_kana, phone, email,
+                 postal_code, address1, address2, status, note,
+                 created_by, updated_by)
+             VALUES
+                (:customer_type, :customer_name, :customer_name_kana, :phone, :email,
+                 :postal_code, :address1, :address2, :status, :note,
+                 :created_by, :updated_by)'
+        );
+        $stmt->execute([
+            'customer_type'      => (string) ($input['customer_type'] ?? 'individual'),
+            'customer_name'      => (string) ($input['customer_name'] ?? ''),
+            'customer_name_kana' => $input['customer_name_kana'] ?? null,
+            'phone'              => $input['phone'] ?? null,
+            'email'              => $input['email'] ?? null,
+            'postal_code'        => $input['postal_code'] ?? null,
+            'address1'           => $input['address1'] ?? null,
+            'address2'           => $input['address2'] ?? null,
+            'status'             => 'active',
+            'note'               => $input['note'] ?? null,
+            'created_by'         => $userId,
+            'updated_by'         => $userId,
+        ]);
 
-            $customerId = (int) $this->pdo->lastInsertId();
-
-            // 初期代表連絡先を同一トランザクション内で作成
-            $contactName = (string) ($input['customer_name'] ?? '');
-            $stmt2 = $this->pdo->prepare(
-                'INSERT INTO m_customer_contact
-                    (customer_id, contact_name, phone, email, is_primary, sort_order,
-                     created_by, updated_by)
-                 VALUES
-                    (:customer_id, :contact_name, :phone, :email, 1, 1,
-                     :created_by, :updated_by)'
-            );
-            $stmt2->execute([
-                'customer_id'  => $customerId,
-                'contact_name' => $contactName,
-                'phone'        => $input['phone'] ?? null,
-                'email'        => $input['email'] ?? null,
-                'created_by'   => $userId,
-                'updated_by'   => $userId,
-            ]);
-
-            $this->pdo->commit();
-            return $customerId;
-        } catch (\Throwable $e) {
-            $this->pdo->rollBack();
-            throw $e;
-        }
+        return (int) $this->pdo->lastInsertId();
     }
 
     /**

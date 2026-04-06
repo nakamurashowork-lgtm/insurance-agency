@@ -11,8 +11,6 @@ use function App\Domain\Notification\build_lineworks_renewal_alert_payload;
 
 final class RenewalNotificationBatchService
 {
-    private const EARLY_DAYS_BEFORE = 28;
-    private const DIRECT_DAYS_BEFORE = 14;
 
     public function __construct(private RenewalNotificationBatchRepository $repository)
     {
@@ -239,11 +237,6 @@ final class RenewalNotificationBatchService
                             continue;
                         }
 
-                        if ($this->repository->hasDeliveryForSchedule($renewalCaseId, $phaseId, $runDate)) {
-                            $skipCount++;
-                            continue;
-                        }
-
                         $target['renewal_reminder_phase_id'] = $phaseId;
                         $deliverableTargets[] = $target;
                     } catch (Throwable $e) {
@@ -368,28 +361,38 @@ final class RenewalNotificationBatchService
     }
 
     /**
+     * DBのm_renewal_reminder_phaseから通知トリガーフェーズを動的に取得する。
+     * EARLY → 'early'（早期通知）、URGENT → 'direct'（直前通知）にマッピング。
+     *
      * @return array<int, array{key:string,label:string,days_before:int}>
      */
     private function notificationDefinitions(): array
     {
-        return [
-            [
-                'key' => 'early',
-                'label' => '満期リマインド（早期）',
-                'days_before' => self::EARLY_DAYS_BEFORE,
-            ],
-            [
-                'key' => 'direct',
-                'label' => '満期リマインド（直前）',
-                'days_before' => self::DIRECT_DAYS_BEFORE,
-            ],
-        ];
+        $phases = $this->repository->findNotificationTriggerPhases();
+        $definitions = [];
+        foreach ($phases as $phase) {
+            $key = match ((string) ($phase['phase_code'] ?? '')) {
+                'EARLY'  => 'early',
+                'URGENT' => 'direct',
+                default  => null,
+            };
+            if ($key === null) {
+                continue;
+            }
+            $definitions[] = [
+                'key'         => $key,
+                'label'       => (string) ($phase['phase_name'] ?? $key),
+                'days_before' => (int) ($phase['from_days_before'] ?? 0),
+            ];
+        }
+
+        return $definitions;
     }
 
     private function resolveRetryNotificationKey(int $daysBefore): ?string
     {
         foreach ($this->notificationDefinitions() as $definition) {
-            if ((int) $definition['days_before'] === $daysBefore) {
+            if ((int) ($definition['days_before'] ?? 0) === $daysBefore) {
                 return (string) $definition['key'];
             }
         }

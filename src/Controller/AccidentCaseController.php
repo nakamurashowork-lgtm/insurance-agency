@@ -154,6 +154,7 @@ final class AccidentCaseController
             $audits = $this->attachAuditUserNames($audits, $auditUserNames);
             $assignedUsers = (new StaffRepository($pdo))->findActive();
             $accidentStatuses = (new CaseStatusRepository($pdo))->findByType('accident');
+            $reminderRule = $repository->findReminderRuleByAccidentCaseId($id);
             $flashError = $this->guard->session()->consumeFlash('error');
             $flashSuccess = $this->guard->session()->consumeFlash('success');
 
@@ -165,8 +166,10 @@ final class AccidentCaseController
                 $listUrl,
                 $this->config->routeUrl('accident/update'),
                 $this->config->routeUrl('accident/comment'),
+                $this->config->routeUrl('accident/reminder'),
                 $this->guard->session()->issueCsrfToken('accident_update_' . $id),
                 $this->guard->session()->issueCsrfToken('accident_comment_' . $id),
+                $this->guard->session()->issueCsrfToken('accident_reminder_' . $id),
                 $detailUrl,
                 $this->config->routeUrl('customer/detail'),
                 $this->config->routeUrl('renewal/detail'),
@@ -182,7 +185,8 @@ final class AccidentCaseController
                         ['label' => '事故案件詳細'],
                     ]
                 ),
-                $accidentStatuses
+                $accidentStatuses,
+                $reminderRule
             ));
         } catch (Throwable) {
             $this->guard->session()->setFlash('error', '事故案件詳細の取得に失敗しました。');
@@ -280,6 +284,61 @@ final class AccidentCaseController
             $this->guard->session()->setFlash('success', 'コメントを登録しました。');
         } catch (Throwable) {
             $this->guard->session()->setFlash('error', 'コメントの登録に失敗しました。');
+        }
+
+        Responses::redirect($returnTo);
+    }
+
+    public function reminder(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+        $this->assertAdmin($auth);
+
+        $id = (int) ($_POST['id'] ?? 0);
+        $returnTo = $this->validateReturnTo($_POST['return_to'] ?? null, $id);
+        if ($id <= 0) {
+            $this->guard->session()->setFlash('error', '案件IDが不正です。');
+            Responses::redirect($this->config->routeUrl('accident/list'));
+        }
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('accident_reminder_' . $id, $token)) {
+            $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
+            Responses::redirect($returnTo);
+        }
+
+        $isEnabled     = (int) ($_POST['is_enabled'] ?? 0);
+        $intervalWeeks = (int) ($_POST['interval_weeks'] ?? 1);
+        $weekdays      = array_map('intval', (array) ($_POST['weekdays'] ?? []));
+        $startDate     = $this->nullableDate($_POST['start_date'] ?? null);
+        $endDate       = $this->nullableDate($_POST['end_date'] ?? null);
+
+        if ($intervalWeeks < 1) {
+            $this->guard->session()->setFlash('error', '通知間隔は1以上の整数で入力してください。');
+            Responses::redirect($returnTo);
+        }
+        if ($isEnabled === 1 && $weekdays === []) {
+            $this->guard->session()->setFlash('error', '通知曜日を1つ以上選択してください。');
+            Responses::redirect($returnTo);
+        }
+        if ($startDate !== null && $endDate !== null && $endDate < $startDate) {
+            $this->guard->session()->setFlash('error', '通知終了日は通知開始日以降の日付を入力してください。');
+            Responses::redirect($returnTo);
+        }
+
+        try {
+            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $repository = new AccidentCaseRepository($pdo);
+            $repository->saveReminderRule($id, [
+                'is_enabled'     => $isEnabled,
+                'interval_weeks' => $intervalWeeks,
+                'weekdays'       => $weekdays,
+                'start_date'     => $startDate,
+                'end_date'       => $endDate,
+            ], (int) ($auth['user_id'] ?? 0));
+            $this->guard->session()->setFlash('success', 'リマインド設定を保存しました。');
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', 'リマインド設定の保存に失敗しました。');
         }
 
         Responses::redirect($returnTo);

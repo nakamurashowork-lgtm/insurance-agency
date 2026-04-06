@@ -14,6 +14,7 @@ final class AccidentCaseDetailView
      * @param array<int, array{id: int, name: string}> $assignedUsers
      * @param array<string, mixed> $layoutOptions
      * @param array<int, array<string, mixed>> $allStatuses
+     * @param array<string, mixed>|null $reminderRule
      */
     public static function render(
         array $detail,
@@ -23,15 +24,18 @@ final class AccidentCaseDetailView
         string $listUrl,
         string $updateUrl,
         string $commentUrl,
+        string $reminderUrl,
         string $updateCsrf,
         string $commentCsrf,
+        string $reminderCsrf,
         string $returnToUrl,
         string $customerDetailBaseUrl,
         string $renewalDetailBaseUrl,
         ?string $flashError,
         ?string $flashSuccess,
         array $layoutOptions,
-        array $allStatuses = []
+        array $allStatuses = [],
+        ?array $reminderRule = null
     ): string {
         $errorHtml = '';
         if (is_string($flashError) && $flashError !== '') {
@@ -52,11 +56,11 @@ final class AccidentCaseDetailView
         } else {
             $statusLabels = [
                 'accepted'     => '受付',
-                'linked'       => '対応開始',
+                'linked'       => '保険会社連絡済み',
                 'in_progress'  => '対応中',
-                'waiting_docs' => '保留',
-                'resolved'     => '解決',
-                'closed'       => 'クローズ',
+                'waiting_docs' => '書類待ち',
+                'resolved'     => '解決済み',
+                'closed'       => '完了',
             ];
         }
         $currentStatus = (string) ($detail['status'] ?? 'accepted');
@@ -269,6 +273,8 @@ final class AccidentCaseDetailView
             . '<div class="dialog-actions"><button class="btn btn-primary" type="submit">保存する</button></div>'
             . '</form>'
             . '</div>'
+            // リマインド設定エリア
+            . self::renderReminderSection($reminderRule, $detail, $reminderUrl, $reminderCsrf, $returnToUrl)
             . '</div>'
             // ── 右カラム ──
             . '<div>'
@@ -295,6 +301,205 @@ final class AccidentCaseDetailView
             . '</div>';
 
         return Layout::render('事故案件詳細', $content, $layoutOptions);
+    }
+
+    /**
+     * @param array<string, mixed>|null $rule
+     * @param array<string, mixed> $detail
+     */
+    private static function renderReminderSection(
+        ?array $rule,
+        array $detail,
+        string $reminderUrl,
+        string $reminderCsrf,
+        string $returnToUrl
+    ): string {
+        $accidentCaseId = (int) ($detail['id'] ?? 0);
+        $status = (string) ($detail['status'] ?? '');
+        $isReadonly = in_array($status, ['resolved', 'closed'], true);
+
+        $weekdayLabels = ['日', '月', '火', '水', '木', '金', '土'];
+
+        if ($rule === null) {
+            // 未設定
+            if ($isReadonly) {
+                return '<div class="card"><div class="detail-section-title">リマインド設定</div>'
+                    . '<p class="muted" style="font-size:13px;">リマインド未設定（完了済み）</p>'
+                    . '</div>';
+            }
+            $formHtml = self::renderReminderForm(
+                $accidentCaseId, null, $reminderUrl, $reminderCsrf, $returnToUrl, $weekdayLabels, false
+            );
+            return '<div class="card"><div class="detail-section-title">リマインド設定</div>'
+                . '<p class="muted" style="font-size:13px;margin-bottom:8px;">リマインド未設定</p>'
+                . '<details>'
+                . '<summary style="cursor:pointer;color:var(--color-primary,#2563eb);font-size:13px;padding:4px 0;list-style:none;">設定する ▸</summary>'
+                . '<div style="margin-top:10px;">' . $formHtml . '</div>'
+                . '</details>'
+                . '</div>';
+        }
+
+        // 既存ルール
+        $isEnabled  = (int) ($rule['is_enabled'] ?? 0);
+        $weekdays   = (array) ($rule['weekdays'] ?? []);
+        $nextDate   = self::calcNextReminderDate($rule, $weekdays);
+        $lastNotify = trim((string) ($rule['last_notified_on'] ?? ''));
+        $lastNotifyDisplay = $lastNotify !== '' ? Layout::escape($lastNotify) : '—';
+
+        if ($isReadonly) {
+            // 読み取り専用
+            $weekdayDisplay = $weekdays !== []
+                ? implode('・', array_map(fn($w) => $weekdayLabels[$w] ?? '', $weekdays))
+                : '—';
+            return '<div class="card"><div class="detail-section-title">リマインド設定</div>'
+                . '<div class="kv"><span class="kv-key">有効/無効</span><span class="kv-val">' . ($isEnabled ? '有効' : '無効') . '</span></div>'
+                . '<div class="kv"><span class="kv-key">通知間隔</span><span class="kv-val">' . (int) ($rule['interval_weeks'] ?? 1) . '週</span></div>'
+                . '<div class="kv"><span class="kv-key">通知曜日</span><span class="kv-val">' . Layout::escape($weekdayDisplay) . '</span></div>'
+                . '<div class="kv"><span class="kv-key">通知開始日</span><span class="kv-val">' . (trim((string) ($rule['start_date'] ?? '')) !== '' ? Layout::escape((string) $rule['start_date']) : '<span class="muted">未設定</span>') . '</span></div>'
+                . '<div class="kv"><span class="kv-key">通知終了日</span><span class="kv-val">' . (trim((string) ($rule['end_date'] ?? '')) !== '' ? Layout::escape((string) $rule['end_date']) : '<span class="muted">未設定</span>') . '</span></div>'
+                . '<div class="kv"><span class="kv-key">次回通知予定</span><span class="kv-val">' . Layout::escape($nextDate) . '</span></div>'
+                . '<div class="kv"><span class="kv-key">最終通知日</span><span class="kv-val">' . $lastNotifyDisplay . '</span></div>'
+                . '</div>';
+        }
+
+        $formHtml = self::renderReminderForm(
+            $accidentCaseId, $rule, $reminderUrl, $reminderCsrf, $returnToUrl, $weekdayLabels, true
+        );
+        return '<div class="card"><div class="detail-section-title">リマインド設定</div>'
+            . '<div class="kv"><span class="kv-key">次回通知予定</span><span class="kv-val">' . Layout::escape($nextDate) . '</span></div>'
+            . '<div class="kv"><span class="kv-key">最終通知日</span><span class="kv-val">' . $lastNotifyDisplay . '</span></div>'
+            . '<details open>'
+            . '<summary style="cursor:pointer;font-size:13px;padding:4px 0;color:var(--text-muted,#6b7280);">設定を編集</summary>'
+            . '<div style="margin-top:10px;">' . $formHtml . '</div>'
+            . '</details>'
+            . '</div>';
+    }
+
+    /**
+     * @param array<string, mixed>|null $rule
+     * @param string[] $weekdayLabels
+     */
+    private static function renderReminderForm(
+        int $accidentCaseId,
+        ?array $rule,
+        string $reminderUrl,
+        string $reminderCsrf,
+        string $returnToUrl,
+        array $weekdayLabels,
+        bool $hasExisting
+    ): string {
+        $isEnabled     = $rule !== null ? (int) ($rule['is_enabled'] ?? 0) : 1;
+        $intervalWeeks = $rule !== null ? (int) ($rule['interval_weeks'] ?? 1) : 1;
+        $startDate     = $rule !== null ? trim((string) ($rule['start_date'] ?? '')) : '';
+        $endDate       = $rule !== null ? trim((string) ($rule['end_date'] ?? '')) : '';
+        $savedWeekdays = $rule !== null ? (array) ($rule['weekdays'] ?? []) : [];
+
+        $disabledAttr  = $isEnabled === 0 ? ' disabled' : '';
+
+        $weekdayCheckboxes = '';
+        for ($w = 0; $w <= 6; $w++) {
+            $checked = in_array($w, $savedWeekdays, true) ? ' checked' : '';
+            $weekdayCheckboxes .= '<label style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;">'
+                . '<input type="checkbox" name="weekdays[]" value="' . $w . '"' . $checked . $disabledAttr . '>'
+                . '<span>' . $weekdayLabels[$w] . '</span>'
+                . '</label>';
+        }
+
+        $enabledChecked = $isEnabled === 1 ? ' checked' : '';
+
+        return '<form method="post" action="' . Layout::escape($reminderUrl) . '" id="reminder-form">'
+            . '<input type="hidden" name="id" value="' . $accidentCaseId . '">'
+            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($reminderCsrf) . '">'
+            . '<input type="hidden" name="return_to" value="' . Layout::escape($returnToUrl) . '">'
+            . '<div class="form-row">'
+            . '<div class="form-label">リマインド有効/無効</div>'
+            . '<label style="display:inline-flex;align-items:center;gap:8px;">'
+            . '<input type="checkbox" name="is_enabled" value="1" id="reminder-enabled"' . $enabledChecked . ' onchange="toggleReminderFields(this.checked)">'
+            . '<span>有効</span>'
+            . '</label>'
+            . '</div>'
+            . '<div class="form-row"><div class="form-label">通知間隔（週）</div>'
+            . '<input class="form-input" type="number" name="interval_weeks" value="' . $intervalWeeks . '" min="1" style="width:80px;"' . $disabledAttr . ' id="reminder-interval">'
+            . '</div>'
+            . '<div class="form-row"><div class="form-label">通知曜日</div>'
+            . '<div id="reminder-weekdays">' . $weekdayCheckboxes . '</div>'
+            . '</div>'
+            . '<div class="form-row"><div class="form-label">通知開始日</div>'
+            . '<input class="form-input" type="date" name="start_date" value="' . Layout::escape($startDate) . '"' . $disabledAttr . ' id="reminder-start">'
+            . '</div>'
+            . '<div class="form-row"><div class="form-label">通知終了日</div>'
+            . '<input class="form-input" type="date" name="end_date" value="' . Layout::escape($endDate) . '"' . $disabledAttr . ' id="reminder-end">'
+            . '</div>'
+            . '<div class="dialog-actions">'
+            . '<button class="btn btn-primary" type="submit">リマインド設定を保存</button>'
+            . '</div>'
+            . '</form>'
+            . '<script>'
+            . 'function toggleReminderFields(enabled){'
+            . 'var ids=["reminder-interval","reminder-start","reminder-end"];'
+            . 'ids.forEach(function(id){var el=document.getElementById(id);if(el){el.disabled=!enabled;}});'
+            . 'var cbs=document.querySelectorAll("#reminder-weekdays input[type=checkbox]");'
+            . 'cbs.forEach(function(cb){cb.disabled=!enabled;});'
+            . '}'
+            . '</script>';
+    }
+
+    /**
+     * @param array<string, mixed> $rule
+     * @param int[] $weekdays
+     */
+    private static function calcNextReminderDate(array $rule, array $weekdays): string
+    {
+        if ((int) ($rule['is_enabled'] ?? 0) === 0) {
+            return '無効';
+        }
+
+        if ($weekdays === []) {
+            return '—';
+        }
+
+        $today   = new \DateTimeImmutable(date('Y-m-d'));
+        $endDate = trim((string) ($rule['end_date'] ?? '')) !== ''
+            ? new \DateTimeImmutable((string) $rule['end_date'])
+            : null;
+
+        if ($endDate !== null && $endDate < $today) {
+            return '終了済み';
+        }
+
+        $startDate = trim((string) ($rule['start_date'] ?? '')) !== ''
+            ? new \DateTimeImmutable((string) $rule['start_date'])
+            : null;
+
+        $baseDate     = new \DateTimeImmutable((string) $rule['base_date']);
+        $intervalDays = max(1, (int) ($rule['interval_weeks'] ?? 1)) * 7;
+
+        // 今日以降で base_date から intervalDays の倍数かつ weekday_cd が一致する最初の日を探す
+        $limit = $today->modify('+2 years');
+        $date  = $today;
+
+        while ($date <= $limit) {
+            $weekdayCd = (int) $date->format('w');
+            if (in_array($weekdayCd, $weekdays, true)) {
+                $diff = $baseDate->diff($date);
+                if ($diff->invert === 0) {
+                    $daysDiff = (int) $diff->days;
+                    if ($daysDiff % $intervalDays === 0) {
+                        if ($startDate !== null && $date < $startDate) {
+                            $date = $date->modify('+1 day');
+                            continue;
+                        }
+                        if ($endDate !== null && $date > $endDate) {
+                            return '終了済み';
+                        }
+                        return $date->format('Y-m-d');
+                    }
+                }
+            }
+            $date = $date->modify('+1 day');
+        }
+
+        return '—';
     }
 
     private static function formatDate(string $value): string

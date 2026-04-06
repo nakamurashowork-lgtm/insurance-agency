@@ -147,6 +147,9 @@ $router->post('accident/store', static function () use ($accidentCaseController)
 $router->post('accident/comment', static function () use ($accidentCaseController): void {
     $accidentCaseController->comment();
 });
+$router->post('accident/reminder', static function () use ($accidentCaseController): void {
+    $accidentCaseController->reminder();
+});
 $router->get('activity/list', static function () use ($activityController): void {
     $activityController->list();
 });

@@ -282,19 +282,6 @@ $insCustomerEmpty->execute([
 ]);
 $emptyCustomerId = (int) $tenant->lastInsertId();
 
-$insContact = $tenant->prepare(
-    "INSERT INTO m_customer_contact (customer_id, contact_name, department, position_name, phone, email, is_primary, sort_order, created_by, updated_by)
-     VALUES (:customer_id, :contact_name, :department, '担当', :phone, :email, 1, 1, :uid, :uid)"
-);
-$insContact->execute([
-    'customer_id' => $customerId,
-    'contact_name' => $mark . '_CONTACT',
-    'department' => '営業部',
-    'phone' => '0312345678',
-    'email' => strtolower($mark) . '_contact@example.com',
-    'uid' => $userId,
-]);
-
 $insContract = $tenant->prepare(
     "INSERT INTO t_contract (customer_id, policy_no, insurer_name, product_type, policy_start_date, policy_end_date, premium_amount, payment_cycle, status, created_by, updated_by)
      VALUES (:customer_id, :policy_no, 'UI保険', 'auto', '2026-01-01', '2026-12-31', 120000, 'annual', 'active', :uid, :uid)"

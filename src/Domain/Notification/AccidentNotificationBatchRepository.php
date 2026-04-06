@@ -116,7 +116,7 @@ final class AccidentNotificationBatchRepository
     public function insertDeliverySuccess(int $runId, int $accidentCaseId, int $ruleId, string $runDate): bool
     {
         $stmt = $this->pdo->prepare(
-            'INSERT IGNORE INTO t_notification_delivery (
+            'INSERT INTO t_notification_delivery (
                 notification_run_id,
                 notification_type,
                 renewal_case_id,
@@ -138,7 +138,12 @@ final class AccidentNotificationBatchRepository
                 NOW(),
                 "success",
                 NULL
-             )'
+             )
+             ON DUPLICATE KEY UPDATE
+                notification_run_id = VALUES(notification_run_id),
+                notified_at         = NOW(),
+                delivery_status     = "success",
+                error_message       = NULL'
         );
         $stmt->execute([
             'run_id' => $runId,
@@ -147,7 +152,7 @@ final class AccidentNotificationBatchRepository
             'scheduled_date' => $runDate,
         ]);
 
-        return $stmt->rowCount() === 1;
+        return true;
     }
 
     public function hasDeliveryForSchedule(int $accidentCaseId, int $ruleId, string $runDate): bool

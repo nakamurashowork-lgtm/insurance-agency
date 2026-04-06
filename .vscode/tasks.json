@@ -48,8 +48,11 @@
       "command": "powershell",
       "args": [
         "-NoProfile",
-        "-Command",
-        "$date='${input:batchDate}'; $type='${input:batchType}'; $tenant='${input:batchTenant}'; $tenantArg = if ($tenant -ne '') { \"--tenant=$tenant\" } else { $null }; $phpArgs = @(\"tools/batch/run_renewal_notification.php\", \"--date=$date\", \"--type=$type\"); if ($tenantArg) { $phpArgs += $tenantArg }; & 'C:\\xampp\\php\\php.exe' $phpArgs"
+        "-ExecutionPolicy", "Bypass",
+        "-File", "tools\\batch\\run_renewal_notification.ps1",
+        "-date", "${input:batchDate}",
+        "-type", "${input:batchType}",
+        "-tenant", "${input:batchTenant}"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -68,8 +71,9 @@
       "command": "powershell",
       "args": [
         "-NoProfile",
-        "-Command",
-        "$date=(Get-Date -Format 'yyyy-MM-dd'); $type='${input:batchTypeNoTenant}'; & 'C:\\xampp\\php\\php.exe' tools/batch/run_renewal_notification.php \"--date=$date\" \"--type=$type\""
+        "-ExecutionPolicy", "Bypass",
+        "-File", "tools\\batch\\run_renewal_notification.ps1",
+        "-type", "${input:batchTypeNoTenant}"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -88,8 +92,10 @@
       "command": "powershell",
       "args": [
         "-NoProfile",
-        "-Command",
-        "$date=(Get-Date -Format 'yyyy-MM-dd'); $type='${input:batchTypeTodayTenant}'; $tenant='${input:batchTenantToday}'; $tenantArg = if ($tenant -ne '') { \"--tenant=$tenant\" } else { $null }; $phpArgs = @(\"tools/batch/run_renewal_notification.php\", \"--date=$date\", \"--type=$type\"); if ($tenantArg) { $phpArgs += $tenantArg }; & 'C:\\xampp\\php\\php.exe' $phpArgs"
+        "-ExecutionPolicy", "Bypass",
+        "-File", "tools\\batch\\run_renewal_notification.ps1",
+        "-type", "${input:batchTypeTodayTenant}",
+        "-tenant", "${input:batchTenantToday}"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
