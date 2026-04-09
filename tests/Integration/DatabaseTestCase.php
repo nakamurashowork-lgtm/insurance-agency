@@ -16,6 +16,13 @@ use PHPUnit\Framework\TestCase;
  */
 abstract class DatabaseTestCase extends TestCase
 {
+    /**
+     * テスト固定の実行者 ID。
+     * マジックナンバー回避のため全テストはこの定数を参照すること。
+     * 将来 common.users への FK が追加された場合は 1 箇所の変更で済む。
+     */
+    protected const TEST_EXECUTED_BY = 9001;
+
     protected PDO $pdo;
 
     /** TRUNCATE する順序（外部キー的な参照順を考慮して子 → 親の順） */
@@ -96,8 +103,8 @@ abstract class DatabaseTestCase extends TestCase
             'sjnet_code' => null,
             'is_active'  => 1,
             'sort_order' => 0,
-            'created_by' => 1,
-            'updated_by' => 1,
+            'created_by' => self::TEST_EXECUTED_BY,
+            'updated_by' => self::TEST_EXECUTED_BY,
         ];
         $data = array_merge($defaults, $overrides);
 
@@ -132,8 +139,8 @@ abstract class DatabaseTestCase extends TestCase
             'status'             => 'active',
             'note'               => null,
             'is_deleted'         => 0,
-            'created_by'         => 1,
-            'updated_by'         => 1,
+            'created_by'         => self::TEST_EXECUTED_BY,
+            'updated_by'         => self::TEST_EXECUTED_BY,
         ];
         $data = array_merge($defaults, $overrides);
 
@@ -171,8 +178,8 @@ abstract class DatabaseTestCase extends TestCase
             'office_staff_id'       => null,
             'last_sjnet_imported_at' => null,
             'is_deleted'            => 0,
-            'created_by'            => 1,
-            'updated_by'            => 1,
+            'created_by'            => self::TEST_EXECUTED_BY,
+            'updated_by'            => self::TEST_EXECUTED_BY,
         ];
         $data = array_merge($defaults, $overrides);
 
@@ -192,6 +199,78 @@ abstract class DatabaseTestCase extends TestCase
         return (int) $this->pdo->lastInsertId();
     }
 
+    // =========================================================
+    // バッチ結果取得ヘルパ
+    // =========================================================
+
+    /**
+     * t_sjnet_import_batch の最新行を返す。
+     * テスト内で import() を1回しか呼ばない場合はそのバッチ行を返す。
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function getLatestBatch(): ?array
+    {
+        $stmt = $this->pdo->query(
+            'SELECT * FROM t_sjnet_import_batch ORDER BY id DESC LIMIT 1'
+        );
+        $row = $stmt !== false ? $stmt->fetch() : false;
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * 指定バッチ ID に属する全取込行を返す（row_no 昇順）。
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    protected function getRowsByBatch(int $batchId): array
+    {
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM t_sjnet_import_row
+             WHERE sjnet_import_batch_id = :batch_id
+             ORDER BY row_no ASC'
+        );
+        $stmt->execute(['batch_id' => $batchId]);
+        $rows = $stmt->fetchAll();
+        return is_array($rows) ? $rows : [];
+    }
+
+    // =========================================================
+    // テスト用一時ファイルヘルパ
+    // =========================================================
+
+    /**
+     * CSV 文字列を一時ファイルに書き込み、パスを返す。
+     * テスト終了時に自動削除されるよう tearDown で管理すること。
+     */
+    protected function writeTempCsv(string $csvContent): string
+    {
+        $path = tempnam(sys_get_temp_dir(), 'sjnet_test_');
+        if ($path === false) {
+            throw new \RuntimeException('tempnam failed');
+        }
+        file_put_contents($path, $csvContent);
+        $this->tempFiles[] = $path;
+        return $path;
+    }
+
+    /** @var list<string> */
+    private array $tempFiles = [];
+
+    protected function tearDown(): void
+    {
+        foreach ($this->tempFiles as $path) {
+            if (file_exists($path)) {
+                unlink($path);
+            }
+        }
+        $this->tempFiles = [];
+    }
+
+    // =========================================================
+    // マスタデータ投入ヘルパ
+    // =========================================================
+
     /**
      * t_renewal_case に1行挿入し、挿入した id を返す。
      *
@@ -206,8 +285,8 @@ abstract class DatabaseTestCase extends TestCase
             'assigned_staff_id'      => null,
             'office_staff_id'        => null,
             'is_deleted'             => 0,
-            'created_by'             => 1,
-            'updated_by'             => 1,
+            'created_by'             => self::TEST_EXECUTED_BY,
+            'updated_by'             => self::TEST_EXECUTED_BY,
         ];
         $data = array_merge($defaults, $overrides);
 
