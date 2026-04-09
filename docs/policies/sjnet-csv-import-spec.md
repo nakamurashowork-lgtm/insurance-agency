@@ -4,7 +4,17 @@
 
 本文書は、SJ-NET からダウンロードした満期一覧 CSV を満期一覧画面（SCR-RENEWAL-LIST）から取り込み、`t_contract`・`t_renewal_case`・`m_customer` を自動登録・更新する処理の正式仕様である。
 
-担当者マッピングの詳細は `docs/policies/sjnet_staff_mapping_spec.md` を参照する。本文書はそれを上位仕様として包含し、CSV カラム定義・取込ロジック・年決定ルールを追加定義する。
+担当者マッピングの詳細は `docs/policies/sjnet_staff_mapping_spec.md` を参照する。本文書はそれを上位仕様として包含し、CSV カラム定義・取込ロジック・満期日決定ルールを追加定義する。
+
+---
+
+## 1-1. 関連仕様書
+
+本文書は SJNET 取込の **具体的な処理フロー** を定義する。
+
+`t_contract` と `t_renewal_case` の **責務分離の設計原則**（どのカラムをどちらのテーブルで持つか、画面からの編集可否、CSV 取込で更新してよいカラムとそうでないカラムの区別）については、`docs/policies/contract-renewal-case-separation.md` を参照する。
+
+本文書は責務分離仕様の制約下で実装する。両者に不整合がある場合は、責務分離仕様を優先する。
 
 ---
 
@@ -30,12 +40,9 @@
 
 | 列番号 | 列名 | 取込用途 | 対応カラム |
 |---|---|---|---|
-| 2 (B) | **満期日（月）** | 満期日組み立て（年は取込日から自動判定） | `t_renewal_case.maturity_date`（月） |
-| 3 (C) | **満期日（日）** | 満期日組み立て | `t_renewal_case.maturity_date`（日） |
 | 4 (D) | **顧客名** | 顧客名寄せ・新規登録 | `m_customer.customer_name` |
-| 15 (O) | **保険会社** | 契約登録・更新 | `t_contract.insurer_name` |
 | 16 (P) | **保険始期** | 契約登録・更新 | `t_contract.policy_start_date` |
-| 17 (Q) | **保険終期** | 契約の識別キー（policy_no との複合）・契約登録・更新 | `t_contract.policy_end_date` |
+| 17 (Q) | **保険終期** | 契約の識別キー（policy_no との複合）・契約登録・更新・満期日 | `t_contract.policy_end_date` / `t_renewal_case.maturity_date` |
 | 18 (R) | **種目種類** | 契約登録・更新 | `t_contract.product_type` |
 | 19 (S) | **証券番号** | 契約の識別キー（policy_end_date との複合）| `t_contract.policy_no` |
 | 23 (W) | **合計保険料** | 契約登録・更新 | `t_contract.premium_amount` |
@@ -53,53 +60,46 @@
 
 ### 不使用カラム（読み飛ばし）
 
-| 列番号 | 列名 |
-|---|---|
-| 1 (A) | 満期契約の識別 |
-| 5 (E) | 生年月日 |
-| 9 (I) | ＦＡＸ |
-| 10 (J) | 携帯ＴＥＬ |
-| 11 (K) | 更改状況 |
-| 12 (L) | 世帯主名 |
-| 13 (M) | 続柄 |
-| 14 (N) | （空列） |
-| 21 (U) | 回数 |
-| 22 (V) | 件数 |
-| 24 (X) | 満期返れい金 |
-| 25〜30 | 保険金額1〜3・単位 |
-| 31 (AE) | 契約状況 |
-| 32〜36 | 事故・入替・質権・共保・代分 |
-| 37 (AK) | 保険の対象等 |
-| 38〜39 | （空列） |
-| 40 (AN) | 拠点コード |
-| 41 (AO) | 拠点 |
-| 42 (AP) | 担当者コード |
+| 列番号 | 列名 | 理由 |
+|---|---|---|
+| 1 (A) | 満期契約の識別 | |
+| 2 (B) | 満期日（月） | Q列（保険終期）で代替するため不要 |
+| 3 (C) | 満期日（日） | Q列（保険終期）で代替するため不要 |
+| 5 (E) | 生年月日 | |
+| 9 (I) | ＦＡＸ | |
+| 10 (J) | 携帯ＴＥＬ | |
+| 11 (K) | 更改状況 | |
+| 12 (L) | 世帯主名 | |
+| 13 (M) | 続柄 | |
+| 14 (N) | （空列） | |
+| 15 (O) | 保険会社 | 損保ジャパン専用のため不要 |
+| 21 (U) | 回数 | |
+| 22 (V) | 件数 | |
+| 24 (X) | 満期返れい金 | |
+| 25〜30 | 保険金額1〜3・単位 | |
+| 31 (AE) | 契約状況 | |
+| 32〜36 | 事故・入替・質権・共保・代分 | |
+| 37 (AK) | 保険の対象等 | |
+| 38〜39 | （空列） | |
+| 40 (AN) | 拠点コード | |
+| 41 (AO) | 拠点 | |
+| 42 (AP) | 担当者コード | |
 
 ---
 
-## 4. 満期年の決定ルール
+## 4. 満期日の決定ルール
 
-SJNETのCSVには満期日の「月」と「日」のみが含まれ、「年」が含まれない。
-以下のルールで取込実行日から満期年を決定する。
+**Q列（保険終期 = `policy_end_date`）をそのまま満期日として使用する。**
 
 ```
-満期月日 = 列2（月） + 列3（日）
-
-候補A = 取込実行年 - 満期月日
-候補B = 取込実行年 + 1 - 満期月日
-
-取込実行日 <= 候補A → 候補A（当年）を満期日とする
-取込実行日 >  候補A → 候補B（翌年）を満期日とする
+t_contract.policy_end_date    = CSV の Q列（YYYY-MM-DD）
+t_renewal_case.maturity_date  = CSV の Q列（同じ値）
 ```
 
-**例（取込日: 2026-02-01）**
+この方式は、業務 Excel の運用（保険終期 = 満期日）と一致する。B列（満期月）・C列（満期日）から年を動的算出する旧ロジックは廃止した。
 
-| CSVの月日 | 候補A | 判定 | 採用 |
-|---|---|---|---|
-| 4月30日 | 2026-04-30 | 取込日≦候補A | 2026-04-30（当年） |
-| 1月15日 | 2026-01-15 | 取込日＞候補A | 2027-01-15（翌年） |
-
-この判定は「毎月、満期2ヶ月前の月初に取り込む」という現行運用と完全に整合する。
+**廃止した旧ロジック（参考）**  
+以前は B列の月・C列の日から「取込日を基準に当年または翌年」を判定して満期日を算出していた。この算出は業務 Excel の運用と乖離しており、かつ不必要な複雑さを持っていたため廃止した。
 
 ---
 
@@ -134,7 +134,6 @@ SJNETのCSVには満期日の「月」と「日」のみが含まれ、「年」
   → t_contract を policy_no = 列19 AND policy_end_date = 列17（日付変換）AND is_deleted = 0 で検索
     ※ 同一証券番号でも終期日が異なれば別の契約年度として扱う
   → ヒット（UPDATE）: 同一年度の再取込
-      insurer_name       = 列15
       policy_start_date  = 列16（日付変換）
       policy_end_date    = 列17（日付変換）
       product_type       = 列18
@@ -143,10 +142,10 @@ SJNETのCSVには満期日の「月」と「日」のみが含まれ、「年」
       sales_user_id      = resolved_staff_user_id（NULL の場合は上書きしない）
       last_sjnet_imported_at = 取込実行日時
       ※ customer_id は UPDATE しない（既存の顧客紐づけを維持する）
+      ※ 保険会社（列15: O列）は参照しない（損保ジャパン専用のため）
   → ミス（INSERT）: 新年度の契約として新規作成
       customer_id        = STEP 2 で解決した customer_id
       policy_no          = 列19
-      insurer_name       = 列15
       policy_start_date  = 列16
       policy_end_date    = 列17
       product_type       = 列18
@@ -161,14 +160,14 @@ SJNETのCSVには満期日の「月」と「日」のみが含まれ、「年」
         対応途中（not_started / sj_requested 等）の旧案件は自動クローズしない
 
 【STEP 5】満期案件の登録・更新
-  → contract_id + maturity_date（STEP 4 の contract_id と STEP から決定した満期日）で
+  → contract_id + maturity_date（STEP 4 の contract_id と列17の保険終期）で
     t_renewal_case を検索（is_deleted = 0）
   → ヒット（UPDATE):
       assigned_user_id = resolved_staff_user_id（既に設定済みの場合は上書きしない）
   → ミス（INSERT):
       contract_id      = STEP 4 の contract_id
-      maturity_date    = 満期年決定ルールで算出した DATE
-      case_status      = 'open'
+      maturity_date    = 列17（保険終期）と同じ値（YYYY-MM-DD）
+      case_status      = 'not_started'
       assigned_user_id = resolved_staff_user_id
       office_user_id   = t_contract.office_user_id を引き継ぐ
 
@@ -182,7 +181,7 @@ SJNETのCSVには満期日の「月」と「日」のみが含まれ、「年」
 
 - 証券番号（列19）が空の行
 - 顧客名（列4）が空の行
-- 満期月（列2）または満期日（列3）が空の行
+- 保険終期（列17）が空の行
 
 ---
 
