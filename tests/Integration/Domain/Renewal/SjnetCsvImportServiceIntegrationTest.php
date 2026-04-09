@@ -1048,6 +1048,122 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
         $this->assertSame('renewed', $oldCase['renewal_result'], '前提確認: renewal_result は renewed のまま');
     }
 
+    /**
+     * Y-D2: 顧客 INSERT 成功後に契約 INSERT が失敗すると orphan customer が残る（既知の不具合）
+     *
+     * 【これは既知の不具合を固定するテスト。Q6 の業務確認後、削除または書き換え予定】
+     *
+     * 以下 3 つの既知問題を 1 シナリオで同時に固定する（Arrange が共通のため分離しない）:
+     *
+     *   1. processRow にトランザクション境界がなく、顧客 INSERT 後に契約 INSERT が失敗すると
+     *      orphan customer が DB に残る（Phase 5 指摘 #1）
+     *
+     *   2. 例外発生行は t_sjnet_import_row に記録されない
+     *      （insertRow が processRow 成功後にのみ呼ばれる構造のため）（Phase 5 指摘 #2）
+     *
+     *   3. 1 行の PDOException でバッチ全体が failBatch + 中断される
+     *      （ambiguous_customer 等の業務エラーが継続するのと非対称）（Phase 5 指摘 #3）
+     *
+     * 修正は 3 件独立して行われる可能性があるため、修正時はこのテストを
+     * 分割または書き換えること。特に #1 修正（トランザクション導入）後は
+     * 「orphan customer が残らないこと」を確認するテストに置き換えること。
+     *
+     * 失敗の引き起こし方:
+     *   soft-deleted 契約（is_deleted=1）を同一 (policy_no, policy_end_date) で事前作成。
+     *   CSV 取込時に upsertContract の SELECT は is_deleted=0 でフィルタするためミス判定し、
+     *   INSERT を試みる → UNIQUE KEY uq_t_contract_02(policy_no, policy_end_date) で
+     *   PDOException 発生。この時点で顧客 INSERT はコミット済み（autocommit ON）。
+     */
+    public function testImport_OrphanCustomer_WhenContractInsertFails_KnownIssue_PendingQ6(): void
+    {
+        // Arrange: 同一 (policy_no, policy_end_date) で soft-deleted 契約を事前作成
+        // ※ customer_id=1 はダミー（外部キー制約なし）
+        $policyNo    = 'YD2-P001';
+        $maturityDate = '2026-04-30';
+
+        $dummyCustomerId = $this->createCustomer(['customer_name' => 'ダミー既存顧客']);
+        $this->createContract([
+            'customer_id'     => $dummyCustomerId,
+            'policy_no'       => $policyNo,
+            'policy_end_date' => $maturityDate,
+            'is_deleted'      => 1,  // soft-deleted: SELECT で is_deleted=0 フィルタをすり抜ける
+        ]);
+
+        // CSV には新規顧客 + 同一 policy_no + 同一 policy_end_date
+        $newCustomerName = '孤立顧客テスト太郎';
+        $path = $this->writeTempCsv(
+            SjnetCsvBuilder::row()
+                ->withPolicyNo($policyNo)
+                ->withCustomerName($newCustomerName)
+                ->withEndDate($maturityDate)
+                ->toCsvString()
+        );
+        $service = $this->makeService();
+
+        // Act: import 実行。processRow 内で顧客 INSERT 成功後、契約 INSERT が UNIQUE 違反で失敗する
+        // import() の catch Throwable → failBatch → RuntimeException 再スロー
+        $threwException = false;
+        try {
+            $service->import($path, 'yd2_orphan.csv');
+        } catch (\RuntimeException $e) {
+            $threwException = true;
+        }
+
+        // Assert 1: RuntimeException がスローされること（バッチ全体が中断）
+        $this->assertTrue($threwException, 'PDOException が RuntimeException として再スローされること');
+
+        // Assert 2: orphan customer が DB に残っていること（既知不具合 #1 の固定）
+        // [現状固定] Q6 でトランザクション導入後は「残らないこと」を確認するテストに置き換えること
+        $stmt = $this->pdo->prepare('SELECT id FROM m_customer WHERE customer_name = :name');
+        $stmt->execute(['name' => $newCustomerName]);
+        $orphanCustomer = $stmt->fetch();
+        $this->assertIsArray(
+            $orphanCustomer,
+            '[既知不具合 #1] orphan customer が残っている。' .
+            'Q6 回答後にトランザクションが導入されたら、このアサートを「残らないこと」に書き換えること'
+        );
+
+        // Assert 3: t_contract に新規行がないこと（失敗した INSERT は反映されていない）
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM t_contract WHERE policy_no = :pno AND is_deleted = 0'
+        );
+        $stmt->execute(['pno' => $policyNo]);
+        $this->assertSame(
+            0,
+            (int) $stmt->fetchColumn(),
+            't_contract に is_deleted=0 の新規行はない（UNIQUE 違反で INSERT 失敗）'
+        );
+
+        // Assert 4: t_renewal_case に該当行なし
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM t_renewal_case')->fetchColumn(),
+            't_renewal_case に行がないこと'
+        );
+
+        // Assert 5: t_sjnet_import_row に失敗行が記録されていないこと（既知不具合 #2 の固定）
+        // [現状固定] 修正後は「error として記録されること」に書き換えること
+        $batch = $this->getLatestBatch();
+        $this->assertNotNull($batch, 'バッチ行は作成されていること');
+        $rows = $this->getRowsByBatch((int) $batch['id']);
+        $this->assertCount(
+            0,
+            $rows,
+            '[既知不具合 #2] 例外発生行は t_sjnet_import_row に記録されない。' .
+            '修正後は「error として記録されること」に書き換えること'
+        );
+
+        // Assert 6: t_sjnet_import_batch が failed 状態で終わること（既知不具合 #3 の固定）
+        // [現状固定] 1 行エラーでバッチ全体が中断・failed になる。
+        // 修正後（行単位でキャッチ）は 'partial' を期待するテストに書き換えること
+        $this->assertSame(
+            'failed',
+            $batch['import_status'],
+            '[既知不具合 #3] 1 行の PDOException でバッチ全体が failed になる。' .
+            '修正後は partial を期待するテストに書き換えること'
+        );
+    }
+
     // =========================================================
     // Step 8: バッチ全体 (D1, D3, D4-1, D4-2)
     // =========================================================

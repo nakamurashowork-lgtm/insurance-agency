@@ -115,5 +115,119 @@ GROUP BY error_message;
 
 | # | 箇所 | 仕様書の記述 | 実装の挙動 | 対応方針 |
 |---|---|---|---|---|
-| I-1 | `sjnet-csv-import-spec.md` STEP 5 | `case_status = 'open'` | `'not_started'` を INSERT | 仕様書側を `'not_started'` に修正（DDL の DEFAULT 値と一致させる） |
-| I-2 | `closeOldRenewalCases` | 仕様書に `case_status IN ('renewed', 'lost')` と明記 | 同左 | `t_renewal_case.case_status` の有効値に `'renewed'`/`'lost'` が含まれないように見える（コメントには記載なし）。実際の有効値リストを確定して DDL コメントを修正する |
+| I-1 | `sjnet-csv-import-spec.md` STEP 5 | `case_status = 'open'` | `'not_started'` を INSERT | 仕様書側を `'not_started'` に修正済み（コミット e8c3c07） |
+| I-2 | `closeOldRenewalCases` | `case_status IN ('renewed', 'lost')` でクローズ | 永久に 0 件更新（dead code） | 下記 Phase 5 指摘 #3 を参照 |
+
+---
+
+## Phase 5 指摘事項（開発側で修正が必要な実装上の問題）
+
+> テスト強化（Phase 2）で判明した実装上の問題を記録する。
+> 各項目は独立して修正可能。修正前に Q1〜Q6 の業務確認結果を考慮すること。
+> 「Y-D2 で固定済み」は統合テスト `testImport_..._KnownIssue_PendingQ6` で
+> 現状挙動がテストコードに記録されていることを意味する。
+
+---
+
+### Phase 5 指摘 #1: processRow にトランザクション境界がなく orphan customer が残る
+
+**ファイル**: `src/Domain/Renewal/SjnetCsvImportService.php` — `import()` / `processRow()`
+
+**問題**:
+`processRow()` は「顧客解決 → 契約登録 → 満期案件登録」を順に実行するが、
+明示的な `BEGIN / COMMIT / ROLLBACK` で囲まれていない。
+顧客の新規 INSERT が成功した後、契約 INSERT が例外（UNIQUE 違反等）で失敗すると、
+顧客だけ DB に残る（orphan customer）。
+
+**再現条件**:
+同一 `(policy_no, policy_end_date)` の soft-deleted 契約が既に存在する状態で
+同一キーの新規 CSV 行を取込む → 顧客 INSERT 成功 → 契約 INSERT が UNIQUE 違反。
+
+**影響**:
+- 手動で顧客を削除しない限り、次回同名顧客の取込で `ambiguous_customer` エラーが発生し続ける
+- 孤立した顧客が顧客一覧に表示される
+
+**対応方針**: Q6「processRow にトランザクションを導入してよいか？」の回答を待って判断する。
+
+**テストで固定済み**: Y-D2 (`testImport_OrphanCustomer_WhenContractInsertFails_KnownIssue_PendingQ6`)
+
+---
+
+### Phase 5 指摘 #2: 例外発生行は t_sjnet_import_row に記録されない
+
+**ファイル**: `src/Domain/Renewal/SjnetCsvImportService.php` — `import()` ループ（67〜75行）
+
+**問題**:
+```php
+$rowData = $this->processRow($cols, $rowNo, $counters);
+$importRepo->insertRow($batchId, $rowNo, $rowData);  // processRow 成功後にのみ呼ばれる
+```
+`processRow()` 内で PDOException が発生すると、`insertRow()` が呼ばれる前に
+catch ブロック（75行）に飛ぶため、その行の記録が `t_sjnet_import_row` に残らない。
+
+**対比**: ambiguous_customer 等の「業務エラー」は `processRow()` が error 配列を返すため
+`insertRow()` が呼ばれて記録される。PDOException は記録されない。
+
+**影響**:
+- 取込ログを見ても「何行目の何が原因でバッチが中断したか」がわからない
+- デバッグ・運用上の可視性が低下する
+
+**対応方針**: try-catch を `processRow()` 単位に変更し、PDOException も
+`row_status='error'` として insertRow() に記録するか検討する。
+
+**テストで固定済み**: Y-D2 (`testImport_OrphanCustomer_WhenContractInsertFails_KnownIssue_PendingQ6`)
+
+---
+
+### Phase 5 指摘 #3: 1 行の PDOException でバッチ全体が中断される（D1 と非対称）
+
+**ファイル**: `src/Domain/Renewal/SjnetCsvImportService.php` — `import()` 67〜77行
+
+**問題**:
+D1 テストで確認したように、`ambiguous_customer` 等の業務エラーは
+「その行をスキップして次の行を続行」する。
+しかし PDOException は `import()` の外側の catch で `failBatch` を呼んでバッチ全体を中断する。
+
+1 行の DB エラーが全体を止める挙動は業務上の問題になりうる。
+
+**対応方針**:
+- 1 行の PDOException も processRow 単位でキャッチして `row_status='error'` として継続するか
+- それとも DB エラーはデータ整合性の問題として全体中断を維持するか
+  業務ポリシーの確認が必要
+
+**テストで固定済み**: Y-D2 (`testImport_OrphanCustomer_WhenContractInsertFails_KnownIssue_PendingQ6`)
+
+---
+
+### Phase 5 指摘 #4: closeOldRenewalCases が wrong column フィルタで dead code
+
+**ファイル**: `src/Domain/Renewal/SjnetCsvImportService.php` — `closeOldRenewalCases()` 495行
+
+**問題**:
+```sql
+AND rc.case_status IN ('renewed', 'lost')
+```
+`'renewed'`/`'lost'` は `t_renewal_case.renewal_result` カラムの値であって
+`case_status` の有効値には存在しない。
+この UPDATE は実行されるが常に 0 件更新する（dead code）。
+
+**対応方針**: Q3「closeOldRenewalCases が not_started/sj_requested を残すのは意図通りか？」
+の回答を踏まえ、条件を `renewal_result IN ('renewed', 'lost')` に変更するか
+別の自動クローズ条件を設計するか判断する。
+
+**テストで固定済み**: Y-C2 (`testCloseOldRenewalCases_CurrentlyDoesNothing_KnownIssue_DeadCode`)
+
+---
+
+### Phase 5 指摘 #5: 負値保険料が 0 にサイレントフォールバックされる
+
+**ファイル**: `src/Domain/Renewal/SjnetCsvImportService.php` — `upsertContract()` 432/463行
+
+**問題**:
+`parsePremium()` が負値で `null` を返した場合、`$premiumAmount ?? 0` で
+`premium_amount = 0` が DB に書かれる。`row_status` は `'insert'`/`'update'` のまま、
+`error_message` も `null`。UI にも `t_sjnet_import_row` にも警告が出ない。
+
+**対応方針**: 運用上問題になる場合は `row_status='warning'` 相当の記録追加を検討する。
+
+**テストで固定済み**: B5 (`testUpsertContract_NegativePremium_StoredAsZero_NoError`)
