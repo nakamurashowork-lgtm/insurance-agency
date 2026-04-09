@@ -963,6 +963,91 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
         );
     }
 
+    /**
+     * Y-C2: closeOldRenewalCases は wrong column フィルタにより永久にヒットしない（dead code）
+     *
+     * 【これは既知バグの固定テスト】
+     * 発見経緯: I-2 調査で t_renewal_case に 'renewed'/'lost' の case_status が存在しないことを確認。
+     *
+     * バグの内容:
+     *   closeOldRenewalCases の WHERE 条件:
+     *     AND rc.case_status IN ('renewed', 'lost')
+     *   しかし 'renewed'/'lost' は t_renewal_case.renewal_result カラムの値であり、
+     *   case_status の有効値は not_started/sj_requested/doc_prepared/... であって
+     *   'renewed'/'lost' は含まれない。
+     *   結果: この UPDATE は永久に 0 件更新する（dead code）。
+     *
+     * テストの構成（実装者の本来の意図を再現）:
+     *   - 旧契約に紐づく満期案件を用意する。renewal_result='renewed'（実装者が意図した条件値）
+     *   - case_status は実際の有効値 'not_started' を設定
+     *   - 新年度契約を CSV 取込で INSERT → closeOldRenewalCases が呼ばれる
+     *   - 実装者の意図では「renewal_result='renewed' の旧案件はクローズされるべき」だが、
+     *     wrong column フィルタ（case_status を見ている）のため何もクローズされない
+     *
+     * 修正時の対応:
+     *   このテストの Assert を「case_status = 'closed' であること」に書き換えること。
+     *   修正後のテストは「このテストを削除して置き換える」こと。
+     */
+    public function testCloseOldRenewalCases_CurrentlyDoesNothing_KnownIssue_DeadCode(): void
+    {
+        // Arrange: 旧年度の契約 + 満期案件（renewal_result='renewed'、case_status は有効値）
+        $policyNo      = 'YC2-P001';
+        $oldMaturity   = '2025-04-30';  // 旧年度の満期日
+        $newMaturity   = '2026-04-30';  // 新年度の満期日（CSV で取込む）
+
+        $customerId    = $this->createCustomer(['customer_name' => 'クローズテスト顧客']);
+        $oldContractId = $this->createContract([
+            'customer_id'     => $customerId,
+            'policy_no'       => $policyNo,
+            'policy_end_date' => $oldMaturity,
+        ]);
+
+        // 旧年度の満期案件: renewal_result='renewed'（実装者が「クローズ対象」と意図した行）
+        // case_status は実際の有効値から選ぶ（'renewed' は case_status に存在しない）
+        $this->createRenewalCase([
+            'contract_id'    => $oldContractId,
+            'maturity_date'  => $oldMaturity,
+            'case_status'    => 'not_started',  // 実際の case_status の有効値
+        ]);
+        // renewal_result を 'renewed' に直接セット（実装者の意図する「クローズ対象」条件）
+        $this->pdo->prepare(
+            'UPDATE t_renewal_case SET renewal_result = :rr WHERE contract_id = :cid'
+        )->execute(['rr' => 'renewed', 'cid' => $oldContractId]);
+
+        // 新年度 CSV: 同一 policy_no で新しい policy_end_date → 新規 contract INSERT → closeOldRenewalCases 呼び出し
+        $path    = $this->writeTempCsv(
+            SjnetCsvBuilder::row()
+                ->withPolicyNo($policyNo)
+                ->withCustomerName('クローズテスト顧客')
+                ->withStartDate('2025-05-01')
+                ->withEndDate($newMaturity)  // 新年度終期
+                ->toCsvString()
+        );
+        $service = $this->makeService();
+
+        // Act: 新年度契約を INSERT → closeOldRenewalCases が呼ばれる
+        $result = $service->import($path, 'yc2_close_old.csv');
+
+        // Assert: import は成功している（新年度契約の INSERT 自体は正常）
+        $this->assertSame(0, $result['error']);
+
+        // Assert: 旧年度の満期案件の case_status が変わっていないこと（dead code の証明）
+        $stmt = $this->pdo->prepare(
+            'SELECT case_status, renewal_result FROM t_renewal_case WHERE contract_id = :cid'
+        );
+        $stmt->execute(['cid' => $oldContractId]);
+        $oldCase = $stmt->fetch();
+
+        $this->assertIsArray($oldCase);
+        $this->assertSame(
+            'not_started',
+            $oldCase['case_status'],
+            '[dead code バグの固定] renewal_result=renewed の旧案件は case_status でヒットしないためクローズされない。' .
+            '修正時は case_status=\'closed\' を期待するテストに書き換えること'
+        );
+        $this->assertSame('renewed', $oldCase['renewal_result'], '前提確認: renewal_result は renewed のまま');
+    }
+
     // =========================================================
     // Step 8: バッチ全体 (D1, D3, D4-1, D4-2)
     // =========================================================
