@@ -874,6 +874,96 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
     }
 
     // =========================================================
+    // Phase 2-Y: 現状実装の固定テスト
+    // =========================================================
+
+    /**
+     * Y-A3: 既存顧客に対して CSV の住所・連絡先が一切更新されない（現状動作の固定）
+     *
+     * 【これは現状動作の固定テスト】
+     * 関連質問: Q1（既存顧客の住所を CSV で上書きすべきか？）
+     *
+     * 現状の挙動:
+     *   resolveCustomer は既存顧客（customer_name で 1 件ヒット）を見つけた場合、
+     *   UPDATE SQL を一切発行せずに既存 id を返すだけ。
+     *   CSV に含まれる F列(postal_code)/G列(address1)/H列(phone) は
+     *   既存顧客には反映されない。
+     *
+     * 保護される列（CSV に値があっても更新されない列）:
+     *   - postal_code: CSV F列（新規登録時のみ反映）
+     *   - address1:    CSV G列（新規登録時のみ反映）
+     *   - phone:       CSV H列（新規登録時のみ反映）
+     *   - customer_type, status, customer_name_kana, email, address2, note:
+     *     CSV に列自体が存在しないか、resolveCustomer が読まないため常に保護される
+     *
+     * Q1 回答後に「上書きすべき」となった場合:
+     *   このテストの Assert を「変更されていること」に書き換えること。
+     */
+    public function testResolveCustomer_ExistingCustomer_DoesNotUpdateAddress_CurrentSpec_PendingQ1(): void
+    {
+        // Arrange: 既存顧客を登録（CSV とは異なる住所・電話番号を設定）
+        $customerName       = '住所保護テスト顧客';
+        $originalPostal     = '100-0001';
+        $originalAddress1   = '東京都千代田区千代田1-1（元の住所）';
+        $originalPhone      = '03-0000-0000';
+
+        $existingCustomerId = $this->createCustomer([
+            'customer_name' => $customerName,
+            'postal_code'   => $originalPostal,
+            'address1'      => $originalAddress1,
+            'phone'         => $originalPhone,
+        ]);
+
+        // CSV には異なる住所・電話番号を持つ同名顧客が来る
+        $csvPostal   = '900-0001';
+        $csvAddress1 = '沖縄県那覇市泊1-1（CSV の新しい住所）';
+        $csvPhone    = '098-999-9999';
+
+        $path    = $this->writeTempCsv(
+            SjnetCsvBuilder::row()
+                ->withPolicyNo('YA3-P001')
+                ->withCustomerName($customerName)
+                ->withEndDate(self::MATURITY_DATE)
+                ->withPostalCode($csvPostal)
+                ->withAddress1($csvAddress1)
+                ->withPhone($csvPhone)
+                ->toCsvString()
+        );
+        $service = $this->makeService();
+
+        // Act
+        $result = $service->import($path, 'ya3_address_not_updated.csv');
+
+        // Assert: customer_insert カウンタが増えないこと（新規 INSERT されていない）
+        $this->assertSame(0, $result['customer_insert'], '既存顧客は INSERT されない');
+
+        // Assert: m_customer が 1 件のまま
+        $this->assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM m_customer')->fetchColumn());
+
+        // Assert: 各保護列が元の値のまま変わっていないこと
+        $stmt = $this->pdo->prepare('SELECT * FROM m_customer WHERE id = :id');
+        $stmt->execute(['id' => $existingCustomerId]);
+        $customer = $stmt->fetch();
+
+        $this->assertIsArray($customer);
+        $this->assertSame(
+            $originalPostal,
+            $customer['postal_code'],
+            '[現状固定] postal_code は CSV の値で上書きされない（Q1 回答次第で変わる）'
+        );
+        $this->assertSame(
+            $originalAddress1,
+            $customer['address1'],
+            '[現状固定] address1 は CSV の値で上書きされない（Q1 回答次第で変わる）'
+        );
+        $this->assertSame(
+            $originalPhone,
+            $customer['phone'],
+            '[現状固定] phone は CSV の値で上書きされない（Q1 回答次第で変わる）'
+        );
+    }
+
+    // =========================================================
     // Step 8: バッチ全体 (D1, D3, D4-1, D4-2)
     // =========================================================
 
