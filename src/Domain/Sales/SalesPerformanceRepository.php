@@ -13,7 +13,6 @@ final class SalesPerformanceRepository
         'source_type',
         'customer_name',
         'staff_id',
-        'insurer_name',
         'policy_no',
         'product_type',
         'premium_amount',
@@ -63,7 +62,6 @@ final class SalesPerformanceRepository
                     sp.performance_date,
                     sp.performance_type,
                     sp.source_type,
-                    sp.insurer_name,
                     sp.policy_no,
                     sp.policy_start_date,
                     sp.application_date,
@@ -79,7 +77,6 @@ final class SalesPerformanceRepository
                     mc.customer_name,
                     c.policy_no AS contract_policy_no,
                     c.policy_start_date AS contract_policy_start_date,
-                    c.insurer_name AS contract_insurer_name,
                     c.insurance_category AS contract_insurance_category,
                     c.product_type AS contract_product_type,
                     COALESCE(NULLIF(sp.policy_no, ""), c.policy_no) AS policy_no_display
@@ -173,12 +170,6 @@ final class SalesPerformanceRepository
             $params['performance_type'] = $performanceType;
         }
 
-        $insurerName = trim((string) ($criteria['insurer_name'] ?? ''));
-        if ($insurerName !== '') {
-            $sql .= ' AND COALESCE(NULLIF(sp.insurer_name, ""), c.insurer_name) LIKE :insurer_name';
-            $params['insurer_name'] = '%' . $insurerName . '%';
-        }
-
         $policyNo = trim((string) ($criteria['policy_no'] ?? ''));
         if ($policyNo !== '') {
             $sql .= ' AND COALESCE(NULLIF(sp.policy_no, ""), c.policy_no) LIKE :policy_no';
@@ -231,7 +222,6 @@ final class SalesPerformanceRepository
             'source_type' => 'sp.source_type',
             'customer_name' => 'mc.customer_name',
             'staff_id' => 'sp.staff_id',
-            'insurer_name' => 'COALESCE(NULLIF(sp.insurer_name, ""), c.insurer_name)',
             'policy_no' => 'COALESCE(NULLIF(sp.policy_no, ""), c.policy_no)',
             'product_type' => 'sp.product_type',
             'premium_amount' => 'sp.premium_amount',
@@ -259,7 +249,6 @@ final class SalesPerformanceRepository
                   sp.performance_date,
                   sp.performance_type,
                 sp.source_type,
-                sp.insurer_name,
                 sp.policy_no,
                 sp.policy_start_date,
                 sp.application_date,
@@ -274,7 +263,6 @@ final class SalesPerformanceRepository
                   mc.customer_name,
                 c.policy_no AS contract_policy_no,
                 c.policy_start_date AS contract_policy_start_date,
-                c.insurer_name AS contract_insurer_name,
                 c.insurance_category AS contract_insurance_category,
                 c.product_type AS contract_product_type,
                 COALESCE(NULLIF(sp.policy_no, ""), c.policy_no) AS policy_no_display
@@ -348,7 +336,7 @@ final class SalesPerformanceRepository
     }
 
     /**
-     * t_sales_performance に実績が存在する年月を降順で返す
+     * t_sales_performance に成績が存在する年月を降順で返す
      *
      * @return array<int, string>  例: ['2026-04', '2026-03', ...]
      */
@@ -371,7 +359,7 @@ final class SalesPerformanceRepository
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function fetchCustomers(int $limit = 500): array
+    public function fetchCustomers(int $limit = 5000): array
     {
         $stmt = $this->pdo->prepare(
             'SELECT id, customer_name
@@ -396,7 +384,6 @@ final class SalesPerformanceRepository
             'SELECT c.id,
                     c.customer_id,
                     c.policy_no,
-                    c.insurer_name,
                     c.insurance_category,
                     c.product_type,
                     c.policy_start_date,
@@ -425,15 +412,25 @@ final class SalesPerformanceRepository
         $stmt = $this->pdo->prepare(
             'SELECT rc.id,
                     rc.contract_id,
-                    c.customer_id,
+                    rc.assigned_staff_id,
                     rc.maturity_date,
                     rc.case_status,
-                    c.policy_no
+                    c.customer_id,
+                    c.policy_no,
+                    c.product_type,
+                    c.insurance_category,
+                    c.policy_start_date,
+                    c.premium_amount AS prev_premium_amount,
+                    cust.customer_name
              FROM t_renewal_case rc
              LEFT JOIN t_contract c
                     ON c.id = rc.contract_id
                    AND c.is_deleted = 0
+             LEFT JOIN m_customer cust
+                    ON cust.id = c.customer_id
+                   AND cust.is_deleted = 0
              WHERE rc.is_deleted = 0
+               AND rc.case_status NOT IN (\'renewed\', \'lost\', \'closed\')
              ORDER BY rc.maturity_date DESC, rc.id DESC
              LIMIT :limit'
         );
@@ -457,7 +454,6 @@ final class SalesPerformanceRepository
                 performance_date,
                 performance_type,
                 source_type,
-                insurer_name,
                 policy_no,
                 policy_start_date,
                 application_date,
@@ -478,7 +474,6 @@ final class SalesPerformanceRepository
                 :performance_date,
                 :performance_type,
                 :source_type,
-                :insurer_name,
                 :policy_no,
                 :policy_start_date,
                 :application_date,
@@ -502,7 +497,6 @@ final class SalesPerformanceRepository
             'performance_date' => $input['performance_date'] ?? null,
             'performance_type' => $input['performance_type'] ?? null,
             'source_type' => $input['source_type'] ?? null,
-            'insurer_name' => $input['insurer_name'] ?? null,
             'policy_no' => $input['policy_no'] ?? null,
             'policy_start_date' => $input['policy_start_date'] ?? null,
             'application_date' => $input['application_date'] ?? null,
@@ -534,7 +528,6 @@ final class SalesPerformanceRepository
                  performance_date = :performance_date,
                  performance_type = :performance_type,
                  source_type = :source_type,
-                 insurer_name = :insurer_name,
                  policy_no = :policy_no,
                  policy_start_date = :policy_start_date,
                  application_date = :application_date,
@@ -559,7 +552,6 @@ final class SalesPerformanceRepository
             'performance_date' => $input['performance_date'] ?? null,
             'performance_type' => $input['performance_type'] ?? null,
             'source_type' => $input['source_type'] ?? null,
-            'insurer_name' => $input['insurer_name'] ?? null,
             'policy_no' => $input['policy_no'] ?? null,
             'policy_start_date' => $input['policy_start_date'] ?? null,
             'application_date' => $input['application_date'] ?? null,
@@ -580,7 +572,7 @@ final class SalesPerformanceRepository
             $after = $this->findForAudit($id);
             if ($after !== null) {
                 $details = $this->buildAuditDetails($before, $after);
-                $eventId = $this->insertAuditEvent($id, $userId, '実績情報を更新');
+                $eventId = $this->insertAuditEvent($id, $userId, '成績情報を更新');
                 if ($details !== []) {
                     $this->insertAuditEventDetails($eventId, $details);
                 }
@@ -641,7 +633,7 @@ final class SalesPerformanceRepository
     {
         $stmt = $this->pdo->prepare(
             'SELECT performance_date, performance_type, source_type,
-                    customer_id, staff_id, insurer_name, insurance_category,
+                    customer_id, staff_id, insurance_category,
                     product_type, premium_amount, policy_no, policy_start_date,
                     application_date, receipt_no, settlement_month, installment_count,
                     contract_id, renewal_case_id, remark
@@ -669,7 +661,6 @@ final class SalesPerformanceRepository
             'source_type'        => $normalize($row['source_type'] ?? null),
             'customer_id'        => $normalize($row['customer_id'] ?? null),
             'staff_id'           => $normalize($row['staff_id'] ?? null),
-            'insurer_name'       => $normalize($row['insurer_name'] ?? null),
             'insurance_category' => $normalize($row['insurance_category'] ?? null),
             'product_type'       => $normalize($row['product_type'] ?? null),
             'premium_amount'     => $normalize($row['premium_amount'] ?? null),
@@ -693,12 +684,11 @@ final class SalesPerformanceRepository
     private function buildAuditDetails(array $before, array $after): array
     {
         $fields = [
-            'performance_date'   => ['label' => '実績計上日',  'value_type' => 'DATE'],
-            'performance_type'   => ['label' => '実績区分',    'value_type' => 'STRING'],
+            'performance_date'   => ['label' => '成績計上日',  'value_type' => 'DATE'],
+            'performance_type'   => ['label' => '成績区分',    'value_type' => 'STRING'],
             'source_type'        => ['label' => '業務区分',    'value_type' => 'STRING'],
             'customer_id'        => ['label' => '契約者ID',    'value_type' => 'NUMBER'],
             'staff_id'           => ['label' => '担当者ID',    'value_type' => 'NUMBER'],
-            'insurer_name'       => ['label' => '保険会社名',  'value_type' => 'STRING'],
             'insurance_category' => ['label' => '保険種類',    'value_type' => 'STRING'],
             'product_type'       => ['label' => '種目',        'value_type' => 'STRING'],
             'premium_amount'     => ['label' => '保険料',      'value_type' => 'NUMBER'],

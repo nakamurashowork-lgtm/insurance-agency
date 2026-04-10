@@ -2,5 +2,8 @@
 /tmp/
 /vendor/
 .env
+.env.sta
+.env.pro
 *.log
 .DS_Store
+index.php.staging

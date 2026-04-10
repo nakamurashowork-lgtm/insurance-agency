@@ -18,8 +18,6 @@ CREATE TABLE IF NOT EXISTS t_accident_reminder_rule (
   KEY idx_t_accident_reminder_rule_01 (accident_case_id),
   KEY idx_t_accident_reminder_rule_02 (is_enabled),
   KEY idx_t_accident_reminder_rule_03 (is_deleted),
-  CONSTRAINT fk_t_accident_reminder_rule_01
-    FOREIGN KEY (accident_case_id) REFERENCES t_accident_case(id),
   CONSTRAINT chk_t_accident_reminder_rule_01 CHECK (interval_weeks >= 1),
   CONSTRAINT chk_t_accident_reminder_rule_02 CHECK (end_date IS NULL OR start_date IS NULL OR end_date >= start_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='事故リマインドルール';

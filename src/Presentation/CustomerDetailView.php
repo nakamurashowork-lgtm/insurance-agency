@@ -30,6 +30,7 @@ final class CustomerDetailView
         string $activityListBaseUrl,
         string $activityDetailBaseUrl,
         string $salesCaseDetailBaseUrl,
+        string $accidentDetailBaseUrl,
         string $updateUrl,
         string $editCsrf,
         ?array $editDraft,
@@ -60,7 +61,7 @@ final class CustomerDetailView
             $endDateStyle = $endDate !== '' && $endDate < $today ? ' style="color:var(--text-danger);font-weight:500;"' : '';
 
             if ($renewalCaseId > 0) {
-                $renewalUrl = Layout::escape($renewalDetailBaseUrl . '&id=' . $renewalCaseId);
+                $renewalUrl = Layout::escape($renewalDetailBaseUrl . '&id=' . $renewalCaseId . '&from=customer&customer_id=' . $customerId);
                 $policyCell = '<a class="text-link" href="' . $renewalUrl . '">' . $policyNo . '</a>';
             } else {
                 $policyCell = $policyNo;
@@ -80,26 +81,41 @@ final class CustomerDetailView
         // 事故案件テーブル
         $accidentHtml = '';
         foreach ($accidentCases as $row) {
+            $accidentId       = (int) ($row['id'] ?? 0);
+            $accidentDetailUrl = $accidentId > 0
+                ? Layout::escape($accidentDetailBaseUrl . '&id=' . $accidentId . '&from=customer&customer_id=' . $customerId)
+                : '';
+            $acceptedDate     = Layout::escape((string) ($row['accepted_date'] ?? ''));
+            $acceptedDateCell = $accidentDetailUrl !== ''
+                ? '<a class="text-link" href="' . $accidentDetailUrl . '">' . $acceptedDate . '</a>'
+                : $acceptedDate;
+
             $accidentHtml .= '<tr>'
-                . '<td>' . Layout::escape((string) ($row['accepted_date'] ?? '')) . '</td>'
-                . '<td>' . Layout::escape((string) ($row['accident_no'] ?? '')) . '</td>'
-                . '<td>' . Layout::escape((string) ($row['insurance_category'] ?? '')) . '</td>'
+                . '<td style="white-space:nowrap;">' . $acceptedDateCell . '</td>'
+                . '<td style="white-space:nowrap;">' . Layout::escape((string) ($row['accident_date'] ?? '')) . '</td>'
+                . '<td class="cell-ellipsis">' . Layout::escape((string) ($row['insurance_category'] ?? '')) . '</td>'
+                . '<td class="cell-ellipsis">' . Layout::escape((string) ($row['sc_staff_name'] ?? '')) . '</td>'
                 . '<td>' . self::renderAccidentStatus((string) ($row['status'] ?? '')) . '</td>'
                 . '</tr>';
         }
         if ($accidentHtml === '') {
-            $accidentHtml = '<tr><td colspan="4">事故案件はありません。</td></tr>';
+            $accidentHtml = '<tr><td colspan="5">事故案件はありません。</td></tr>';
         }
 
-        // 活動履歴タイムライン（直近5件）
+        // 営業活動タイムライン（直近5件）
         $timelineHtml = '';
         foreach ($activities as $row) {
             $subject = trim((string) ($row['subject'] ?? '')) ?: trim((string) ($row['activity_type'] ?? ''));
             $actDate = trim((string) ($row['activity_date'] ?? ''));
+            $actId   = (int) ($row['id'] ?? 0);
+            $actDetailUrl = $actId > 0 ? Layout::escape($activityDetailBaseUrl . '&id=' . $actId . '&from=customer&customer_id=' . $customerId) : '';
+            $subjectHtml = $actDetailUrl !== ''
+                ? '<a class="text-link" style="font-size:12.5px;font-weight:500;" href="' . $actDetailUrl . '">' . Layout::escape($subject) . '</a>'
+                : '<span style="font-size:12.5px;font-weight:500;">' . Layout::escape($subject) . '</span>';
             $timelineHtml .= '<div class="timeline-item">'
                 . '<div class="timeline-dot done"></div>'
                 . '<div class="timeline-body">'
-                . '<div style="font-size:12.5px;font-weight:500;">' . Layout::escape($subject) . '</div>'
+                . $subjectHtml
                 . '<div class="timeline-time">' . Layout::escape($actDate) . '</div>'
                 . '</div>'
                 . '</div>';
@@ -107,7 +123,6 @@ final class CustomerDetailView
         if ($timelineHtml === '') {
             $timelineHtml = '<div style="font-size:12.5px;color:var(--text-secondary);">活動履歴はありません。</div>';
         }
-        $activityListUrl = Layout::escape($activityListBaseUrl . '&customer_id=' . $customerId);
 
         // 編集フォーム初期値（draft があれば draft 優先）
         $d = $editDraft ?? $detail;
@@ -148,15 +163,14 @@ final class CustomerDetailView
             . '<div class="card">'
             . '<div class="detail-section-title">事故案件</div>'
             . '<div class="table-wrap"><table class="table-fixed table-card list-table" style="margin:0;">'
-            . '<colgroup><col style="width:90px;"><col style="width:auto;"><col style="width:80px;"><col style="width:80px;"></colgroup>'
-            . '<thead><tr><th>受付日</th><th>事故番号</th><th>保険種類</th><th>状態</th></tr></thead>'
+            . '<colgroup><col style="width:90px;"><col style="width:90px;"><col style="width:auto;"><col style="width:110px;"><col style="width:80px;"></colgroup>'
+            . '<thead><tr><th>受付日</th><th>事故発生日</th><th>保険種類</th><th>SC担当者</th><th>対応状況</th></tr></thead>'
             . '<tbody>' . $accidentHtml . '</tbody>'
             . '</table></div>'
             . '</div>'
             . '<div class="card">'
-            . '<div class="detail-section-title">対応履歴（直近）</div>'
+            . '<div class="detail-section-title">営業活動</div>'
             . '<div class="status-timeline">' . $timelineHtml . '</div>'
-            . '<a class="btn" href="' . $activityListUrl . '" style="width:100%;display:block;margin-top:8px;text-align:center;">活動履歴を全て見る</a>'
             . '</div>'
             . '</div>'
             /* 見込案件セクション: H-5判断#8 により非表示（コードは保持）
@@ -278,7 +292,7 @@ final class CustomerDetailView
     private static function resolveBackLabel(string $returnToUrl): string
     {
         if (str_contains($returnToUrl, 'route=renewal/detail'))  return '満期詳細へ戻る';
-        if (str_contains($returnToUrl, 'route=sales/detail'))    return '実績詳細へ戻る';
+        if (str_contains($returnToUrl, 'route=sales/detail'))    return '成績詳細へ戻る';
         if (str_contains($returnToUrl, 'route=accident/detail')) return '事故案件詳細へ戻る';
         return '顧客一覧へ戻る';
     }

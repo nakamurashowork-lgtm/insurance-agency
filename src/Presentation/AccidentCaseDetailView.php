@@ -21,7 +21,8 @@ final class AccidentCaseDetailView
         array $comments,
         array $audits,
         array $assignedUsers,
-        string $listUrl,
+        string $backUrl,
+        string $backLabel,
         string $updateUrl,
         string $commentUrl,
         string $reminderUrl,
@@ -47,21 +48,10 @@ final class AccidentCaseDetailView
             $successHtml = '<div class="notice">' . Layout::escape($flashSuccess) . '</div>';
         }
 
-        // Build status labels map from master data or fallback
-        if ($allStatuses !== []) {
-            $statusLabels = [];
-            foreach ($allStatuses as $sRow) {
-                $statusLabels[(string) ($sRow['code'] ?? '')] = (string) ($sRow['display_name'] ?? '');
-            }
-        } else {
-            $statusLabels = [
-                'accepted'     => '受付',
-                'linked'       => '保険会社連絡済み',
-                'in_progress'  => '対応中',
-                'waiting_docs' => '書類待ち',
-                'resolved'     => '解決済み',
-                'closed'       => '完了',
-            ];
+        // Build status labels map from master data
+        $statusLabels = [];
+        foreach ($allStatuses as $sRow) {
+            $statusLabels[(string) ($sRow['code'] ?? '')] = (string) ($sRow['display_name'] ?? '');
         }
         $currentStatus = (string) ($detail['status'] ?? 'accepted');
         $statusHtml = '';
@@ -244,7 +234,7 @@ final class AccidentCaseDetailView
             . '<div style="margin-top:4px;">' . $statusBadge . '</div>'
             . '</div>'
             . '<div class="actions">'
-            . '<a class="btn btn-secondary" href="' . Layout::escape($listUrl) . '">一覧へ戻る</a>'
+            . '<a class="btn btn-secondary" href="' . Layout::escape($backUrl) . '">' . Layout::escape($backLabel) . '</a>'
             . '<button class="btn btn-primary" type="submit" form="accident-update-form">保存</button>'
             . '</div>'
             . '</div>'
@@ -258,6 +248,9 @@ final class AccidentCaseDetailView
             . '<div class="kv"><span class="kv-key">お客さま名</span><span class="kv-val">' . ($customerUrl !== '' ? '<a class="kv-link" href="' . $customerUrl . '">' . Layout::escape($customerName) . '</a>' : Layout::escape($customerName)) . '</span></div>'
             . '<div class="kv"><span class="kv-key">受付日</span><span class="kv-val">' . Layout::escape((string) ($detail['accepted_date'] ?? '')) . '</span></div>'
             . '<div class="kv"><span class="kv-key">事故発生日</span><span class="kv-val">' . (trim((string) ($detail['accident_date'] ?? '')) !== '' ? Layout::escape((string) $detail['accident_date']) : '<span class="muted">未設定</span>') . '</span></div>'
+            . '<div class="kv"><span class="kv-key">保険種類</span><span class="kv-val">' . (trim((string) ($detail['insurance_category'] ?? '')) !== '' ? Layout::escape((string) $detail['insurance_category']) : '<span class="muted">未設定</span>') . '</span></div>'
+            . '<div class="kv"><span class="kv-key">担当拠点</span><span class="kv-val">' . (trim((string) ($detail['accident_location'] ?? '')) !== '' ? Layout::escape((string) $detail['accident_location']) : '<span class="muted">未設定</span>') . '</span></div>'
+            . '<div class="kv"><span class="kv-key">SC担当者</span><span class="kv-val">' . (trim((string) ($detail['sc_staff_name'] ?? '')) !== '' ? Layout::escape((string) $detail['sc_staff_name']) : '<span class="muted">未設定</span>') . '</span></div>'
             . '</div>'
             // 対応状況更新フォーム
             . '<div class="card">'
@@ -315,18 +308,10 @@ final class AccidentCaseDetailView
         string $returnToUrl
     ): string {
         $accidentCaseId = (int) ($detail['id'] ?? 0);
-        $status = (string) ($detail['status'] ?? '');
-        $isReadonly = in_array($status, ['resolved', 'closed'], true);
 
         $weekdayLabels = ['日', '月', '火', '水', '木', '金', '土'];
 
         if ($rule === null) {
-            // 未設定
-            if ($isReadonly) {
-                return '<div class="card"><div class="detail-section-title">リマインド設定</div>'
-                    . '<p class="muted" style="font-size:13px;">リマインド未設定（完了済み）</p>'
-                    . '</div>';
-            }
             $formHtml = self::renderReminderForm(
                 $accidentCaseId, null, $reminderUrl, $reminderCsrf, $returnToUrl, $weekdayLabels, false
             );
@@ -340,27 +325,10 @@ final class AccidentCaseDetailView
         }
 
         // 既存ルール
-        $isEnabled  = (int) ($rule['is_enabled'] ?? 0);
         $weekdays   = (array) ($rule['weekdays'] ?? []);
         $nextDate   = self::calcNextReminderDate($rule, $weekdays);
         $lastNotify = trim((string) ($rule['last_notified_on'] ?? ''));
         $lastNotifyDisplay = $lastNotify !== '' ? Layout::escape($lastNotify) : '—';
-
-        if ($isReadonly) {
-            // 読み取り専用
-            $weekdayDisplay = $weekdays !== []
-                ? implode('・', array_map(fn($w) => $weekdayLabels[$w] ?? '', $weekdays))
-                : '—';
-            return '<div class="card"><div class="detail-section-title">リマインド設定</div>'
-                . '<div class="kv"><span class="kv-key">有効/無効</span><span class="kv-val">' . ($isEnabled ? '有効' : '無効') . '</span></div>'
-                . '<div class="kv"><span class="kv-key">通知間隔</span><span class="kv-val">' . (int) ($rule['interval_weeks'] ?? 1) . '週</span></div>'
-                . '<div class="kv"><span class="kv-key">通知曜日</span><span class="kv-val">' . Layout::escape($weekdayDisplay) . '</span></div>'
-                . '<div class="kv"><span class="kv-key">通知開始日</span><span class="kv-val">' . (trim((string) ($rule['start_date'] ?? '')) !== '' ? Layout::escape((string) $rule['start_date']) : '<span class="muted">未設定</span>') . '</span></div>'
-                . '<div class="kv"><span class="kv-key">通知終了日</span><span class="kv-val">' . (trim((string) ($rule['end_date'] ?? '')) !== '' ? Layout::escape((string) $rule['end_date']) : '<span class="muted">未設定</span>') . '</span></div>'
-                . '<div class="kv"><span class="kv-key">次回通知予定</span><span class="kv-val">' . Layout::escape($nextDate) . '</span></div>'
-                . '<div class="kv"><span class="kv-key">最終通知日</span><span class="kv-val">' . $lastNotifyDisplay . '</span></div>'
-                . '</div>';
-        }
 
         $formHtml = self::renderReminderForm(
             $accidentCaseId, $rule, $reminderUrl, $reminderCsrf, $returnToUrl, $weekdayLabels, true

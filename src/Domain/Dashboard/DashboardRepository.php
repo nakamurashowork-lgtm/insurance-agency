@@ -24,6 +24,44 @@ final class DashboardRepository
     ) {
     }
 
+    // ─── Tenant user list ────────────────────────────────────────────────
+
+    /**
+     * テナント所属ユーザー一覧を返す（担当者選択ドロップダウン用）。
+     * display_name が NULL の場合は name にフォールバックする。
+     *
+     * @return array<int, array{id: int, display_name: string}>
+     */
+    public function fetchTenantUsers(): array
+    {
+        if ($this->commonPdo === null || $this->tenantCode === '') {
+            return [];
+        }
+
+        $stmt = $this->commonPdo->prepare(
+            'SELECT u.id, COALESCE(NULLIF(u.display_name, ""), u.name) AS display_name
+             FROM users u
+             JOIN user_tenants ut ON ut.user_id = u.id AND ut.tenant_code = :tenant_code
+             WHERE u.is_deleted = 0 AND ut.is_deleted = 0 AND ut.status = 1
+             ORDER BY display_name ASC'
+        );
+        $stmt->bindValue(':tenant_code', $this->tenantCode);
+        $stmt->execute();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        return array_map(
+            static fn (array $row): array => [
+                'id'           => (int) $row['id'],
+                'display_name' => (string) $row['display_name'],
+            ],
+            $rows
+        );
+    }
+
     // ─── New summary methods ──────────────────────────────────────────────
 
     /**
@@ -147,14 +185,18 @@ final class DashboardRepository
     }
 
     /**
-     * 月別実績サマリ（12ヶ月分、4月始まり）を返す。
+     * 月別成績サマリ（12ヶ月分、4月始まり）を返す。
      *
      * @return array<int, array{premium: int, count: int}>
      */
     public function getPerformanceMonthlySummary(int $fiscalYear, ?int $staffUserId): array
     {
-        $fiscalStart = $fiscalYear . '-04-01';
-        $fiscalEnd   = ($fiscalYear + 1) . '-03-31';
+        // 集計基準: settlement_month（精算月）
+        // fiscal_year の年度 = {fiscalYear}-04 〜 {fiscalYear+1}-03
+        $fyStart  = $fiscalYear      . '-04';
+        $fyEnd12  = $fiscalYear      . '-12';
+        $fyStart1 = ($fiscalYear + 1) . '-01';
+        $fyEnd    = ($fiscalYear + 1) . '-03';
 
         $userJoin  = $staffUserId !== null
             ? 'LEFT JOIN m_staff ms ON ms.id = sp.staff_id AND ms.user_id = :staff_user_id'
@@ -162,19 +204,25 @@ final class DashboardRepository
         $userWhere = $staffUserId !== null ? 'AND ms.id IS NOT NULL' : '';
 
         $sql =
-            'SELECT MONTH(sp.performance_date) AS perf_month,
+            'SELECT CAST(SUBSTRING(sp.settlement_month, 6, 2) AS UNSIGNED) AS perf_month,
                     COALESCE(SUM(sp.premium_amount), 0) AS premium,
                     COUNT(*) AS cnt
              FROM t_sales_performance sp
              ' . $userJoin . '
              WHERE sp.is_deleted = 0
-               AND sp.performance_date BETWEEN :fiscal_start AND :fiscal_end
+               AND sp.settlement_month IS NOT NULL
+               AND (
+                   sp.settlement_month BETWEEN :fy_start AND :fy_end12
+                   OR sp.settlement_month BETWEEN :fy_start1 AND :fy_end
+               )
                ' . $userWhere . '
-             GROUP BY MONTH(sp.performance_date)';
+             GROUP BY CAST(SUBSTRING(sp.settlement_month, 6, 2) AS UNSIGNED)';
 
         $stmt = $this->pdo->prepare($sql);
-        $stmt->bindValue(':fiscal_start', $fiscalStart);
-        $stmt->bindValue(':fiscal_end',   $fiscalEnd);
+        $stmt->bindValue(':fy_start',  $fyStart);
+        $stmt->bindValue(':fy_end12',  $fyEnd12);
+        $stmt->bindValue(':fy_start1', $fyStart1);
+        $stmt->bindValue(':fy_end',    $fyEnd);
         if ($staffUserId !== null) {
             $stmt->bindValue(':staff_user_id', $staffUserId, PDO::PARAM_INT);
         }
@@ -249,13 +297,12 @@ final class DashboardRepository
     }
 
     /**
-     * 今日の活動件数と日報提出状態を返す。
+     * 今日の活動件数を返す。
      *
-     * @return array{today_count: int, is_submitted: bool, submitted_at: string|null}
+     * @return array{today_count: int}
      */
     public function getActivitySummary(int $staffUserId): array
     {
-        // 今日の活動件数（t_activity.staff_id = common.users.id）
         $stmt = $this->pdo->prepare(
             'SELECT COUNT(*) FROM t_activity
              WHERE activity_date = CURDATE()
@@ -264,29 +311,8 @@ final class DashboardRepository
         );
         $stmt->bindValue(':staff_id', $staffUserId, PDO::PARAM_INT);
         $stmt->execute();
-        $todayCount = (int) $stmt->fetchColumn();
 
-        // 日報提出状態（t_daily_report.staff_user_id = common.users.id）
-        $stmt2 = $this->pdo->prepare(
-            'SELECT is_submitted, submitted_at
-             FROM t_daily_report
-             WHERE report_date = CURDATE()
-               AND staff_user_id = :staff_user_id
-               AND is_deleted = 0
-             LIMIT 1'
-        );
-        $stmt2->bindValue(':staff_user_id', $staffUserId, PDO::PARAM_INT);
-        $stmt2->execute();
-        $drRow = $stmt2->fetch(PDO::FETCH_ASSOC);
-
-        $isSubmitted  = is_array($drRow) && (int) ($drRow['is_submitted'] ?? 0) === 1;
-        $submittedAt  = is_array($drRow) ? ($drRow['submitted_at'] ?? null) : null;
-
-        return [
-            'today_count'  => $todayCount,
-            'is_submitted' => $isSubmitted,
-            'submitted_at' => is_string($submittedAt) ? $submittedAt : null,
-        ];
+        return ['today_count' => (int) $stmt->fetchColumn()];
     }
 
     /**

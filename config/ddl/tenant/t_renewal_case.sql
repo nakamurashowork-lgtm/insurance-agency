@@ -25,7 +25,6 @@ CREATE TABLE IF NOT EXISTS t_renewal_case (
   updated_at              DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日時',
 
   PRIMARY KEY (id),
-
   KEY idx_t_renewal_case_01 (maturity_date),
   KEY idx_t_renewal_case_02 (case_status),
   KEY idx_t_renewal_case_03 (next_action_date),
@@ -33,13 +32,7 @@ CREATE TABLE IF NOT EXISTS t_renewal_case (
   KEY idx_t_renewal_case_05 (is_deleted),
   KEY idx_t_renewal_case_06 (office_staff_id),
   KEY idx_t_renewal_case_07 (office_staff_id, case_status),
-  KEY idx_t_renewal_case_08 (contract_id, maturity_date),
-
-  CONSTRAINT fk_t_renewal_case_01
-    FOREIGN KEY (contract_id) REFERENCES t_contract(id),
-  CONSTRAINT fk_t_renewal_case_02
-    FOREIGN KEY (renewed_contract_id) REFERENCES t_contract(id)
-
+  KEY idx_t_renewal_case_08 (contract_id, maturity_date)
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci

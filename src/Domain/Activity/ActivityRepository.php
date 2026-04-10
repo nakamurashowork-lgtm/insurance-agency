@@ -62,16 +62,11 @@ final class ActivityRepository
                     a.staff_id,
                     a.created_at,
                     a.updated_at,
-                    mc.customer_name,
-                    COALESCE(dr.is_submitted, 0) AS daily_is_submitted
+                    mc.customer_name
              FROM t_activity a
              LEFT JOIN m_customer mc
                      ON mc.id = a.customer_id
-                    AND mc.is_deleted = 0
-             LEFT JOIN t_daily_report dr
-                     ON dr.report_date = a.activity_date
-                    AND dr.staff_user_id = a.staff_id
-                    AND dr.is_deleted = 0'
+                    AND mc.is_deleted = 0'
             . $whereSql
             . $this->buildOrderBy($sort, $direction)
             . ' LIMIT :limit OFFSET :offset';
@@ -264,13 +259,6 @@ final class ActivityRepository
             $params['staff_id'] = (int) $staffUserId;
         }
 
-        $dailyReportStatus = trim((string) ($criteria['daily_report_status'] ?? ''));
-        if ($dailyReportStatus === 'submitted') {
-            $sql .= ' AND COALESCE(dr.is_submitted, 0) = 1';
-        } elseif ($dailyReportStatus === 'not_submitted') {
-            $sql .= ' AND COALESCE(dr.is_submitted, 0) = 0';
-        }
-
         return $sql;
     }
 
@@ -284,11 +272,7 @@ final class ActivityRepository
              FROM t_activity a
              LEFT JOIN m_customer mc
                      ON mc.id = a.customer_id
-                    AND mc.is_deleted = 0
-             LEFT JOIN t_daily_report dr
-                     ON dr.report_date = a.activity_date
-                    AND dr.staff_user_id = a.staff_id
-                    AND dr.is_deleted = 0'
+                    AND mc.is_deleted = 0'
             . $whereSql
         );
         foreach ($params as $key => $value) {

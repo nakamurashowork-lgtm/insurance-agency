@@ -93,8 +93,6 @@ final class ListPageRenderer
 
     /**
      * 件数表示 + 表示件数切替 + 上部ページャーをまとめたツールバーを生成する
-     *
-     * @param string $sortSummary 「並び順: ○○ 昇順」等の文字列。空文字なら非表示。
      */
     public static function toolbar(
         string $url,
@@ -105,14 +103,9 @@ final class ListPageRenderer
         int $perPage,
         string $sortSummary = ''
     ): string {
-        $sortHtml = $sortSummary !== ''
-            ? '<p class="muted list-sort-summary">' . Layout::escape($sortSummary) . '</p>'
-            : '';
-
         return '<div class="list-toolbar">'
             . '<div class="list-summary"><p class="summary-count">' . Layout::escape(self::summaryText($totalCount, $pager)) . '</p></div>'
             . '<div class="list-toolbar-actions">'
-            . $sortHtml
             . self::perPageForm($url, $criteria, $listState, $perPage)
             . self::pager($url, $criteria, $listState, $pager)
             . '</div>'

@@ -41,13 +41,29 @@ final class ProcedureMethodRepository
         return array_map(static fn(array $r) => (string) $r['label'], $rows);
     }
 
-    public function create(string $label, int $displayOrder = 0): int
+    /** @return array<string, mixed>|null */
+    public function findById(int $id): ?array
     {
+        $stmt = $this->pdo->prepare(
+            'SELECT id, label, display_order, is_active FROM m_procedure_method WHERE id = :id LIMIT 1'
+        );
+        $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    public function create(string $label): int
+    {
+        $maxOrder = (int) $this->pdo->query(
+            'SELECT COALESCE(MAX(display_order), 0) FROM m_procedure_method'
+        )->fetchColumn();
+
         $stmt = $this->pdo->prepare(
             'INSERT INTO m_procedure_method (label, display_order, is_active) VALUES (:label, :display_order, 1)'
         );
         $stmt->bindValue(':label', $label);
-        $stmt->bindValue(':display_order', $displayOrder, PDO::PARAM_INT);
+        $stmt->bindValue(':display_order', $maxOrder + 1, PDO::PARAM_INT);
         $stmt->execute();
         return (int) $this->pdo->lastInsertId();
     }
@@ -72,5 +88,55 @@ final class ProcedureMethodRepository
         $stmt->bindValue(':id', $id, PDO::PARAM_INT);
         $stmt->execute();
         return $stmt->rowCount();
+    }
+
+    public function delete(int $id): void
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM m_procedure_method WHERE id = :id');
+        $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+        $stmt->execute();
+    }
+
+    public function swapDisplayOrder(int $id, string $direction): bool
+    {
+        $self = $this->findById($id);
+        if ($self === null) {
+            return false;
+        }
+        $selfOrder = (int) ($self['display_order'] ?? 0);
+
+        if ($direction === 'up') {
+            $stmt = $this->pdo->prepare(
+                'SELECT id, display_order FROM m_procedure_method
+                 WHERE display_order < :order ORDER BY display_order DESC LIMIT 1'
+            );
+        } else {
+            $stmt = $this->pdo->prepare(
+                'SELECT id, display_order FROM m_procedure_method
+                 WHERE display_order > :order ORDER BY display_order ASC LIMIT 1'
+            );
+        }
+        $stmt->bindValue(':order', $selfOrder, PDO::PARAM_INT);
+        $stmt->execute();
+        $neighbor = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($neighbor)) {
+            return false;
+        }
+
+        $neighborId    = (int) ($neighbor['id'] ?? 0);
+        $neighborOrder = (int) ($neighbor['display_order'] ?? 0);
+
+        $upd = $this->pdo->prepare(
+            'UPDATE m_procedure_method SET display_order = :order WHERE id = :id'
+        );
+        $upd->bindValue(':order', $neighborOrder, PDO::PARAM_INT);
+        $upd->bindValue(':id', $id, PDO::PARAM_INT);
+        $upd->execute();
+
+        $upd->bindValue(':order', $selfOrder, PDO::PARAM_INT);
+        $upd->bindValue(':id', $neighborId, PDO::PARAM_INT);
+        $upd->execute();
+
+        return true;
     }
 }

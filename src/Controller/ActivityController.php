@@ -57,16 +57,6 @@ final class ActivityController
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
 
-            // staff_id が未指定（デフォルト）の場合: loginUserId に紐づく m_staff.id で補正する
-            // t_activity.staff_id は m_staff.id を格納するため、common.users.id での比較は誤り
-            if (($this->rawGetStaffId()) === '') {
-                $loginStaffMstId = (new StaffRepository($pdo))->findIdByUserId($loginUserId);
-                if ($loginStaffMstId !== null) {
-                    $criteria['staff_id'] = (string) $loginStaffMstId;
-                }
-                // m_staff レコードがない場合は loginUserId のまま（後方互換）
-            }
-
             $repository = new ActivityRepository($pdo);
             $result = $repository->searchPage(
                 $criteria,
@@ -114,12 +104,16 @@ final class ActivityController
     {
         $auth = $this->guard->requireAuthenticated();
 
-        $id = (int) ($_GET['id'] ?? 0);
-        $listUrl = $this->listUrlFromGet();
+        $id         = (int) ($_GET['id'] ?? 0);
+        $from       = $this->sanitizeFrom((string) ($_GET['from'] ?? 'list'));
+        $date       = $this->sanitizeDate((string) ($_GET['date'] ?? ''));
+        $customerId = (int) ($_GET['customer_id'] ?? 0);
+        $backInfo   = $this->resolveBackInfo($from, $date, $customerId);
+        $backUrl    = $backInfo['url'];
 
         if ($id <= 0) {
             $this->guard->session()->setFlash('error', '活動IDが不正です。');
-            Responses::redirect($listUrl);
+            Responses::redirect($backUrl);
         }
 
         $record       = null;
@@ -134,7 +128,7 @@ final class ActivityController
             $record = $repository->findById($id);
             if ($record === null) {
                 $this->guard->session()->setFlash('error', '対象の活動が見つかりません。');
-                Responses::redirect($listUrl);
+                Responses::redirect($backUrl);
             }
             $customers    = $repository->fetchCustomers(500);
             $staffUsers   = (new StaffRepository($pdo))->findActive();
@@ -152,14 +146,23 @@ final class ActivityController
 
         $flashError   = $this->guard->session()->consumeFlash('error');
         $flashSuccess = $this->guard->session()->consumeFlash('success');
-        $detailUrl    = $this->detailUrl($id);
+
+        // from パラメータを維持した詳細 URL（更新後の return_to に使用）
+        $detailParams = array_filter([
+            'id'          => (string) $id,
+            'from'        => $from,
+            'date'        => $date,
+            'customer_id' => $customerId > 0 ? (string) $customerId : '',
+        ], fn($v) => $v !== '');
+        $detailUrl = ListViewHelper::buildUrl($this->config->routeUrl('activity/detail'), $detailParams);
 
         Responses::html(ActivityDetailView::renderDetail(
             $record,
             $customers,
             $staffUsers,
             [],
-            $listUrl,
+            $backUrl,
+            $backInfo['label'],
             $detailUrl,
             $this->config->routeUrl('activity/update'),
             $this->config->routeUrl('activity/delete'),
@@ -174,11 +177,7 @@ final class ActivityController
                 $this->guard,
                 $this->config,
                 'activity',
-                [
-                    ['label' => 'ホーム', 'url' => $this->config->routeUrl('dashboard')],
-                    ['label' => '活動一覧', 'url' => $listUrl],
-                    ['label' => '活動詳細'],
-                ]
+                $backInfo['breadcrumbs']
             ),
             $purposeTypes
         ));
@@ -383,14 +382,19 @@ final class ActivityController
                     ['label' => '営業日報（' . $date . '）'],
                 ]
             ),
-            $this->config->routeUrl('activity/submit'),
-            $this->guard->session()->issueCsrfToken('activity_submit'),
             $loginUserId,
             $this->config->routeUrl('activity/delete'),
             $this->guard->session()->issueCsrfToken('activity_delete')
         ));
     }
 
+    /**
+     * 日報提出処理
+     *
+     * 注記: 本メソッドは UI からの呼び出しは無効化されている（2026-04-08）。
+     * 将来、承認フロー実装時に UI を復活させる予定。
+     * docs/screens/activity-daily.md Section 4-4 を参照。
+     */
     public function submit(): void
     {
         $auth        = $this->guard->requireAuthenticated();
@@ -475,6 +479,72 @@ final class ActivityController
         Responses::redirect($returnUrl);
     }
 
+    // ---- back-navigation helpers ----
+
+    /**
+     * from パラメータをホワイトリスト検証する。未知の値は 'list' にフォールバック。
+     */
+    private function sanitizeFrom(string $from): string
+    {
+        return in_array($from, ['daily', 'list', 'customer'], true) ? $from : 'list';
+    }
+
+    /**
+     * date パラメータを検証する。不正な値は空文字にフォールバック。
+     */
+    private function sanitizeDate(string $date): string
+    {
+        if ($date === '') {
+            return '';
+        }
+        $parsed = DateTimeImmutable::createFromFormat('Y-m-d', $date);
+        return ($parsed !== false && $parsed->format('Y-m-d') === $date) ? $date : '';
+    }
+
+    /**
+     * from の値に応じて戻り先情報（url / label / breadcrumbs）を返す。
+     *
+     * @return array{url: string, label: string, breadcrumbs: array<int, array<string, string|null>>}
+     */
+    private function resolveBackInfo(string $from, string $date, int $customerId): array
+    {
+        $effectiveDate = $date !== '' ? $date : (new DateTimeImmutable())->format('Y-m-d');
+
+        return match ($from) {
+            'daily' => [
+                'url'   => ListViewHelper::buildUrl($this->config->routeUrl('activity/daily'), ['date' => $effectiveDate]),
+                'label' => '日報に戻る',
+                'breadcrumbs' => [
+                    ['label' => 'ホーム',                            'url' => $this->config->routeUrl('dashboard')],
+                    ['label' => '営業日報（' . $effectiveDate . '）', 'url' => ListViewHelper::buildUrl($this->config->routeUrl('activity/daily'), ['date' => $effectiveDate])],
+                    ['label' => '活動詳細'],
+                ],
+            ],
+            'customer' => [
+                'url'   => $customerId > 0
+                    ? ListViewHelper::buildUrl($this->config->routeUrl('customer/detail'), ['id' => (string) $customerId])
+                    : $this->config->routeUrl('activity/list'),
+                'label' => '顧客に戻る',
+                'breadcrumbs' => [
+                    ['label' => 'ホーム',   'url' => $this->config->routeUrl('dashboard')],
+                    ['label' => '顧客詳細', 'url' => $customerId > 0
+                        ? ListViewHelper::buildUrl($this->config->routeUrl('customer/detail'), ['id' => (string) $customerId])
+                        : null],
+                    ['label' => '活動詳細'],
+                ],
+            ],
+            default => [
+                'url'   => $this->config->routeUrl('activity/list'),
+                'label' => '活動一覧に戻る',
+                'breadcrumbs' => [
+                    ['label' => 'ホーム',     'url' => $this->config->routeUrl('dashboard')],
+                    ['label' => '活動一覧', 'url' => $this->config->routeUrl('activity/list')],
+                    ['label' => '活動詳細'],
+                ],
+            ],
+        };
+    }
+
     // ---- private helpers ----
 
     /**
@@ -483,25 +553,15 @@ final class ActivityController
      */
     private function extractCriteria(array $source, int $loginUserId, string $today, bool $isAdmin = false): array
     {
-        $staffUserId = trim((string) ($source['staff_id'] ?? ''));
-        if ($staffUserId === '') {
-            $staffUserId = (string) $loginUserId;
-        }
-
         $dateFrom = trim((string) ($source['activity_date_from'] ?? ''));
         $dateTo   = trim((string) ($source['activity_date_to'] ?? ''));
-        if ($dateFrom === '' && $dateTo === '') {
-            $dateFrom = $today;
-            $dateTo   = $today;
-        }
 
         return [
             'activity_date_from'  => $dateFrom,
             'activity_date_to'    => $dateTo,
             'customer_name'       => trim((string) ($source['customer_name'] ?? '')),
             'activity_type'       => trim((string) ($source['activity_type'] ?? '')),
-            'staff_id'       => $staffUserId,
-            'daily_report_status' => $isAdmin ? trim((string) ($source['daily_report_status'] ?? '')) : '',
+            'staff_id'            => trim((string) ($source['staff_id'] ?? '')),
         ];
     }
 
@@ -632,6 +692,11 @@ final class ActivityController
         $activityType = trim((string) ($input['activity_type'] ?? ''));
         if ($activityType === '') {
             $errors[] = '活動種別は必須です。';
+        }
+
+        $subject = trim((string) ($input['subject'] ?? ''));
+        if ($subject === '') {
+            $errors[] = '件名は必須です。';
         }
 
         $contentSummary = trim((string) ($input['content_summary'] ?? ''));

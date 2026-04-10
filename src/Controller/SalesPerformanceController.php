@@ -22,6 +22,7 @@ final class SalesPerformanceController
 {
     private const ALLOWED_TYPES = ['new', 'renewal', 'addition', 'change', 'cancel_deduction'];
     private const ALLOWED_SOURCE_TYPES = ['non_life', 'life'];
+    private const ALLOWED_FORM_TYPES = ['non_life', 'life'];
 
     public function __construct(
         private AuthGuard $guard,
@@ -52,11 +53,11 @@ final class SalesPerformanceController
         $error = null;
 
         $openModal = trim((string) ($_GET['open_modal'] ?? ''));
-        if (!in_array($openModal, ['create', 'import'], true)) {
+        if (!in_array($openModal, ['create_nonlife', 'create_life', 'import'], true)) {
             $openModal = '';
         }
         if ($createDraft !== null && $openModal === '') {
-            $openModal = 'create';
+            $openModal = ($createDraft['form_type'] ?? '') === 'life' ? 'create_life' : 'create_nonlife';
         }
 
         try {
@@ -73,7 +74,7 @@ final class SalesPerformanceController
             $total = (int) ($result['total'] ?? 0);
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
             $listUrl = $this->listUrl($criteria, $listState);
-            $customers = $repository->fetchCustomers(500);
+            $customers = $repository->fetchCustomers(5000);
             $staffUsers = (new StaffRepository($pdo))->findActive();
             $contracts = $repository->fetchContracts(500);
             $renewalCases = $repository->fetchRenewalCases(500);
@@ -92,7 +93,7 @@ final class SalesPerformanceController
                 }
             }
         } catch (Throwable) {
-            $error = '実績一覧の取得に失敗しました。接続設定を確認してください。';
+            $error = '成績一覧の取得に失敗しました。接続設定を確認してください。';
         }
 
         $flashError = $this->guard->session()->consumeFlash('error');
@@ -114,8 +115,10 @@ final class SalesPerformanceController
             $this->config->routeUrl('sales/detail'),
             $this->config->routeUrl('sales/create'),
             $this->config->routeUrl('sales/import'),
+            $this->config->routeUrl('sales/delete'),
             $this->guard->session()->issueCsrfToken('sales_create'),
             $this->guard->session()->issueCsrfToken('sales_import'),
+            $this->guard->session()->issueCsrfToken('sales_delete'),
             $flashError,
             $flashSuccess,
             $error,
@@ -136,7 +139,7 @@ final class SalesPerformanceController
 
         $id = (int) ($_GET['id'] ?? 0);
         if ($id <= 0) {
-            $this->guard->session()->setFlash('error', '実績IDが不正です。');
+            $this->guard->session()->setFlash('error', '成績IDが不正です。');
             Responses::redirect($listUrl);
         }
 
@@ -153,10 +156,10 @@ final class SalesPerformanceController
             $repository = new SalesPerformanceRepository($pdo);
             $record = $repository->findById($id);
             if ($record === null) {
-                $this->guard->session()->setFlash('error', '対象実績が見つかりません。');
+                $this->guard->session()->setFlash('error', '対象成績が見つかりません。');
                 Responses::redirect($listUrl);
             }
-            $customers = $repository->fetchCustomers(500);
+            $customers = $repository->fetchCustomers(5000);
             $staffUsers = (new StaffRepository($pdo))->findActive();
             $contracts = $repository->fetchContracts(500);
             $renewalCases = $repository->fetchRenewalCases(500);
@@ -172,7 +175,7 @@ final class SalesPerformanceController
                 $record = array_merge($record, (array) $editDraft['input']);
             }
         } catch (Throwable) {
-            $error = '実績詳細の取得に失敗しました。接続設定を確認してください。';
+            $error = '成績詳細の取得に失敗しました。接続設定を確認してください。';
         }
 
         $flashError = $this->guard->session()->consumeFlash('error');
@@ -204,8 +207,8 @@ final class SalesPerformanceController
                 'sales',
                 [
                     ['label' => 'ホーム', 'url' => $this->config->routeUrl('dashboard')],
-                    ['label' => '実績一覧', 'url' => $listUrl],
-                    ['label' => '実績詳細'],
+                    ['label' => '成績一覧', 'url' => $listUrl],
+                    ['label' => '成績詳細'],
                 ]
             )
         ));
@@ -268,21 +271,22 @@ final class SalesPerformanceController
 
         $input = $this->collectInput();
         $errors = $this->validateInput($input);
+        $createOpenModal = ($input['form_type'] ?? '') === 'life' ? 'create_life' : 'create_nonlife';
         if ($errors !== []) {
             $this->guard->session()->setFlash('error', implode(' ', $errors));
             $this->storeCreateDraft($input);
-            Responses::redirect(ListViewHelper::buildUrl($returnTo, ['open_modal' => 'create']));
+            Responses::redirect(ListViewHelper::buildUrl($returnTo, ['open_modal' => $createOpenModal]));
         }
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
             $repository = new SalesPerformanceRepository($pdo);
             $repository->create($input, (int) ($auth['user_id'] ?? 0));
-            $this->guard->session()->setFlash('success', '実績を登録しました。');
+            $this->guard->session()->setFlash('success', '成績を登録しました。');
         } catch (Throwable) {
-            $this->guard->session()->setFlash('error', '実績の登録に失敗しました。');
+            $this->guard->session()->setFlash('error', '成績の登録に失敗しました。');
             $this->storeCreateDraft($input);
-            Responses::redirect(ListViewHelper::buildUrl($returnTo, ['open_modal' => 'create']));
+            Responses::redirect(ListViewHelper::buildUrl($returnTo, ['open_modal' => $createOpenModal]));
         }
 
         Responses::redirect($returnTo);
@@ -300,7 +304,7 @@ final class SalesPerformanceController
 
         $id = (int) ($_POST['id'] ?? 0);
         if ($id <= 0) {
-            $this->guard->session()->setFlash('error', '実績IDが不正です。');
+            $this->guard->session()->setFlash('error', '成績IDが不正です。');
             Responses::redirect($returnTo);
         }
 
@@ -317,13 +321,13 @@ final class SalesPerformanceController
             $repository = new SalesPerformanceRepository($pdo);
             $updated = $repository->update($id, $input, (int) ($auth['user_id'] ?? 0));
             if ($updated > 0) {
-                $this->guard->session()->setFlash('success', '実績を更新しました。');
+                $this->guard->session()->setFlash('success', '成績を更新しました。');
             } else {
                 $this->guard->session()->setFlash('error', '更新対象が見つかりません。');
                 $this->storeEditDraft($id, $input);
             }
         } catch (Throwable) {
-            $this->guard->session()->setFlash('error', '実績の更新に失敗しました。');
+            $this->guard->session()->setFlash('error', '成績の更新に失敗しました。');
             $this->storeEditDraft($id, $input);
         }
 
@@ -342,7 +346,7 @@ final class SalesPerformanceController
 
         $id = (int) ($_POST['id'] ?? 0);
         if ($id <= 0) {
-            $this->guard->session()->setFlash('error', '実績IDが不正です。');
+            $this->guard->session()->setFlash('error', '成績IDが不正です。');
             Responses::redirect($returnTo);
         }
 
@@ -351,12 +355,12 @@ final class SalesPerformanceController
             $repository = new SalesPerformanceRepository($pdo);
             $deleted = $repository->softDelete($id, (int) ($auth['user_id'] ?? 0));
             if ($deleted > 0) {
-                $this->guard->session()->setFlash('success', '実績を削除しました。');
+                $this->guard->session()->setFlash('success', '成績を削除しました。');
             } else {
                 $this->guard->session()->setFlash('error', '削除対象が見つかりません。');
             }
         } catch (Throwable) {
-            $this->guard->session()->setFlash('error', '実績の削除に失敗しました。');
+            $this->guard->session()->setFlash('error', '成績の削除に失敗しました。');
         }
 
         Responses::redirect($this->config->routeUrl('sales/list'));
@@ -371,12 +375,6 @@ final class SalesPerformanceController
         // 年度（4月始まり）のデフォルト計算はダッシュボードと同一ロジック
         $performanceFiscalYear = trim((string) ($source['performance_fiscal_year'] ?? ''));
         $performanceMonthNum   = trim((string) ($source['performance_month_num'] ?? ''));
-        if ($performanceFiscalYear === '' && $performanceMonthNum === '' && !array_key_exists('filter_open', $source)) {
-            $currentMonth          = (int) date('n');
-            $currentYear           = (int) date('Y');
-            $performanceFiscalYear = (string) ($currentMonth >= 4 ? $currentYear : $currentYear - 1);
-            $performanceMonthNum   = (string) $currentMonth;
-        }
 
         return [
             'performance_fiscal_year' => $performanceFiscalYear,
@@ -385,7 +383,6 @@ final class SalesPerformanceController
             'staff_id' => trim((string) ($source['staff_id'] ?? '')),
             'source_type' => trim((string) ($source['source_type'] ?? '')),
             'performance_type' => trim((string) ($source['performance_type'] ?? '')),
-            'insurer_name' => trim((string) ($source['insurer_name'] ?? '')),
             'policy_no' => trim((string) ($source['policy_no'] ?? '')),
             'product_type' => trim((string) ($source['product_type'] ?? '')),
             'settlement_month' => trim((string) ($source['settlement_month'] ?? '')),
@@ -404,7 +401,7 @@ final class SalesPerformanceController
             'page' => (string) ListViewHelper::normalizePage($source['page'] ?? 1),
             'per_page' => (string) ListViewHelper::normalizePerPage($source['per_page'] ?? ListViewHelper::DEFAULT_PER_PAGE),
             'sort' => $sort,
-            'direction' => $sort === '' ? 'asc' : ListViewHelper::normalizeDirection($source['direction'] ?? 'asc'),
+            'direction' => $sort === '' ? 'desc' : ListViewHelper::normalizeDirection($source['direction'] ?? 'asc'),
         ];
     }
 
@@ -478,27 +475,49 @@ final class SalesPerformanceController
         $contractId = (int) ($_POST['contract_id'] ?? 0);
         $renewalCaseId = (int) ($_POST['renewal_case_id'] ?? 0);
         $staffUserId = (int) ($_POST['staff_id'] ?? 0);
+        $formType = trim((string) ($_POST['form_type'] ?? ''));
+        $performanceTypeDetail = trim((string) ($_POST['performance_type_detail'] ?? ''));
+
+        // form_type + renewal_case_id → source_type + performance_type に変換
+        $mapped = $this->determineBusinessCategory($formType, $renewalCaseId, $performanceTypeDetail);
 
         return [
+            'form_type' => $formType,
             'customer_id' => $customerId,
             'contract_id' => $contractId > 0 ? $contractId : null,
             'renewal_case_id' => $renewalCaseId > 0 ? $renewalCaseId : null,
             'performance_date' => trim((string) ($_POST['performance_date'] ?? '')),
-            'performance_type' => trim((string) ($_POST['performance_type'] ?? '')),
-            'source_type' => $this->nullableText($_POST['source_type'] ?? null),
-            'insurer_name' => $this->nullableText($_POST['insurer_name'] ?? null),
+            'performance_type' => $mapped['performance_type'],
+            'source_type' => $mapped['source_type'],
             'policy_no' => $this->nullableText($_POST['policy_no'] ?? null),
             'policy_start_date' => $this->nullableDate($_POST['policy_start_date'] ?? null),
             'application_date' => $this->nullableDate($_POST['application_date'] ?? null),
             'insurance_category' => $this->nullableText($_POST['insurance_category'] ?? null),
             'product_type' => $this->nullableText($_POST['product_type'] ?? null),
-            'premium_amount' => trim((string) ($_POST['premium_amount'] ?? '0')),
+            'premium_amount' => trim((string) ($_POST['premium_amount'] ?? '')),
             'installment_count' => $this->nullableInt($_POST['installment_count'] ?? null),
             'receipt_no' => $this->nullableText($_POST['receipt_no'] ?? null),
             'settlement_month' => $this->nullableText($_POST['settlement_month'] ?? null),
             'staff_id' => $staffUserId > 0 ? $staffUserId : null,
             'remark' => $this->nullableText($_POST['remark'] ?? null),
         ];
+    }
+
+    /**
+     * @return array{source_type: string, performance_type: string}
+     */
+    private function determineBusinessCategory(string $formType, int $renewalCaseId, string $performanceTypeDetail): array
+    {
+        if ($formType === 'life') {
+            return ['source_type' => 'life', 'performance_type' => 'new'];
+        }
+        if ($formType === 'non_life' && $renewalCaseId > 0) {
+            return ['source_type' => 'non_life', 'performance_type' => 'renewal'];
+        }
+        // non_life 新規（または form_type 不明時のフォールバック）
+        $allowed = ['new', 'addition', 'change', 'cancel_deduction'];
+        $pt = in_array($performanceTypeDetail, $allowed, true) ? $performanceTypeDetail : 'new';
+        return ['source_type' => 'non_life', 'performance_type' => $pt];
     }
 
     /**
@@ -509,23 +528,28 @@ final class SalesPerformanceController
     {
         $errors = [];
 
+        $formType = (string) ($input['form_type'] ?? '');
+        if (!in_array($formType, self::ALLOWED_FORM_TYPES, true)) {
+            $errors[] = '業務区分は必須です。';
+        }
+
+        $type = (string) ($input['performance_type'] ?? '');
+        if (!in_array($type, self::ALLOWED_TYPES, true)) {
+            $errors[] = '成績区分が不正です。';
+        }
+
+        $sourceType = (string) ($input['source_type'] ?? '');
+        if (!in_array($sourceType, self::ALLOWED_SOURCE_TYPES, true)) {
+            $errors[] = '業務区分が不正です。';
+        }
+
         if ((int) ($input['customer_id'] ?? 0) <= 0) {
             $errors[] = '顧客は必須です。';
         }
 
         $date = (string) ($input['performance_date'] ?? '');
         if (!$this->isValidDate($date)) {
-            $errors[] = '実績計上日は YYYY-MM-DD 形式で指定してください。';
-        }
-
-        $type = (string) ($input['performance_type'] ?? '');
-        if (!in_array($type, self::ALLOWED_TYPES, true)) {
-            $errors[] = '実績区分が不正です。';
-        }
-
-        $sourceType = (string) ($input['source_type'] ?? '');
-        if ($sourceType !== '' && !in_array($sourceType, self::ALLOWED_SOURCE_TYPES, true)) {
-            $errors[] = '業務区分が不正です。';
+            $errors[] = '成績計上日は YYYY-MM-DD 形式で指定してください。';
         }
 
         $installmentCount = $input['installment_count'] ?? null;
@@ -566,6 +590,13 @@ final class SalesPerformanceController
             if (!is_int($staffUserId) || $staffUserId <= 0) {
                 $errors[] = '担当者が不正です。';
             }
+        }
+
+        // 生保は精算月・分割回数・領収証番号を強制的に NULL
+        if ($formType === 'life') {
+            $input['settlement_month']  = null;
+            $input['installment_count'] = null;
+            $input['receipt_no']        = null;
         }
 
         return $errors;

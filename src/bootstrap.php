@@ -9,6 +9,7 @@ use App\Controller\AccidentCaseController;
 use App\Controller\ActivityController;
 use App\Controller\AuthController;
 use App\Controller\CustomerController;
+use App\Controller\DashboardApiController;
 use App\Controller\DashboardController;
 use App\Controller\RenewalCaseController;
 use App\Controller\SalesCaseController;
@@ -56,7 +57,8 @@ $authGuard = new AuthGuard($session, $config);
 
 $loginController = new LoginController($session, $config);
 $authController = new AuthController($config, $session, $googleOAuthClient, $authService, $authGuard, $userRepository, $tenantResolver);
-$dashboardController = new DashboardController($authGuard, $tenantFactory, $commonFactory, $config);
+$dashboardController    = new DashboardController($authGuard, $tenantFactory, $commonFactory, $config);
+$dashboardApiController = new DashboardApiController($authGuard, $tenantFactory, $commonFactory, $config);
 $renewalCaseController = new RenewalCaseController($authGuard, $tenantFactory, $commonFactory, $config);
 $customerController = new CustomerController($authGuard, $tenantFactory, $config);
 $salesPerformanceController = new SalesPerformanceController($authGuard, $tenantFactory, $commonFactory, $config);
@@ -80,6 +82,18 @@ $router->get('login', static function () use ($loginController): void {
 });
 $router->get('dashboard', static function () use ($dashboardController): void {
     $dashboardController->show();
+});
+$router->get('api/dashboard/renewal-summary', static function () use ($dashboardApiController): void {
+    $dashboardApiController->renewalSummary();
+});
+$router->get('api/dashboard/accident-summary', static function () use ($dashboardApiController): void {
+    $dashboardApiController->accidentSummary();
+});
+$router->get('api/dashboard/sales-case-summary', static function () use ($dashboardApiController): void {
+    $dashboardApiController->salesCaseSummary();
+});
+$router->get('api/dashboard/sales-performance-summary', static function () use ($dashboardApiController): void {
+    $dashboardApiController->salesPerformanceSummary();
 });
 $router->get('renewal/list', static function () use ($renewalCaseController): void {
     $renewalCaseController->list();
@@ -144,6 +158,9 @@ $router->post('accident/update', static function () use ($accidentCaseController
 $router->post('accident/store', static function () use ($accidentCaseController): void {
     $accidentCaseController->store();
 });
+$router->post('accident/delete', static function () use ($accidentCaseController): void {
+    $accidentCaseController->delete();
+});
 $router->post('accident/comment', static function () use ($accidentCaseController): void {
     $accidentCaseController->comment();
 });
@@ -201,6 +218,12 @@ $router->post('tenant/settings/procedure-method/deactivate', static function () 
 $router->post('tenant/settings/procedure-method/activate', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->procedureMethodActivate();
 });
+$router->post('tenant/settings/procedure-method/delete', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->procedureMethodDelete();
+});
+$router->post('tenant/settings/procedure-method/reorder', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->procedureMethodReorder();
+});
 $router->post('tenant/settings/purpose-type/create', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->purposeTypeCreate();
 });
@@ -212,6 +235,12 @@ $router->post('tenant/settings/purpose-type/deactivate', static function () use 
 });
 $router->post('tenant/settings/purpose-type/activate', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->purposeTypeActivate();
+});
+$router->post('tenant/settings/purpose-type/delete', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->purposeTypeDelete();
+});
+$router->post('tenant/settings/purpose-type/reorder', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->purposeTypeReorder();
 });
 $router->post('tenant/settings/staff/create', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->staffCreate();
@@ -234,6 +263,12 @@ $router->post('tenant/settings/status/deactivate', static function () use ($tena
 $router->post('tenant/settings/status/activate', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->statusActivate();
 });
+$router->post('tenant/settings/status/delete', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->statusDelete();
+});
+$router->post('tenant/settings/status/reorder', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->statusReorder();
+});
 $router->post('tenant/settings/category/create', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->categoryCreate();
 });
@@ -248,6 +283,12 @@ $router->post('tenant/settings/category/activate', static function () use ($tena
 });
 $router->post('tenant/settings/user/update-display-name', static function () use ($tenantSettingsController): void {
     $tenantSettingsController->userUpdateDisplayName();
+});
+$router->post('tenant/sales-target/save', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->salesTargetSave();
+});
+$router->post('tenant/sales-target/delete', static function () use ($tenantSettingsController): void {
+    $tenantSettingsController->salesTargetDelete();
 });
 $router->get('sales-case/list', static function () use ($salesCaseController): void {
     $salesCaseController->list();
@@ -285,5 +326,45 @@ $router->post('auth/totp-setup/verify', static function () use ($authController)
 $router->post('logout', static function () use ($authController): void {
     $authController->logout();
 });
+
+// ローカル開発用裏口ログイン（APP_ENV=local のみ有効）
+if (($config->appEnv ?? '') === 'local') {
+    $router->get('dev/login', static function () use ($session, $config, $commonFactory): void {
+        // dev@local.test ユーザーでセッションを確立する
+        $pdo = $commonFactory->create();
+        $stmt = $pdo->prepare(
+            'SELECT u.id AS user_id, u.name, u.display_name, u.is_system_admin,
+                    t.id AS tenant_id, t.tenant_code, t.tenant_name, t.db_name, ut.role
+             FROM users u
+             JOIN user_tenants ut ON ut.user_id = u.id
+             JOIN tenants t ON t.tenant_code = ut.tenant_code
+             WHERE u.email = :email AND u.is_deleted = 0 AND ut.is_deleted = 0
+             LIMIT 1'
+        );
+        $stmt->execute([':email' => 'dev@local.test']);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if (!is_array($row)) {
+            http_response_code(500);
+            echo '<h1>dev login error: user not found</h1>';
+            return;
+        }
+
+        $session->setAuth([
+            'user_id'        => (int) $row['user_id'],
+            'display_name'   => (string) ($row['display_name'] !== '' ? $row['display_name'] : $row['name']),
+            'tenant_id'      => (int) $row['tenant_id'],
+            'tenant_code'    => (string) $row['tenant_code'],
+            'tenant_name'    => (string) $row['tenant_name'],
+            'tenant_db_name' => (string) $row['db_name'],
+            'permissions'    => [
+                'is_system_admin' => ((int) $row['is_system_admin']) === 1,
+                'tenant_role'     => (string) $row['role'],
+            ],
+        ]);
+
+        \App\Http\Responses::redirect($config->routeUrl('dashboard'));
+    });
+}
 
 return $router;

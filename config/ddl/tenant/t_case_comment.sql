@@ -15,13 +15,9 @@ CREATE TABLE IF NOT EXISTS t_case_comment (
   KEY idx_t_case_comment_01 (renewal_case_id, created_at),
   KEY idx_t_case_comment_02 (accident_case_id, created_at),
   KEY idx_t_case_comment_03 (is_deleted),
-  CONSTRAINT fk_t_case_comment_01
-    FOREIGN KEY (renewal_case_id) REFERENCES t_renewal_case(id),
-  CONSTRAINT fk_t_case_comment_02
-    FOREIGN KEY (accident_case_id) REFERENCES t_accident_case(id),
   CONSTRAINT chk_t_case_comment_01 CHECK (
-    (target_type = 'renewal_case' AND renewal_case_id IS NOT NULL AND accident_case_id IS NULL)
+    (target_type = 'renewal_case'  AND renewal_case_id  IS NOT NULL AND accident_case_id IS NULL)
     OR
-    (target_type = 'accident_case' AND accident_case_id IS NOT NULL AND renewal_case_id IS NULL)
+    (target_type = 'accident_case' AND accident_case_id IS NOT NULL AND renewal_case_id  IS NULL)
   )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='案件コメント';

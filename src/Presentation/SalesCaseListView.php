@@ -59,14 +59,14 @@ final class SalesCaseListView
 
         $filterFormHtml = self::renderFilterForm($criteria, $listUrl, $staffUsers, $listState);
         $tableHtml = '<div class="table-wrap">'
-            . self::renderTable($rows, $detailBaseUrl, $customerDetailBaseUrl, $deleteUrl, $deleteCsrf)
+            . self::renderTable($rows, $detailBaseUrl, $customerDetailBaseUrl, $deleteUrl, $deleteCsrf, $listUrl, $criteria, $listState)
             . '</div>';
 
         $content =
             '<div class="list-page-frame">'
             . LP::pageHeader('見込案件一覧', '<button class="btn btn-primary" type="button" data-open-dialog="sales-case-create-dialog">＋ 見込案件登録</button>')
             . $noticeHtml
-            . LP::filterCard($filterFormHtml, $filterOpen)
+            . $filterFormHtml
             . LP::tableCard($topToolbar, $tableHtml, $bottomPager)
             . '</div>'
             . '<dialog id="dlg-delete-scase-confirm" class="modal-dialog">'
@@ -148,53 +148,62 @@ final class SalesCaseListView
             $staffOptions .= '<option value="' . $uid . '"' . $sel . '>' . $name . '</option>';
         }
 
-        return '<form method="get" action="' . Layout::escape(LP::formAction($listUrl)) . '">'
+        return '<div class="search-panel-compact">'
+            . '<div class="toggle-header">'
+            . '<span class="toggle-header-title">検索条件を閉じる</span>'
+            . '<span class="toggle-header-arrow">▲</span>'
+            . '</div>'
+            . '<div class="search-panel-body">'
+            . '<form method="get" action="' . Layout::escape(LP::formAction($listUrl)) . '">'
             . LP::routeInput($listUrl)
-            . '<input type="hidden" name="filter_open" value="1">'
             . LP::hiddenInputs(LP::queryParams([], $listState, false))
-            . '<div class="list-filter-grid">'
-            . '<label class="list-filter-field"><span>顧客名</span>'
-            . '<input type="text" name="customer_name" value="' . $customerName . '" placeholder="顧客名で絞り込み"></label>'
-            . '<label class="list-filter-field"><span>担当者</span>'
-            . '<select name="staff_id">' . $staffOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>ステータス</span>'
-            . '<select name="status">' . $statusOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>見込度</span>'
-            . '<select name="prospect_rank">' . $rankOptions . '</select></label>'
+            . '<div class="search-row">'
+            . '<div class="search-field"><span class="search-label">顧客名</span><input type="text" name="customer_name" class="compact-input w-md" value="' . $customerName . '"></div>'
+            . '<div class="search-field"><span class="search-label">担当者</span><select name="staff_id" class="compact-input w-md">' . $staffOptions . '</select></div>'
+            . '<div class="search-field"><span class="search-label">ステータス</span><select name="status" class="compact-input w-md">' . $statusOptions . '</select></div>'
+            . '<div class="search-field"><span class="search-label">見込度</span><select name="prospect_rank" class="compact-input w-sm">' . $rankOptions . '</select></div>'
+            . '<div class="search-actions">'
+            . '<button type="submit" class="btn btn-small">検索</button>'
+            . '<a href="' . Layout::escape($listUrl) . '" class="btn btn-small btn-secondary">クリア</a>'
             . '</div>'
-            . '<div class="actions list-filter-actions">'
-            . '<button type="submit" class="btn">検索</button>'
-            . '<a href="' . Layout::escape(ListViewHelper::buildUrl($listUrl, ['filter_open' => '1'])) . '" class="btn btn-secondary">条件クリア</a>'
             . '</div>'
-            . '</form>';
+            . '</form>'
+            . '</div>'
+            . '</div>';
     }
 
     /**
      * @param array<int, array<string, mixed>> $rows
+     */
+    /**
+     * @param array<string, string> $criteria
+     * @param array<string, string> $listState
      */
     private static function renderTable(
         array $rows,
         string $detailBaseUrl,
         string $customerDetailBaseUrl,
         string $deleteUrl,
-        string $deleteCsrf
+        string $deleteCsrf,
+        string $searchUrl = '',
+        array $criteria = [],
+        array $listState = []
     ): string {
         $thead =
             '<thead><tr>'
-            . '<th>案件名</th>'
-            . '<th>顧客名</th>'
-            . '<th>種別</th>'
-            . '<th>種目</th>'
-            . '<th>見込度</th>'
-            . '<th>契約予定月</th>'
-            . '<th>ステータス</th>'
+            . '<th>' . LP::sortLink('案件名', 'case_name', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('顧客名', 'customer_name', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('種別', 'case_type', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('種目', 'product_type', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('見込度', 'prospect_rank', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('ステータス', 'status', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>担当者</th>'
             . '<th style="width:48px;"></th>'
             . '</tr></thead>';
 
         if ($rows === []) {
             return '<table class="table-fixed table-card list-table">' . $thead
-                . '<tbody><tr><td colspan="9">該当する見込案件はありません。</td></tr></tbody></table>';
+                . '<tbody><tr><td colspan="8">該当する見込案件はありません。</td></tr></tbody></table>';
         }
 
         $tbody = '<tbody>';
@@ -232,29 +241,27 @@ final class SalesCaseListView
                 . '</form>';
 
             $tbody .= '<tr>'
-                . '<td data-label="案件名"><a class="text-link" href="' . $detailUrl . '"><strong>' . Layout::escape($caseName) . '</strong></a></td>'
-                . '<td data-label="顧客名">' . $custLink . '</td>'
+                . '<td class="cell-ellipsis" data-label="案件名" title="' . Layout::escape($caseName) . '"><a class="text-link" href="' . $detailUrl . '">' . Layout::escape($caseName) . '</a></td>'
+                . '<td class="cell-ellipsis" data-label="顧客名" title="' . Layout::escape($customerName) . '">' . $custLink . '</td>'
                 . '<td data-label="種別">' . Layout::escape($caseTypeLabel) . '</td>'
-                . '<td data-label="種目">' . Layout::escape($productType) . '</td>'
+                . '<td class="cell-ellipsis" data-label="種目" title="' . Layout::escape($productType) . '">' . Layout::escape($productType) . '</td>'
                 . '<td data-label="見込度" style="text-align:center;">' . self::rankBadge($rank) . '</td>'
-                . '<td data-label="契約予定月">' . Layout::escape($closeMonth) . '</td>'
                 . '<td data-label="ステータス">' . self::statusBadge($status) . '</td>'
-                . '<td data-label="担当者">' . Layout::escape($staffName) . '</td>'
+                . '<td class="cell-ellipsis" data-label="担当者" title="' . Layout::escape($staffName) . '">' . Layout::escape($staffName) . '</td>'
                 . '<td style="text-align:center;">' . $deleteForm . '</td>'
                 . '</tr>';
         }
         $tbody .= '</tbody>';
 
         $colgroup = '<colgroup>'
-            . '<col style="width:22%">'
-            . '<col style="width:14%">'
-            . '<col style="width:80px">'
-            . '<col style="width:130px">'
-            . '<col style="width:64px">'
-            . '<col style="width:96px">'
-            . '<col style="width:100px">'
             . '<col>'
-            . '<col style="width:48px">'
+            . '<col style="width:180px">'
+            . '<col style="width:92px">'
+            . '<col style="width:140px">'
+            . '<col style="width:82px">'
+            . '<col style="width:108px">'
+            . '<col style="width:100px">'
+            . '<col style="width:40px">'
             . '</colgroup>';
 
         return '<table class="table-fixed table-card list-table">' . $colgroup . $thead . $tbody . '</table>';
@@ -304,11 +311,14 @@ final class SalesCaseListView
         int $loginStaffId,
         string $returnTo
     ): string {
-        $custOptions = '<option value="">— 顧客を選択（任意）—</option>';
+        $custDatalist = '';
         foreach ($customers as $c) {
             $cid   = (int) ($c['id'] ?? 0);
             $cname = Layout::escape((string) ($c['customer_name'] ?? ''));
-            $custOptions .= '<option value="' . $cid . '">' . $cname . '</option>';
+            if ($cid <= 0 || $cname === '') {
+                continue;
+            }
+            $custDatalist .= '<option value="' . $cname . '" data-id="' . $cid . '">';
         }
 
         $statusOptions = '';
@@ -347,9 +357,18 @@ final class SalesCaseListView
             . '<input type="hidden" name="return_to" value="' . Layout::escape($returnTo) . '">'
             . '<section class="modal-form-section">'
             . '<div class="list-filter-grid modal-form-grid">'
-            . '<label class="list-filter-field modal-form-wide"><span>顧客（既存）</span>'
-            . '<select name="customer_id">' . $custOptions . '</select>'
-            . '<small class="muted">既存顧客に紐づける場合のみ選択。新規開拓先は空欄で構いません。</small></label>'
+            . '<div class="list-filter-field modal-form-wide" id="sc-cust-field">'
+            . '<span style="display:flex;gap:16px;align-items:center;margin-bottom:6px;">'
+            . '<label style="font-weight:500;margin:0;cursor:pointer;"><input type="radio" name="_cust_type" value="existing" id="sc-cust-existing" style="margin-right:4px;">顧客（既存）</label>'
+            . '<label style="font-weight:500;margin:0;cursor:pointer;"><input type="radio" name="_cust_type" value="new" id="sc-cust-new" style="margin-right:4px;">顧客（新規）</label>'
+            . '</span>'
+            . '<datalist id="sc-cust-datalist">' . $custDatalist . '</datalist>'
+            . '<div id="sc-cust-existing-wrap">'
+            . '<input type="text" id="sc-cust-text" list="sc-cust-datalist" autocomplete="off" placeholder="顧客名で検索">'
+            . '<input type="hidden" name="customer_id" id="sc-cust-select">'
+            . '<small class="muted" style="display:block;margin-top:4px;">既存顧客に紐づける場合のみ選択。</small></div>'
+            . '<div id="sc-cust-new-wrap" style="display:none;"><input type="text" name="prospect_name" id="sc-cust-prospect-name" maxlength="200" placeholder="会社名・氏名など"></div>'
+            . '</div>'
             . '<label class="list-filter-field modal-form-wide"><span>案件名 ' . $req . '</span>'
             . '<input type="text" name="case_name" required maxlength="200"></label>'
             . '<label class="list-filter-field"><span>ステータス ' . $req . '</span>'
@@ -376,6 +395,35 @@ final class SalesCaseListView
             . '<button class="btn btn-secondary" type="button" onclick="document.getElementById(\'sales-case-create-dialog\').close()">キャンセル</button>'
             . '</div>'
             . '</form>'
+            . '<script>(function(){'
+            . 'var radios=document.querySelectorAll(\'input[name="_cust_type"]\');'
+            . 'var existWrap=document.getElementById("sc-cust-existing-wrap");'
+            . 'var newWrap=document.getElementById("sc-cust-new-wrap");'
+            . 'var txt=document.getElementById("sc-cust-text");'
+            . 'var hid=document.getElementById("sc-cust-select");'
+            . 'var dl=document.getElementById("sc-cust-datalist");'
+            . 'var pname=document.getElementById("sc-cust-prospect-name");'
+            . 'if(!radios.length||!existWrap||!newWrap){return;}'
+            . 'document.getElementById("sc-cust-existing").checked=true;'
+            . 'function syncId(){'
+            . '  if(!txt||!hid||!dl){return;}'
+            . '  var v=txt.value;var opts=dl.querySelectorAll("option");'
+            . '  hid.value="";'
+            . '  for(var i=0;i<opts.length;i++){if(opts[i].value===v){hid.value=opts[i].getAttribute("data-id")||"";break;}}'
+            . '}'
+            . 'if(txt){txt.addEventListener("input",syncId);txt.addEventListener("change",syncId);}'
+            . 'function toggle(){'
+            . '  var v=document.querySelector(\'input[name="_cust_type"]:checked\').value;'
+            . '  if(v==="existing"){'
+            . '    existWrap.style.display="";newWrap.style.display="none";'
+            . '    if(pname){pname.removeAttribute("required");pname.value="";}'
+            . '  } else {'
+            . '    existWrap.style.display="none";newWrap.style.display="";'
+            . '    if(txt){txt.value="";}if(hid){hid.value="";}if(pname){pname.setAttribute("required","");}'
+            . '  }'
+            . '}'
+            . 'radios.forEach(function(r){r.addEventListener("change",toggle);});'
+            . '})();</script>'
             . '</dialog>';
     }
 }

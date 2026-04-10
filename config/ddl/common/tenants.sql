@@ -15,10 +15,5 @@ CREATE TABLE IF NOT EXISTS tenants (
   UNIQUE KEY uq_tenants_tenant_code (tenant_code),
   UNIQUE KEY uq_tenants_db_name (db_name),
   KEY idx_tenants_status (status),
-  KEY idx_tenants_is_deleted (is_deleted),
-
-  CONSTRAINT fk_tenants_created_by
-    FOREIGN KEY (created_by) REFERENCES users(id),
-  CONSTRAINT fk_tenants_updated_by
-    FOREIGN KEY (updated_by) REFERENCES users(id)
+  KEY idx_tenants_is_deleted (is_deleted)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='テナント';

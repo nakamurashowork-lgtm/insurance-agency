@@ -3,7 +3,6 @@ CREATE TABLE IF NOT EXISTS t_contract (
   customer_id         BIGINT UNSIGNED NOT NULL COMMENT '契約者顧客ID(m_customer.id)',
   insured_customer_id BIGINT UNSIGNED NULL COMMENT '被保険者顧客ID(m_customer.id)',
   policy_no           VARCHAR(50)     NOT NULL COMMENT '証券番号',
-  insurer_name        VARCHAR(100)    NOT NULL COMMENT '保険会社名',
   insurance_category  VARCHAR(50)     NULL COMMENT '保険種類',
   product_type        VARCHAR(50)     NULL COMMENT '種目',
   policy_start_date   DATE            NULL COMMENT '始期日',
@@ -30,10 +29,6 @@ CREATE TABLE IF NOT EXISTS t_contract (
   KEY idx_t_contract_04 (status),
   KEY idx_t_contract_05 (sales_staff_id),
   KEY idx_t_contract_06 (is_deleted),
-  CONSTRAINT fk_t_contract_01
-    FOREIGN KEY (customer_id) REFERENCES m_customer(id),
-  CONSTRAINT fk_t_contract_02
-    FOREIGN KEY (insured_customer_id) REFERENCES m_customer(id),
   CONSTRAINT chk_t_contract_01 CHECK (status IN ('active', 'renewal_pending', 'expired', 'cancelled', 'inactive')),
   CONSTRAINT chk_t_contract_02 CHECK (premium_amount >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='契約';

@@ -37,7 +37,11 @@ final class TenantSettingsView
         array $masterUrls = [],
         array $accidentCaseStatuses = [],
         array $tenantUsers = [],
-        array $procedureMethods = []
+        array $procedureMethods = [],
+        array $yearlyTargets = [],
+        int $selectedTargetFy = 0,
+        array $fiscalYearOptions = [],
+        array $assignableUsers = []
     ): string {
         $errorHtml = '';
         if (is_string($errorMessage) && $errorMessage !== '') {
@@ -68,6 +72,7 @@ final class TenantSettingsView
             . '<div class="tab" data-tab="purpose" onclick="showSettingsTab(\'purpose\',this)">用件区分</div>'
             . '<div class="tab" data-tab="notify" onclick="showSettingsTab(\'notify\',this)">通知設定</div>'
             . '<div class="tab" data-tab="users" onclick="showSettingsTab(\'users\',this)">ユーザー管理</div>'
+            . '<div class="tab" data-tab="target" onclick="showSettingsTab(\'target\',this)">目標管理</div>'
             . '</div>';
 
         // Tab panels
@@ -92,6 +97,16 @@ final class TenantSettingsView
         $panelUsers    = '<div id="settings-panel-users" class="settings-panel" style="display:none;">'
             . self::renderUserSection($tenantUsers, $masterCsrfs, $masterUrls)
             . '</div>';
+        $panelTarget   = '<div id="settings-panel-target" class="settings-panel" style="display:none;">'
+            . self::renderSalesTargetSection(
+                $yearlyTargets,
+                $assignableUsers,
+                $selectedTargetFy,
+                $fiscalYearOptions,
+                $masterCsrfs,
+                $masterUrls
+            )
+            . '</div>';
 
         // Tab JS — classList approach; call initCategoryFilter when switching to category
         $tabJs = ''
@@ -109,7 +124,18 @@ final class TenantSettingsView
             . 'if(!tab)return;'
             . 'var tabEl=document.querySelector(".tab[data-tab=\'"+tab+"\']");'
             . 'if(tabEl){showSettingsTab(tab,tabEl);}'
+            . 'var panel=document.getElementById("settings-panel-"+tab);'
+            . 'if(panel){panel.scrollIntoView({behavior:"instant",block:"start"});}'
             . '})();'
+            . 'var _deleteForm=null;'
+            . 'function statusDeleteConfirm(form){'
+            . '_deleteForm=form;'
+            . 'document.getElementById("dlg-status-delete-confirm").showModal();'
+            . '}'
+            . 'function statusDeleteExecute(){'
+            . 'document.getElementById("dlg-status-delete-confirm").close();'
+            . 'if(_deleteForm){_deleteForm.submit();}'
+            . '}'
             . '</script>';
 
         $content = ''
@@ -128,6 +154,7 @@ final class TenantSettingsView
             . $panelPurpose
             . $panelNotify
             . $panelUsers
+            . $panelTarget
             . $tabJs;
 
         return Layout::render('テナント設定', $content, $layoutOptions);
@@ -234,11 +261,12 @@ final class TenantSettingsView
             . '<tbody>' . $rows . '</tbody>'
             . '</table></div>';
 
-        $addBtn = '<button class="btn btn-primary" id="staff-add-btn" style="margin-top:12px;"'
-            . ' onclick="this.style.display=\'none\';document.getElementById(\'staff-add-form\').style.display=\'block\';">+ 担当者を追加</button>';
+        $addBtn = '<button class="btn btn-primary" data-open-dialog="dlg-staff-create" style="margin-top:12px;">+ 担当者を追加</button>';
 
-        $addForm = ''
-            . '<div id="staff-add-form" style="display:none;margin-top:12px;background:#f9f9f9;padding:12px;border:1px solid #ddd;">'
+        $addDialog = ''
+            . '<dialog id="dlg-staff-create" class="modal-dialog">'
+            . '<div class="modal-head"><h2>担当者を追加</h2>'
+            . '<button type="button" class="modal-close" data-close-dialog="dlg-staff-create">×</button></div>'
             . '<form method="post" action="' . Layout::escape($createUrl) . '">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfCreate) . '">'
             . '<input type="hidden" name="_tab" value="staff">'
@@ -257,13 +285,19 @@ final class TenantSettingsView
             . '<select name="user_id" class="form-input">'
             . self::buildUserOptions($tenantUsers, 0)
             . '</select></div>'
-            . '<div style="margin-top:8px;">'
-            . '<button type="submit" class="btn btn-primary btn-sm">追加</button>'
-            . ' <button type="button" class="btn btn-sm" style="margin-left:4px;"'
-            . ' onclick="document.getElementById(\'staff-add-form\').style.display=\'none\';document.getElementById(\'staff-add-btn\').style.display=\'inline-block\';">キャンセル</button>'
+            . '<div class="dlg-footer">'
+            . '<button type="button" class="btn" data-close-dialog="dlg-staff-create">キャンセル</button>'
+            . '<button type="submit" class="btn btn-primary">追加</button>'
             . '</div>'
             . '</form>'
-            . '</div>';
+            . '</dialog>'
+            . '<script>(function(){'
+            . 'var dlg=document.getElementById("dlg-staff-create");'
+            . 'if(!dlg||typeof dlg.showModal!=="function"){return;}'
+            . 'document.querySelectorAll("[data-open-dialog=\"dlg-staff-create\"]").forEach(function(btn){btn.addEventListener("click",function(){if(!dlg.open)dlg.showModal();});});'
+            . 'dlg.querySelectorAll("[data-close-dialog=\"dlg-staff-create\"]").forEach(function(btn){btn.addEventListener("click",function(){if(dlg.open)dlg.close();});});'
+            . 'dlg.addEventListener("click",function(e){var r=dlg.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom){if(dlg.open)dlg.close();}});'
+            . '})();</script>';
 
         return ''
             . '<div class="card">'
@@ -271,9 +305,9 @@ final class TenantSettingsView
             . '<p class="muted" style="margin-bottom:12px;font-size:12.5px;">担当者マスタを管理します。代理店コードを設定すると満期一覧CSV取り込み時に自動マッピングされます。</p>'
             . $table
             . $addBtn
-            . $addForm
             . '</div>'
-            . $dialogs;
+            . $dialogs
+            . $addDialog;
     }
 
     /**
@@ -303,66 +337,42 @@ final class TenantSettingsView
         array $masterCsrfs,
         array $masterUrls
     ): string {
-        $createUrl      = $masterUrls['category_create'] ?? '';
-        $updateUrl      = $masterUrls['category_update'] ?? '';
-        $deactivateUrl  = $masterUrls['category_deactivate'] ?? '';
-        $activateUrl    = $masterUrls['category_activate'] ?? '';
+        $createUrl     = $masterUrls['category_create'] ?? '';
+        $updateUrl     = $masterUrls['category_update'] ?? '';
+        $deactivateUrl = $masterUrls['category_deactivate'] ?? '';
+        $activateUrl   = $masterUrls['category_activate'] ?? '';
 
         $csrfCreate     = $masterCsrfs['category_create'] ?? '';
         $csrfUpdate     = $masterCsrfs['category_update'] ?? '';
         $csrfDeactivate = $masterCsrfs['category_deactivate'] ?? '';
         $csrfActivate   = $masterCsrfs['category_activate'] ?? '';
 
-        $rows    = '';
-        $dialogs = '';
+        $rows = '';
         foreach ($productCategories as $row) {
             $id          = (int) ($row['id'] ?? 0);
             $csvValue    = Layout::escape((string) ($row['csv_value'] ?? ''));
             $displayName = Layout::escape((string) ($row['display_name'] ?? ''));
             $isActive    = (int) ($row['is_active'] ?? 1);
-            $dlgId       = 'dlg-cat-' . $id;
-            $rowStyle    = $isActive === 0 ? ' style="opacity:0.5;"' : '';
+            $rowStyle    = $isActive === 0 ? ' style="opacity:0.55;"' : '';
 
             if ($isActive === 1) {
-                $dialogs .= ''
-                    . '<dialog id="' . $dlgId . '">'
-                    . '<div class="dlg-title">種目を編集</div>'
-                    . '<form method="post" action="' . Layout::escape($updateUrl) . '">'
-                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfUpdate) . '">'
-                    . '<input type="hidden" name="id" value="' . $id . '">'
-                    . '<input type="hidden" name="_tab" value="category">'
-                    . '<div class="form-row"><div class="form-label">種目種類値（CSV）</div>'
-                    . '<input type="text" name="csv_value" value="' . $csvValue . '" required class="form-input"></div>'
-                    . '<div class="form-row"><div class="form-label">表示名</div>'
-                    . '<input type="text" name="display_name" value="' . $displayName . '" required class="form-input"></div>'
-                    . '<div class="dlg-footer">'
-                    . '<button type="button" class="btn" onclick="this.closest(\'dialog\').close()">キャンセル</button>'
-                    . '<button type="submit" class="btn btn-primary">更新</button>'
-                    . '</div>'
-                    . '</form>'
-                    . '</dialog>';
-
                 $actionBtns = '<div style="display:flex;gap:4px;">'
                     . '<button type="button" class="btn btn-sm" style="padding:3px 10px;font-size:11px;"'
-                    . ' onclick="document.getElementById(\'' . $dlgId . '\').showModal()">編集</button>'
-                    . '<form method="post" action="' . Layout::escape($deactivateUrl) . '">'
-                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDeactivate) . '">'
-                    . '<input type="hidden" name="id" value="' . $id . '">'
-                    . '<input type="hidden" name="_tab" value="category">'
-                    . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;"'
-                    . ' onclick="return confirm(\'この値を無効化します。既存データの表示には影響しませんが、新規選択はできなくなります。よろしいですか？\')">無効化</button>'
-                    . '</form>'
+                    . ' onclick="catEdit(this)">編集</button>'
+                    . '<button type="button" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;"'
+                    . ' onclick="catDeactivate(this)">無効化</button>'
                     . '</div>';
             } else {
-                $actionBtns = '<form method="post" action="' . Layout::escape($activateUrl) . '">'
-                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfActivate) . '">'
-                    . '<input type="hidden" name="id" value="' . $id . '">'
-                    . '<input type="hidden" name="_tab" value="category">'
-                    . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;">有効化</button>'
-                    . '</form>';
+                $actionBtns = '<button type="button" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;"'
+                    . ' onclick="catActivate(this)">有効化</button>';
             }
 
-            $rows .= '<tr' . $rowStyle . '>'
+            $rows .= '<tr' . $rowStyle
+                . ' data-id="' . $id . '"'
+                . ' data-csv="' . $csvValue . '"'
+                . ' data-display="' . $displayName . '"'
+                . ' data-active="' . $isActive . '"'
+                . '>'
                 . '<td>' . $csvValue . '</td>'
                 . '<td>' . $displayName . '</td>'
                 . '<td>' . $actionBtns . '</td>'
@@ -374,7 +384,7 @@ final class TenantSettingsView
         }
 
         $searchUi = ''
-            . '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">'
+            . '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">'
             . '<input id="cat-search" class="form-input" placeholder="種目種類・表示名で検索..." style="max-width:260px;">'
             . '<select id="cat-filter" class="form-select" style="max-width:140px;">'
             . '<option value="">全カテゴリ</option>'
@@ -387,7 +397,7 @@ final class TenantSettingsView
             . '</div>';
 
         $table = ''
-            . '<div class="tbl-wrap" style="max-height:480px;overflow-y:auto;">'
+            . '<div class="tbl-wrap">'
             . '<table class="list-table" id="cat-table">'
             . '<thead><tr>'
             . '<th>種目種類値（CSV）</th>'
@@ -397,23 +407,81 @@ final class TenantSettingsView
             . '<tbody>' . $rows . '</tbody>'
             . '</table></div>';
 
-        $addBtn = '<button class="btn btn-primary" id="cat-add-btn" style="margin-top:12px;"'
-            . ' onclick="this.style.display=\'none\';document.getElementById(\'cat-add-form\').style.display=\'block\';">+ 種目を追加</button>';
+        $addBtn = '<button class="btn btn-primary" data-open-dialog="dlg-cat-create" style="margin-top:12px;">+ 種目を追加</button>';
 
-        $addForm = ''
-            . '<div id="cat-add-form" style="display:none;margin-top:12px;background:#f9f9f9;padding:12px;border:1px solid #ddd;">'
+        $addDialog = ''
+            . '<dialog id="dlg-cat-create" class="modal-dialog">'
+            . '<div class="modal-head"><h2>種目を追加</h2>'
+            . '<button type="button" class="modal-close" data-close-dialog="dlg-cat-create">×</button></div>'
             . '<form method="post" action="' . Layout::escape($createUrl) . '">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfCreate) . '">'
             . '<input type="hidden" name="_tab" value="category">'
-            . '<label style="display:block;margin-bottom:6px;">種目種類値（SJ-NET出力値）<input type="text" name="csv_value" required class="form-input" style="max-width:200px;margin-left:8px;"></label>'
-            . '<label style="display:block;margin-bottom:8px;">表示名 <input type="text" name="display_name" required class="form-input" style="max-width:200px;margin-left:8px;"></label>'
-            . '<button type="submit" class="btn btn-primary btn-sm">追加</button>'
-            . ' <button type="button" class="btn btn-sm" style="margin-left:4px;"'
-            . ' onclick="document.getElementById(\'cat-add-form\').style.display=\'none\';document.getElementById(\'cat-add-btn\').style.display=\'inline-block\';">キャンセル</button>'
+            . '<div class="form-row"><div class="form-label">種目種類値（SJ-NET出力値）</div>'
+            . '<input type="text" name="csv_value" required class="form-input"></div>'
+            . '<div class="form-row"><div class="form-label">表示名</div>'
+            . '<input type="text" name="display_name" required class="form-input"></div>'
+            . '<div class="dlg-footer">'
+            . '<button type="button" class="btn" data-close-dialog="dlg-cat-create">キャンセル</button>'
+            . '<button type="submit" class="btn btn-primary">追加</button>'
+            . '</div>'
             . '</form>'
-            . '</div>';
+            . '</dialog>'
+            . '<script>(function(){'
+            . 'var dlg=document.getElementById("dlg-cat-create");'
+            . 'if(!dlg||typeof dlg.showModal!=="function"){return;}'
+            . 'document.querySelectorAll("[data-open-dialog=\"dlg-cat-create\"]").forEach(function(btn){btn.addEventListener("click",function(){if(!dlg.open)dlg.showModal();});});'
+            . 'dlg.querySelectorAll("[data-close-dialog=\"dlg-cat-create\"]").forEach(function(btn){btn.addEventListener("click",function(){if(dlg.open)dlg.close();});});'
+            . 'dlg.addEventListener("click",function(e){var r=dlg.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom){if(dlg.open)dlg.close();}});'
+            . '})();</script>';
 
-        $filterJs = '<script>'
+        $editDialog = ''
+            . '<dialog id="dlg-cat-edit">'
+            . '<div class="dlg-title">種目を編集</div>'
+            . '<form method="post" action="' . Layout::escape($updateUrl) . '">'
+            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfUpdate) . '">'
+            . '<input type="hidden" name="id" id="cat-edit-id">'
+            . '<input type="hidden" name="_tab" value="category">'
+            . '<div class="form-row"><div class="form-label">種目種類値（CSV）</div>'
+            . '<input type="text" name="csv_value" id="cat-edit-csv" required class="form-input"></div>'
+            . '<div class="form-row"><div class="form-label">表示名</div>'
+            . '<input type="text" name="display_name" id="cat-edit-display" required class="form-input"></div>'
+            . '<div class="dlg-footer">'
+            . '<button type="button" class="btn" onclick="document.getElementById(\'dlg-cat-edit\').close()">キャンセル</button>'
+            . '<button type="submit" class="btn btn-primary">更新</button>'
+            . '</div>'
+            . '</form>'
+            . '</dialog>';
+
+        $deactivateForm = ''
+            . '<form id="cat-deactivate-form" method="post" action="' . Layout::escape($deactivateUrl) . '" style="display:none;">'
+            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDeactivate) . '">'
+            . '<input type="hidden" name="id" id="cat-deactivate-id">'
+            . '<input type="hidden" name="_tab" value="category">'
+            . '</form>';
+
+        $activateForm = ''
+            . '<form id="cat-activate-form" method="post" action="' . Layout::escape($activateUrl) . '" style="display:none;">'
+            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfActivate) . '">'
+            . '<input type="hidden" name="id" id="cat-activate-id">'
+            . '<input type="hidden" name="_tab" value="category">'
+            . '</form>';
+
+        $js = '<script>'
+            . 'function catEdit(btn){'
+            . 'var tr=btn.closest("tr");'
+            . 'document.getElementById("cat-edit-id").value=tr.dataset.id;'
+            . 'document.getElementById("cat-edit-csv").value=tr.dataset.csv;'
+            . 'document.getElementById("cat-edit-display").value=tr.dataset.display;'
+            . 'document.getElementById("dlg-cat-edit").showModal();'
+            . '}'
+            . 'function catDeactivate(btn){'
+            . 'document.getElementById("cat-deactivate-id").value=btn.closest("tr").dataset.id;'
+            . 'document.getElementById("cat-deactivate-form").submit();'
+            . '}'
+            . 'function catActivate(btn){'
+            . 'document.getElementById("cat-activate-id").value=btn.closest("tr").dataset.id;'
+            . 'document.getElementById("cat-activate-form").submit();'
+            . '}'
             . 'function initCategoryFilter(){'
             . 'var search=document.getElementById("cat-search");'
             . 'var filter=document.getElementById("cat-filter");'
@@ -425,28 +493,36 @@ final class TenantSettingsView
             . 'document.querySelectorAll("#cat-table tbody tr").forEach(function(tr){'
             . 'var matchText=!q||tr.textContent.toLowerCase().includes(q);'
             . 'var matchCat=!cat||(tr.cells[1]&&tr.cells[1].textContent.trim()===cat);'
-            . 'tr.style.display=(matchText&&matchCat)?"":"none";'
+            . 'var base=tr.dataset.active==="0"?"opacity:0.55;":"";'
+            . 'tr.style.cssText=(matchText&&matchCat)?base:"display:none;";'
             . 'if(matchText&&matchCat)visible++;'
             . '});'
             . 'if(countEl)countEl.textContent=visible+"件表示中";'
             . '}'
+            . 'window.catApplyFilter=apply;'
             . 'if(search)search.addEventListener("input",apply);'
             . 'if(filter)filter.addEventListener("change",apply);'
             . 'apply();'
             . '}'
             . '</script>';
 
-        return ''
+        $note = '<p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;">'
+            . '種目マスタを管理します。<br>'
+            . '・無効化した種目は新規選択できなくなりますが、既存データの表示には影響しません。'
+            . '</p>';
+
+        return $note
             . '<div class="card" style="max-width:700px;">'
             . '<div class="detail-section-title">種目マスタ</div>'
-            . '<p style="font-size:12px;color:var(--text-secondary);margin:0 0 8px;">種目マスタを管理します。無効化した種目は新規選択できなくなりますが、既存データの表示には影響しません。</p>'
             . $searchUi
             . $table
             . $addBtn
-            . $addForm
             . '</div>'
-            . $filterJs
-            . $dialogs;
+            . $editDialog
+            . $deactivateForm
+            . $activateForm
+            . $addDialog
+            . $js;
     }
 
     // ---- 対応状況マスタ ----
@@ -467,38 +543,69 @@ final class TenantSettingsView
         $updateNameUrl  = $masterUrls['status_update_name'] ?? '';
         $deactivateUrl  = $masterUrls['status_deactivate'] ?? '';
         $activateUrl    = $masterUrls['status_activate'] ?? '';
+        $deleteUrl      = $masterUrls['status_delete'] ?? '';
+        $reorderUrl     = $masterUrls['status_reorder'] ?? '';
 
         $csrfCreate     = $masterCsrfs['status_create'] ?? '';
         $csrfUpdateName = $masterCsrfs['status_update_name'] ?? '';
         $csrfDeactivate = $masterCsrfs['status_deactivate'] ?? '';
         $csrfActivate   = $masterCsrfs['status_activate'] ?? '';
+        $csrfDelete     = $masterCsrfs['status_delete'] ?? '';
+        $csrfReorder    = $masterCsrfs['status_reorder'] ?? '';
 
         $html    = '';
         $dialogs = '';
 
-        // Helper to build a status table + add form for one case_type
         $buildSection = function (
             string $sectionTitle,
             string $caseType,
             string $addBtnId,
             string $addFormId,
             array $statuses
-        ) use ($createUrl, $updateNameUrl, $deactivateUrl, $activateUrl, $csrfCreate, $csrfUpdateName, $csrfDeactivate, $csrfActivate, &$dialogs): string {
+        ) use (
+            $createUrl, $updateNameUrl, $deactivateUrl, $activateUrl, $deleteUrl, $reorderUrl,
+            $csrfCreate, $csrfUpdateName, $csrfDeactivate, $csrfActivate, $csrfDelete, $csrfReorder,
+            &$dialogs
+        ): string {
             $rows = '';
             foreach ($statuses as $row) {
-                $id          = (int) ($row['id'] ?? 0);
-                $displayName = Layout::escape((string) ($row['display_name'] ?? ''));
-                $displayOrder = (int) ($row['display_order'] ?? 0);
-                $isSystem    = (int) ($row['is_system'] ?? 0);
-                $isActive    = (int) ($row['is_active'] ?? 1);
-                $dlgId       = 'dlg-status-' . $id;
-                $rowStyle    = ($isSystem === 0 && $isActive === 0) ? ' style="opacity:0.5;"' : '';
+                $id           = (int) ($row['id'] ?? 0);
+                $code         = (string) ($row['code'] ?? '');
+                $displayName  = Layout::escape((string) ($row['display_name'] ?? ''));
+                $isSystem     = (int) ($row['is_system'] ?? 0);
+                $isActive     = (int) ($row['is_active'] ?? 1);
+                $isProtected  = in_array($code, ['closed', 'completed'], true);
+                $canRename    = !$isProtected;
+                $canDisable   = !$isProtected;
+                $canDelete    = !$isProtected;
+                $dlgId        = 'dlg-status-' . $id;
+                $rowOpacity   = ($isActive === 0) ? ' style="opacity:0.55;"' : '';
 
-                if ($isSystem === 1) {
-                    // System-fixed: display only
-                    $actionBtns = '<span class="badge badge-gray" style="font-size:11px;">固定</span>';
-                } elseif ($isActive === 1) {
-                    // Non-system, active: show edit + deactivate
+                // ── 並び順ボタン（全行共通） ──
+                $reorderBtns = ''
+                    . '<form method="post" action="' . Layout::escape($reorderUrl) . '" style="display:inline;">'
+                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfReorder) . '">'
+                    . '<input type="hidden" name="id" value="' . $id . '">'
+                    . '<input type="hidden" name="direction" value="up">'
+                    . '<input type="hidden" name="_tab" value="status">'
+                    . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:12px;" title="上へ">↑</button>'
+                    . '</form>'
+                    . '<form method="post" action="' . Layout::escape($reorderUrl) . '" style="display:inline;">'
+                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfReorder) . '">'
+                    . '<input type="hidden" name="id" value="' . $id . '">'
+                    . '<input type="hidden" name="direction" value="down">'
+                    . '<input type="hidden" name="_tab" value="status">'
+                    . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:12px;" title="下へ">↓</button>'
+                    . '</form>';
+
+                // ── バッジ ──
+                $badge = '';
+                if ($isProtected) {
+                    $badge = '<span class="badge badge-danger" style="font-size:10px;padding:2px 6px;" title="表示名変更・無効化・削除は不可。並び順変更のみ可能。">保護</span> ';
+                }
+
+                // ── 編集ダイアログ ──
+                if ($canRename) {
                     $dialogs .= ''
                         . '<dialog id="' . $dlgId . '">'
                         . '<div class="dlg-title">対応状況を編集</div>'
@@ -514,81 +621,129 @@ final class TenantSettingsView
                         . '</div>'
                         . '</form>'
                         . '</dialog>';
+                }
 
-                    $actionBtns = '<div style="display:flex;gap:4px;">'
-                        . '<button type="button" class="btn btn-sm" style="padding:3px 10px;font-size:11px;"'
-                        . ' onclick="document.getElementById(\'' . $dlgId . '\').showModal()">編集</button>'
-                        . '<form method="post" action="' . Layout::escape($deactivateUrl) . '">'
-                        . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDeactivate) . '">'
-                        . '<input type="hidden" name="id" value="' . $id . '">'
-                        . '<input type="hidden" name="_tab" value="status">'
-                        . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;"'
-                        . ' onclick="return confirm(\'この値を無効化します。既存データの表示には影響しませんが、新規選択はできなくなります。よろしいですか？\')">無効化</button>'
-                        . '</form>'
-                        . '</div>';
+                // ── アクションボタン群 ──
+                $actionBtns = '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">';
+                $actionBtns .= $reorderBtns;
+
+                if ($isProtected) {
+                    // 保護: 並び順のみ（編集・無効化・削除なし）
+                } elseif ($isActive === 1) {
+                    // 有効: 編集 + 無効化
+                    if ($canRename) {
+                        $actionBtns .= '<button type="button" class="btn btn-sm" style="padding:3px 10px;font-size:11px;"'
+                            . ' onclick="document.getElementById(\'' . $dlgId . '\').showModal()">編集</button>';
+                    }
+                    if ($canDisable) {
+                        $actionBtns .= '<form method="post" action="' . Layout::escape($deactivateUrl) . '" style="display:inline;">'
+                            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDeactivate) . '">'
+                            . '<input type="hidden" name="id" value="' . $id . '">'
+                            . '<input type="hidden" name="_tab" value="status">'
+                            . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;">無効化</button>'
+                            . '</form>';
+                    }
+                    if ($canDelete) {
+                        $actionBtns .= '<form method="post" action="' . Layout::escape($deleteUrl) . '" style="display:inline;">'
+                            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDelete) . '">'
+                            . '<input type="hidden" name="id" value="' . $id . '">'
+                            . '<input type="hidden" name="_tab" value="status">'
+                            . '<button type="button" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;color:var(--text-danger);" onclick="statusDeleteConfirm(this.closest(\'form\'))">削除</button>'
+                            . '</form>';
+                    }
                 } else {
-                    // Non-system, inactive: show activate only
-                    $actionBtns = '<form method="post" action="' . Layout::escape($activateUrl) . '">'
+                    // 無効: 有効化 + 削除
+                    $actionBtns .= '<form method="post" action="' . Layout::escape($activateUrl) . '" style="display:inline;">'
                         . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfActivate) . '">'
                         . '<input type="hidden" name="id" value="' . $id . '">'
                         . '<input type="hidden" name="_tab" value="status">'
                         . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;">有効化</button>'
                         . '</form>';
+                    if ($canDelete) {
+                        $actionBtns .= '<form method="post" action="' . Layout::escape($deleteUrl) . '" style="display:inline;">'
+                            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDelete) . '">'
+                            . '<input type="hidden" name="id" value="' . $id . '">'
+                            . '<input type="hidden" name="_tab" value="status">'
+                            . '<button type="button" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;color:var(--text-danger);" onclick="statusDeleteConfirm(this.closest(\'form\'))">削除</button>'
+                            . '</form>';
+                    }
                 }
 
-                $rows .= '<tr' . $rowStyle . '>'
-                    . '<td>' . $displayName . '</td>'
-                    . '<td style="text-align:center;">' . $displayOrder . '</td>'
+                $actionBtns .= '</div>';
+
+                $rows .= '<tr' . $rowOpacity . '>'
+                    . '<td>' . $badge . $displayName . '</td>'
                     . '<td>' . $actionBtns . '</td>'
                     . '</tr>';
             }
 
             if ($rows === '') {
-                $rows = '<tr><td colspan="3" class="muted" style="text-align:center;padding:8px;">登録なし</td></tr>';
+                $rows = '<tr><td colspan="2" class="muted" style="text-align:center;padding:8px;">登録なし</td></tr>';
             }
 
             $table = ''
                 . '<div class="tbl-wrap"><table class="list-table">'
                 . '<thead><tr>'
                 . '<th>表示名</th>'
-                . '<th style="text-align:center;">表示順</th>'
                 . '<th></th>'
                 . '</tr></thead>'
                 . '<tbody>' . $rows . '</tbody>'
                 . '</table></div>';
 
-            $addBtn = '<button class="btn btn-primary" id="' . $addBtnId . '" style="margin-top:12px;"'
-                . ' onclick="this.style.display=\'none\';document.getElementById(\'' . $addFormId . '\').style.display=\'block\';">+ 対応状況を追加</button>';
+            $dlgCreateId = 'dlg-status-' . $caseType . '-create';
+            $addBtn = '<button class="btn btn-primary" data-open-dialog="' . $dlgCreateId . '" style="margin-top:12px;">+ 対応状況を追加</button>';
 
-            $addForm = ''
-                . '<div id="' . $addFormId . '" style="display:none;margin-top:12px;background:#f9f9f9;padding:12px;border:1px solid #ddd;">'
+            $addDialog = ''
+                . '<dialog id="' . $dlgCreateId . '" class="modal-dialog">'
+                . '<div class="modal-head"><h2>対応状況を追加</h2>'
+                . '<button type="button" class="modal-close" data-close-dialog="' . $dlgCreateId . '">×</button></div>'
                 . '<form method="post" action="' . Layout::escape($createUrl) . '">'
                 . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfCreate) . '">'
                 . '<input type="hidden" name="_tab" value="status">'
                 . '<input type="hidden" name="case_type" value="' . Layout::escape($caseType) . '">'
                 . '<div class="form-row"><div class="form-label">表示名</div>'
                 . '<input type="text" name="display_name" required class="form-input"></div>'
-                . '<div style="margin-top:8px;">'
-                . '<button type="submit" class="btn btn-primary btn-sm">追加</button>'
-                . ' <button type="button" class="btn btn-sm" style="margin-left:4px;"'
-                . ' onclick="document.getElementById(\'' . $addFormId . '\').style.display=\'none\';document.getElementById(\'' . $addBtnId . '\').style.display=\'inline-block\';">キャンセル</button>'
+                . '<div class="dlg-footer">'
+                . '<button type="button" class="btn" data-close-dialog="' . $dlgCreateId . '">キャンセル</button>'
+                . '<button type="submit" class="btn btn-primary">追加</button>'
                 . '</div>'
                 . '</form>'
-                . '</div>';
+                . '</dialog>'
+                . '<script>(function(){'
+                . 'var dlg=document.getElementById("' . $dlgCreateId . '");'
+                . 'if(!dlg||typeof dlg.showModal!=="function"){return;}'
+                . 'document.querySelectorAll("[data-open-dialog=\"' . $dlgCreateId . '\"]").forEach(function(btn){btn.addEventListener("click",function(){if(!dlg.open)dlg.showModal();});});'
+                . 'dlg.querySelectorAll("[data-close-dialog=\"' . $dlgCreateId . '\"]").forEach(function(btn){btn.addEventListener("click",function(){if(dlg.open)dlg.close();});});'
+                . 'dlg.addEventListener("click",function(e){var r=dlg.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom){if(dlg.open)dlg.close();}});'
+                . '})();</script>';
 
             return ''
-                . '<div class="card" style="max-width:500px;margin-bottom:16px;">'
+                . '<div class="card" style="max-width:560px;margin-bottom:16px;">'
                 . '<div class="detail-section-title">' . Layout::escape($sectionTitle) . '</div>'
                 . $table
                 . $addBtn
-                . $addForm
-                . '</div>';
+                . '</div>'
+                . $addDialog;
         };
 
-        $statusNote = '<p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;">対応状況マスタを管理します。「固定」マークの項目はシステムで使用するため変更できません。無効化した項目は新規選択できなくなりますが、既存データの表示には影響しません。</p>';
+        $statusNote = '<p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;">'
+            . '対応状況マスタを管理します。<br>'
+            . '・<strong>「保護」項目（完了）</strong>: システムで広く参照されているため、表示名変更・無効化・削除はできません。並び順変更のみ可能です。<br>'
+            . '・無効化した項目は新規案件作成時の選択肢から除外されますが、既存案件の表示には影響しません。'
+            . '</p>';
         $html .= $statusNote;
         $html .= $buildSection('満期 対応状況', 'renewal', 'status-renewal-add-btn', 'status-renewal-add-form', $renewalCaseStatuses);
         $html .= $buildSection('事故 対応状況', 'accident', 'status-accident-add-btn', 'status-accident-add-form', $accidentCaseStatuses);
+
+        $dialogs .= ''
+            . '<dialog id="dlg-status-delete-confirm">'
+            . '<div class="dlg-title">対応状況の削除</div>'
+            . '<p style="margin:8px 0 16px;">この対応状況を削除しますか？<br>削除すると戻せません。</p>'
+            . '<div class="dlg-footer">'
+            . '<button type="button" class="btn" onclick="document.getElementById(\'dlg-status-delete-confirm\').close()">キャンセル</button>'
+            . '<button type="button" class="btn btn-danger" onclick="statusDeleteExecute()">削除する</button>'
+            . '</div>'
+            . '</dialog>';
 
         return $html . $dialogs;
     }
@@ -609,11 +764,15 @@ final class TenantSettingsView
         $updateUrl      = $masterUrls['procedure_method_update'] ?? '';
         $deactivateUrl  = $masterUrls['procedure_method_deactivate'] ?? '';
         $activateUrl    = $masterUrls['procedure_method_activate'] ?? '';
+        $deleteUrl      = $masterUrls['procedure_method_delete'] ?? '';
+        $reorderUrl     = $masterUrls['procedure_method_reorder'] ?? '';
 
         $csrfCreate     = $masterCsrfs['procedure_method_create'] ?? '';
         $csrfUpdate     = $masterCsrfs['procedure_method_update'] ?? '';
         $csrfDeactivate = $masterCsrfs['procedure_method_deactivate'] ?? '';
         $csrfActivate   = $masterCsrfs['procedure_method_activate'] ?? '';
+        $csrfDelete     = $masterCsrfs['procedure_method_delete'] ?? '';
+        $csrfReorder    = $masterCsrfs['procedure_method_reorder'] ?? '';
 
         $rows    = '';
         $dialogs = '';
@@ -622,44 +781,78 @@ final class TenantSettingsView
             $label    = Layout::escape((string) ($row['label'] ?? ''));
             $isActive = (int) ($row['is_active'] ?? 1);
             $dlgId    = 'dlg-procedure-' . $id;
-            $rowStyle = $isActive === 0 ? ' style="opacity:0.5;"' : '';
+            $rowStyle = $isActive === 0 ? ' style="opacity:0.55;"' : '';
+
+            // 編集ダイアログ
+            $dialogs .= ''
+                . '<dialog id="' . $dlgId . '">'
+                . '<div class="dlg-title">手続方法を編集</div>'
+                . '<form method="post" action="' . Layout::escape($updateUrl) . '">'
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfUpdate) . '">'
+                . '<input type="hidden" name="id" value="' . $id . '">'
+                . '<input type="hidden" name="_tab" value="procedure">'
+                . '<div class="form-row"><div class="form-label">表示名</div>'
+                . '<input type="text" name="label" value="' . $label . '" required class="form-input"></div>'
+                . '<div class="dlg-footer">'
+                . '<button type="button" class="btn" onclick="this.closest(\'dialog\').close()">キャンセル</button>'
+                . '<button type="submit" class="btn btn-primary">更新</button>'
+                . '</div>'
+                . '</form>'
+                . '</dialog>';
+
+            // ↑↓ ボタン
+            $reorderBtns = ''
+                . '<form method="post" action="' . Layout::escape($reorderUrl) . '" style="display:inline;">'
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfReorder) . '">'
+                . '<input type="hidden" name="id" value="' . $id . '">'
+                . '<input type="hidden" name="direction" value="up">'
+                . '<input type="hidden" name="_tab" value="procedure">'
+                . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:12px;" title="上へ">↑</button>'
+                . '</form>'
+                . '<form method="post" action="' . Layout::escape($reorderUrl) . '" style="display:inline;">'
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfReorder) . '">'
+                . '<input type="hidden" name="id" value="' . $id . '">'
+                . '<input type="hidden" name="direction" value="down">'
+                . '<input type="hidden" name="_tab" value="procedure">'
+                . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:12px;" title="下へ">↓</button>'
+                . '</form>';
+
+            $actionBtns = '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">'
+                . $reorderBtns;
 
             if ($isActive === 1) {
-                $dialogs .= ''
-                    . '<dialog id="' . $dlgId . '">'
-                    . '<div class="dlg-title">手続方法を編集</div>'
-                    . '<form method="post" action="' . Layout::escape($updateUrl) . '">'
-                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfUpdate) . '">'
-                    . '<input type="hidden" name="id" value="' . $id . '">'
-                    . '<input type="hidden" name="_tab" value="procedure">'
-                    . '<div class="form-row"><div class="form-label">表示名</div>'
-                    . '<input type="text" name="label" value="' . $label . '" required class="form-input"></div>'
-                    . '<div class="dlg-footer">'
-                    . '<button type="button" class="btn" onclick="this.closest(\'dialog\').close()">キャンセル</button>'
-                    . '<button type="submit" class="btn btn-primary">更新</button>'
-                    . '</div>'
-                    . '</form>'
-                    . '</dialog>';
-
-                $actionBtns = '<div style="display:flex;gap:4px;">'
-                    . '<button type="button" class="btn btn-sm" style="padding:3px 10px;font-size:11px;"'
+                $actionBtns .= '<button type="button" class="btn btn-sm" style="padding:3px 10px;font-size:11px;"'
                     . ' onclick="document.getElementById(\'' . $dlgId . '\').showModal()">編集</button>'
-                    . '<form method="post" action="' . Layout::escape($deactivateUrl) . '">'
+                    . '<form method="post" action="' . Layout::escape($deactivateUrl) . '" style="display:inline;">'
                     . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDeactivate) . '">'
                     . '<input type="hidden" name="id" value="' . $id . '">'
                     . '<input type="hidden" name="_tab" value="procedure">'
-                    . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;"'
-                    . ' onclick="return confirm(\'この値を無効化します。既存データの表示には影響しませんが、新規選択はできなくなります。よろしいですか？\')">無効化</button>'
+                    . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;">無効化</button>'
                     . '</form>'
-                    . '</div>';
+                    . '<form method="post" action="' . Layout::escape($deleteUrl) . '" style="display:inline;">'
+                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDelete) . '">'
+                    . '<input type="hidden" name="id" value="' . $id . '">'
+                    . '<input type="hidden" name="_tab" value="procedure">'
+                    . '<button type="button" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;color:var(--text-danger);"'
+                    . ' onclick="procedureDeleteConfirm(this.closest(\'form\'))">削除</button>'
+                    . '</form>';
             } else {
-                $actionBtns = '<form method="post" action="' . Layout::escape($activateUrl) . '">'
+                $actionBtns .= '<form method="post" action="' . Layout::escape($activateUrl) . '" style="display:inline;">'
                     . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfActivate) . '">'
                     . '<input type="hidden" name="id" value="' . $id . '">'
                     . '<input type="hidden" name="_tab" value="procedure">'
                     . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;">有効化</button>'
+                    . '</form>'
+                    . '<form method="post" action="' . Layout::escape($deleteUrl) . '" style="display:inline;">'
+                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDelete) . '">'
+                    . '<input type="hidden" name="id" value="' . $id . '">'
+                    . '<input type="hidden" name="_tab" value="procedure">'
+                    . '<button type="button" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;color:var(--text-danger);"'
+                    . ' onclick="procedureDeleteConfirm(this.closest(\'form\'))">削除</button>'
                     . '</form>';
             }
+
+            $actionBtns .= '</div>';
 
             $rows .= '<tr' . $rowStyle . '>'
                 . '<td>' . $label . '</td>'
@@ -675,38 +868,65 @@ final class TenantSettingsView
             . '<div class="tbl-wrap"><table class="list-table">'
             . '<thead><tr>'
             . '<th>表示名</th>'
-            . '<th style="width:130px;"></th>'
+            . '<th></th>'
             . '</tr></thead>'
             . '<tbody>' . $rows . '</tbody>'
             . '</table></div>';
 
-        $addBtn = '<button class="btn btn-primary" id="procedure-add-btn" style="margin-top:12px;"'
-            . ' onclick="this.style.display=\'none\';document.getElementById(\'procedure-add-form\').style.display=\'block\';">+ 手続方法を追加</button>';
+        $addBtn = '<button class="btn btn-primary" data-open-dialog="dlg-procedure-create" style="margin-top:12px;">+ 手続方法を追加</button>';
 
-        $addForm = ''
-            . '<div id="procedure-add-form" style="display:none;margin-top:12px;background:#f9f9f9;padding:12px;border:1px solid #ddd;">'
+        $addDialog = ''
+            . '<dialog id="dlg-procedure-create" class="modal-dialog">'
+            . '<div class="modal-head"><h2>手続方法を追加</h2>'
+            . '<button type="button" class="modal-close" data-close-dialog="dlg-procedure-create">×</button></div>'
             . '<form method="post" action="' . Layout::escape($createUrl) . '">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfCreate) . '">'
             . '<input type="hidden" name="_tab" value="procedure">'
             . '<div class="form-row"><div class="form-label">表示名</div>'
             . '<input type="text" name="label" required class="form-input"></div>'
-            . '<div style="margin-top:8px;">'
-            . '<button type="submit" class="btn btn-primary btn-sm">追加</button>'
-            . ' <button type="button" class="btn btn-sm" style="margin-left:4px;"'
-            . ' onclick="document.getElementById(\'procedure-add-form\').style.display=\'none\';document.getElementById(\'procedure-add-btn\').style.display=\'inline-block\';">キャンセル</button>'
+            . '<div class="dlg-footer">'
+            . '<button type="button" class="btn" data-close-dialog="dlg-procedure-create">キャンセル</button>'
+            . '<button type="submit" class="btn btn-primary">追加</button>'
             . '</div>'
             . '</form>'
-            . '</div>';
+            . '</dialog>'
+            . '<script>(function(){'
+            . 'var dlg=document.getElementById("dlg-procedure-create");'
+            . 'if(!dlg||typeof dlg.showModal!=="function"){return;}'
+            . 'document.querySelectorAll("[data-open-dialog=\"dlg-procedure-create\"]").forEach(function(btn){btn.addEventListener("click",function(){if(!dlg.open)dlg.showModal();});});'
+            . 'dlg.querySelectorAll("[data-close-dialog=\"dlg-procedure-create\"]").forEach(function(btn){btn.addEventListener("click",function(){if(dlg.open)dlg.close();});});'
+            . 'dlg.addEventListener("click",function(e){var r=dlg.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom){if(dlg.open)dlg.close();}});'
+            . '})();</script>';
 
-        return ''
-            . '<div class="card" style="max-width:400px;">'
+        $deleteDlg = ''
+            . '<dialog id="dlg-procedure-delete-confirm">'
+            . '<div class="dlg-title">手続方法の削除</div>'
+            . '<p style="margin:8px 0 16px;">この手続方法を削除しますか？<br>削除すると戻せません。</p>'
+            . '<div class="dlg-footer">'
+            . '<button type="button" class="btn" onclick="document.getElementById(\'dlg-procedure-delete-confirm\').close()">キャンセル</button>'
+            . '<button type="button" class="btn btn-danger" onclick="procedureDeleteExecute()">削除する</button>'
+            . '</div>'
+            . '</dialog>'
+            . '<script>'
+            . 'var _procedureDeleteForm=null;'
+            . 'function procedureDeleteConfirm(form){_procedureDeleteForm=form;document.getElementById("dlg-procedure-delete-confirm").showModal();}'
+            . 'function procedureDeleteExecute(){document.getElementById("dlg-procedure-delete-confirm").close();if(_procedureDeleteForm){_procedureDeleteForm.submit();}}'
+            . '</script>';
+
+        $note = '<p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;">'
+            . '満期詳細の「手続方法」プルダウンに表示される選択肢を管理します。<br>'
+            . '・無効化した項目は新規選択できなくなりますが、既存データの表示には影響しません。'
+            . '</p>';
+
+        return $note
+            . '<div class="card" style="max-width:560px;">'
             . '<div class="detail-section-title">手続方法マスタ</div>'
-            . '<p style="font-size:12px;color:var(--text-secondary);margin:0 0 8px;">満期詳細の「手続方法」プルダウンに表示される選択肢を管理します。無効化した項目は新規選択できなくなりますが、既存データの表示には影響しません。</p>'
             . $table
             . $addBtn
-            . $addForm
             . '</div>'
-            . $dialogs;
+            . $dialogs
+            . $addDialog
+            . $deleteDlg;
     }
 
     /**
@@ -721,11 +941,15 @@ final class TenantSettingsView
         $updateUrl      = $masterUrls['purpose_type_update'] ?? '';
         $deactivateUrl  = $masterUrls['purpose_type_deactivate'] ?? '';
         $activateUrl    = $masterUrls['purpose_type_activate'] ?? '';
+        $deleteUrl      = $masterUrls['purpose_type_delete'] ?? '';
+        $reorderUrl     = $masterUrls['purpose_type_reorder'] ?? '';
 
         $csrfCreate     = $masterCsrfs['purpose_type_create'] ?? '';
         $csrfUpdate     = $masterCsrfs['purpose_type_update'] ?? '';
         $csrfDeactivate = $masterCsrfs['purpose_type_deactivate'] ?? '';
         $csrfActivate   = $masterCsrfs['purpose_type_activate'] ?? '';
+        $csrfDelete     = $masterCsrfs['purpose_type_delete'] ?? '';
+        $csrfReorder    = $masterCsrfs['purpose_type_reorder'] ?? '';
 
         $rows    = '';
         $dialogs = '';
@@ -734,44 +958,78 @@ final class TenantSettingsView
             $label    = Layout::escape((string) ($row['label'] ?? ''));
             $isActive = (int) ($row['is_active'] ?? 1);
             $dlgId    = 'dlg-purpose-' . $code;
-            $rowStyle = $isActive === 0 ? ' style="opacity:0.5;"' : '';
+            $rowStyle = $isActive === 0 ? ' style="opacity:0.55;"' : '';
+
+            // 編集ダイアログ
+            $dialogs .= ''
+                . '<dialog id="' . $dlgId . '">'
+                . '<div class="dlg-title">用件区分を編集</div>'
+                . '<form method="post" action="' . Layout::escape($updateUrl) . '">'
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfUpdate) . '">'
+                . '<input type="hidden" name="code" value="' . $code . '">'
+                . '<input type="hidden" name="_tab" value="purpose">'
+                . '<div class="form-row"><div class="form-label">表示名</div>'
+                . '<input type="text" name="label" value="' . $label . '" required class="form-input"></div>'
+                . '<div class="dlg-footer">'
+                . '<button type="button" class="btn" onclick="this.closest(\'dialog\').close()">キャンセル</button>'
+                . '<button type="submit" class="btn btn-primary">更新</button>'
+                . '</div>'
+                . '</form>'
+                . '</dialog>';
+
+            // ↑↓ ボタン
+            $reorderBtns = ''
+                . '<form method="post" action="' . Layout::escape($reorderUrl) . '" style="display:inline;">'
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfReorder) . '">'
+                . '<input type="hidden" name="code" value="' . $code . '">'
+                . '<input type="hidden" name="direction" value="up">'
+                . '<input type="hidden" name="_tab" value="purpose">'
+                . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:12px;" title="上へ">↑</button>'
+                . '</form>'
+                . '<form method="post" action="' . Layout::escape($reorderUrl) . '" style="display:inline;">'
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfReorder) . '">'
+                . '<input type="hidden" name="code" value="' . $code . '">'
+                . '<input type="hidden" name="direction" value="down">'
+                . '<input type="hidden" name="_tab" value="purpose">'
+                . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:12px;" title="下へ">↓</button>'
+                . '</form>';
+
+            $actionBtns = '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">'
+                . $reorderBtns;
 
             if ($isActive === 1) {
-                $dialogs .= ''
-                    . '<dialog id="' . $dlgId . '">'
-                    . '<div class="dlg-title">用件区分を編集</div>'
-                    . '<form method="post" action="' . Layout::escape($updateUrl) . '">'
-                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfUpdate) . '">'
-                    . '<input type="hidden" name="code" value="' . $code . '">'
-                    . '<input type="hidden" name="_tab" value="purpose">'
-                    . '<div class="form-row"><div class="form-label">表示名</div>'
-                    . '<input type="text" name="label" value="' . $label . '" required class="form-input"></div>'
-                    . '<div class="dlg-footer">'
-                    . '<button type="button" class="btn" onclick="this.closest(\'dialog\').close()">キャンセル</button>'
-                    . '<button type="submit" class="btn btn-primary">更新</button>'
-                    . '</div>'
-                    . '</form>'
-                    . '</dialog>';
-
-                $actionBtns = '<div style="display:flex;gap:4px;">'
-                    . '<button type="button" class="btn btn-sm" style="padding:3px 10px;font-size:11px;"'
+                $actionBtns .= '<button type="button" class="btn btn-sm" style="padding:3px 10px;font-size:11px;"'
                     . ' onclick="document.getElementById(\'' . $dlgId . '\').showModal()">編集</button>'
-                    . '<form method="post" action="' . Layout::escape($deactivateUrl) . '">'
+                    . '<form method="post" action="' . Layout::escape($deactivateUrl) . '" style="display:inline;">'
                     . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDeactivate) . '">'
                     . '<input type="hidden" name="code" value="' . $code . '">'
                     . '<input type="hidden" name="_tab" value="purpose">'
-                    . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;"'
-                    . ' onclick="return confirm(\'この値を無効化します。既存データの表示には影響しませんが、新規選択はできなくなります。よろしいですか？\')">無効化</button>'
+                    . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;">無効化</button>'
                     . '</form>'
-                    . '</div>';
+                    . '<form method="post" action="' . Layout::escape($deleteUrl) . '" style="display:inline;">'
+                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDelete) . '">'
+                    . '<input type="hidden" name="code" value="' . $code . '">'
+                    . '<input type="hidden" name="_tab" value="purpose">'
+                    . '<button type="button" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;color:var(--text-danger);"'
+                    . ' onclick="purposeDeleteConfirm(this.closest(\'form\'))">削除</button>'
+                    . '</form>';
             } else {
-                $actionBtns = '<form method="post" action="' . Layout::escape($activateUrl) . '">'
+                $actionBtns .= '<form method="post" action="' . Layout::escape($activateUrl) . '" style="display:inline;">'
                     . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfActivate) . '">'
                     . '<input type="hidden" name="code" value="' . $code . '">'
                     . '<input type="hidden" name="_tab" value="purpose">'
                     . '<button type="submit" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;">有効化</button>'
+                    . '</form>'
+                    . '<form method="post" action="' . Layout::escape($deleteUrl) . '" style="display:inline;">'
+                    . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDelete) . '">'
+                    . '<input type="hidden" name="code" value="' . $code . '">'
+                    . '<input type="hidden" name="_tab" value="purpose">'
+                    . '<button type="button" class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;color:var(--text-danger);"'
+                    . ' onclick="purposeDeleteConfirm(this.closest(\'form\'))">削除</button>'
                     . '</form>';
             }
+
+            $actionBtns .= '</div>';
 
             $rows .= '<tr' . $rowStyle . '>'
                 . '<td>' . $label . '</td>'
@@ -787,38 +1045,65 @@ final class TenantSettingsView
             . '<div class="tbl-wrap"><table class="list-table">'
             . '<thead><tr>'
             . '<th>表示名</th>'
-            . '<th style="width:130px;"></th>'
+            . '<th></th>'
             . '</tr></thead>'
             . '<tbody>' . $rows . '</tbody>'
             . '</table></div>';
 
-        $addBtn = '<button class="btn btn-primary" id="purpose-add-btn" style="margin-top:12px;"'
-            . ' onclick="this.style.display=\'none\';document.getElementById(\'purpose-add-form\').style.display=\'block\';">+ 用件区分を追加</button>';
+        $addBtn = '<button class="btn btn-primary" data-open-dialog="dlg-purpose-create" style="margin-top:12px;">+ 用件区分を追加</button>';
 
-        $addForm = ''
-            . '<div id="purpose-add-form" style="display:none;margin-top:12px;background:#f9f9f9;padding:12px;border:1px solid #ddd;">'
+        $addDialog = ''
+            . '<dialog id="dlg-purpose-create" class="modal-dialog">'
+            . '<div class="modal-head"><h2>用件区分を追加</h2>'
+            . '<button type="button" class="modal-close" data-close-dialog="dlg-purpose-create">×</button></div>'
             . '<form method="post" action="' . Layout::escape($createUrl) . '">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfCreate) . '">'
             . '<input type="hidden" name="_tab" value="purpose">'
             . '<div class="form-row"><div class="form-label">表示名</div>'
             . '<input type="text" name="label" required class="form-input"></div>'
-            . '<div style="margin-top:8px;">'
-            . '<button type="submit" class="btn btn-primary btn-sm">追加</button>'
-            . ' <button type="button" class="btn btn-sm" style="margin-left:4px;"'
-            . ' onclick="document.getElementById(\'purpose-add-form\').style.display=\'none\';document.getElementById(\'purpose-add-btn\').style.display=\'inline-block\';">キャンセル</button>'
+            . '<div class="dlg-footer">'
+            . '<button type="button" class="btn" data-close-dialog="dlg-purpose-create">キャンセル</button>'
+            . '<button type="submit" class="btn btn-primary">追加</button>'
             . '</div>'
             . '</form>'
-            . '</div>';
+            . '</dialog>'
+            . '<script>(function(){'
+            . 'var dlg=document.getElementById("dlg-purpose-create");'
+            . 'if(!dlg||typeof dlg.showModal!=="function"){return;}'
+            . 'document.querySelectorAll("[data-open-dialog=\"dlg-purpose-create\"]").forEach(function(btn){btn.addEventListener("click",function(){if(!dlg.open)dlg.showModal();});});'
+            . 'dlg.querySelectorAll("[data-close-dialog=\"dlg-purpose-create\"]").forEach(function(btn){btn.addEventListener("click",function(){if(dlg.open)dlg.close();});});'
+            . 'dlg.addEventListener("click",function(e){var r=dlg.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom){if(dlg.open)dlg.close();}});'
+            . '})();</script>';
 
-        return ''
-            . '<div class="card" style="max-width:400px;">'
+        $deleteDlg = ''
+            . '<dialog id="dlg-purpose-delete-confirm">'
+            . '<div class="dlg-title">用件区分の削除</div>'
+            . '<p style="margin:8px 0 16px;">この用件区分を削除しますか？<br>削除すると戻せません。</p>'
+            . '<div class="dlg-footer">'
+            . '<button type="button" class="btn" onclick="document.getElementById(\'dlg-purpose-delete-confirm\').close()">キャンセル</button>'
+            . '<button type="button" class="btn btn-danger" onclick="purposeDeleteExecute()">削除する</button>'
+            . '</div>'
+            . '</dialog>'
+            . '<script>'
+            . 'var _purposeDeleteForm=null;'
+            . 'function purposeDeleteConfirm(form){_purposeDeleteForm=form;document.getElementById("dlg-purpose-delete-confirm").showModal();}'
+            . 'function purposeDeleteExecute(){document.getElementById("dlg-purpose-delete-confirm").close();if(_purposeDeleteForm){_purposeDeleteForm.submit();}}'
+            . '</script>';
+
+        $note = '<p style="font-size:12px;color:var(--text-secondary);margin:0 0 12px;">'
+            . '活動登録の「用件区分」プルダウンに表示される選択肢を管理します。<br>'
+            . '・無効化した項目は新規選択できなくなりますが、既存データの表示には影響しません。'
+            . '</p>';
+
+        return $note
+            . '<div class="card" style="max-width:560px;">'
             . '<div class="detail-section-title">用件区分</div>'
-            . '<p style="font-size:12px;color:var(--text-secondary);margin:0 0 8px;">活動登録の「用件区分」プルダウンに表示される選択肢を管理します。無効化した項目は新規選択できなくなりますが、既存データの表示には影響しません。</p>'
             . $table
             . $addBtn
-            . $addForm
             . '</div>'
-            . $dialogs;
+            . $dialogs
+            . $addDialog
+            . $deleteDlg;
     }
 
     // ---- 通知設定 ----
@@ -923,16 +1208,6 @@ final class TenantSettingsView
             . '<div class="card" style="max-width:560px;">'
             . '<div class="detail-section-title">事故通知</div>'
             . '<div class="form-row">'
-            . '<div class="form-label">通知先</div>'
-            . '<select name="accident_provider_type" class="form-select" style="max-width:240px;">' . $accidentProviderOptions . '</select>'
-            . '</div>'
-            . '<div class="form-row">'
-            . '<div class="form-label">Webhook URL</div>'
-            . '<input class="form-input" type="url" name="accident_webhook_url" value="' . $accidentWebhook . '" placeholder="https://hooks.worksmobile.com/r/...">'
-            . '<div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px;">満期通知と別のチャンネルに送信する場合は個別に設定してください。空欄の場合は満期通知と同じ Webhook URL を使用します。</div>'
-            . '</div>'
-            . '<div class="divider"></div>'
-            . '<div class="form-row">'
             . '<div style="display:flex;align-items:center;gap:12px;">'
             . '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;cursor:pointer;">'
             . '<input type="checkbox" name="accident_is_enabled" value="1"' . $accidentEnabledAttr . '>'
@@ -941,6 +1216,15 @@ final class TenantSettingsView
             . '<span class="' . $accidentBadgeClass . '">' . $accidentBadgeText . '</span>'
             . '</div>'
             . '<div style="font-size:12px;color:var(--text-secondary);margin-top:6px;">新規事故案件が受付されたときに通知します。</div>'
+            . '</div>'
+            . '<div class="form-row">'
+            . '<div class="form-label">通知先</div>'
+            . '<select name="accident_provider_type" class="form-select" style="max-width:240px;">' . $accidentProviderOptions . '</select>'
+            . '</div>'
+            . '<div class="form-row">'
+            . '<div class="form-label">Webhook URL</div>'
+            . '<input class="form-input" type="url" name="accident_webhook_url" value="' . $accidentWebhook . '" placeholder="https://hooks.worksmobile.com/r/...">'
+            . '<div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px;">満期通知と別のチャンネルに送信する場合は個別に設定してください。空欄の場合は満期通知と同じ Webhook URL を使用します。</div>'
             . '</div>'
             . '<button type="submit" class="btn btn-primary" style="margin-top:8px;">保存</button>'
             . '</div>'
@@ -1144,17 +1428,23 @@ final class TenantSettingsView
             $effectiveName = $displayName !== '' ? $displayName : $name;
             $dlgId = 'dlg-user-' . $userId;
 
+            $roleAdminSelected  = $role === 'admin'  ? ' selected' : '';
+            $roleMemberSelected = $role === 'member' ? ' selected' : '';
+
             $dialogs .= ''
                 . '<dialog id="' . $dlgId . '">'
-                . '<div class="dlg-title">業務表示名を編集</div>'
+                . '<div class="dlg-title">ユーザー設定を編集</div>'
                 . '<form method="post" action="' . Layout::escape($updateUrl) . '">'
                 . '<input type="hidden" name="_csrf_token" value="' . $csrfUpdate . '">'
                 . '<input type="hidden" name="user_id" value="' . $userId . '">'
                 . '<input type="hidden" name="_tab" value="users">'
-                . '<div class="form-row"><div class="form-label">Googleアカウント名</div>'
-                . '<div style="padding:6px 0;font-size:14px;color:#334e68;">' . $name . '</div></div>'
                 . '<div class="form-row"><div class="form-label">業務表示名</div>'
-                . '<input type="text" name="display_name" value="' . $displayName . '" class="form-input" placeholder="空欄にするとGoogleアカウント名を使用" maxlength="100"></div>'
+                . '<input type="text" name="display_name" value="' . $displayName . '" class="form-input" placeholder="空欄にするとアカウント名を使用" maxlength="100"></div>'
+                . '<div class="form-row"><div class="form-label">ロール</div>'
+                . '<select name="role" class="form-input">'
+                . '<option value="member"' . $roleMemberSelected . '>メンバー</option>'
+                . '<option value="admin"' . $roleAdminSelected . '>管理者</option>'
+                . '</select></div>'
                 . '<div class="form-row"><div class="form-label">メールアドレス</div>'
                 . '<div style="padding:6px 0;font-size:14px;color:#334e68;">' . $email . '</div></div>'
                 . '<div class="dlg-footer">'
@@ -1165,8 +1455,7 @@ final class TenantSettingsView
                 . '</dialog>';
 
             $rows .= '<tr>'
-                . '<td>' . $effectiveName . ($displayName !== '' ? '' : ' <span class="muted" style="font-size:11px;">（Google名）</span>') . '</td>'
-                . '<td>' . $name . '</td>'
+                . '<td>' . $effectiveName . '</td>'
                 . '<td>' . $email . '</td>'
                 . '<td>' . $roleLabel . '</td>'
                 . '<td>'
@@ -1183,7 +1472,7 @@ final class TenantSettingsView
         $table = ''
             . '<div class="tbl-wrap"><table class="list-table">'
             . '<thead><tr>'
-            . '<th>業務表示名</th><th>Googleアカウント名</th><th>メールアドレス</th><th>ロール</th><th></th>'
+            . '<th>業務表示名</th><th>メールアドレス</th><th>ロール</th><th></th>'
             . '</tr></thead>'
             . '<tbody>' . $rows . '</tbody>'
             . '</table></div>';
@@ -1195,5 +1484,168 @@ final class TenantSettingsView
             . $table
             . '</div>'
             . $dialogs;
+    }
+
+    // ---- 目標管理セクション ----
+
+    /**
+     * @param array<int, array{staff_user_id: int|null, display_name: string, target_amount: int}> $yearlyTargets
+     * @param array<int, array{user_id: int, display_name: string}>                                $assignableUsers
+     * @param array<int, int>                                                                       $fiscalYearOptions
+     * @param array<string, string>                                                                 $masterCsrfs
+     * @param array<string, string>                                                                 $masterUrls
+     */
+    private static function renderSalesTargetSection(
+        array $yearlyTargets,
+        array $assignableUsers,
+        int $selectedFy,
+        array $fiscalYearOptions,
+        array $masterCsrfs,
+        array $masterUrls
+    ): string {
+        $saveUrl    = $masterUrls['sales_target_save']   ?? '';
+        $deleteUrl  = $masterUrls['sales_target_delete'] ?? '';
+        $settingsBase = rtrim($masterUrls['settings_base'] ?? '', '&');
+        $csrfSave   = $masterCsrfs['sales_target_save']   ?? '';
+        $csrfDelete = $masterCsrfs['sales_target_delete'] ?? '';
+
+        // 既存目標を staff_user_id をキーにしたマップに変換
+        $targetMap = [];
+        foreach ($yearlyTargets as $t) {
+            $key = $t['staff_user_id'] === null ? 'team' : (string) $t['staff_user_id'];
+            $targetMap[$key] = $t;
+        }
+
+        // --- 年度セレクター ---
+        $fyOptions = '';
+        foreach ($fiscalYearOptions as $fy) {
+            $sel = $fy === $selectedFy ? ' selected' : '';
+            $fyOptions .= '<option value="' . $fy . '"' . $sel . '>' . $fy . '年度</option>';
+        }
+        $fySelector = ''
+            . '<div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;">'
+            . '<label style="font-size:13px;font-weight:500;color:#334e68;">対象年度</label>'
+            . '<select style="padding:4px 8px;border:1px solid #d9e2ec;border-radius:4px;font-size:13px;"'
+            . ' onchange="location.href=' . "'" . Layout::escape($settingsBase) . "&tab=target&target_fy='+this.value" . '">'
+            . $fyOptions
+            . '</select>'
+            . '</div>';
+
+        // --- チーム全体目標 ---
+        $teamTarget  = $targetMap['team'] ?? null;
+        $teamAmount  = $teamTarget !== null ? (int) $teamTarget['target_amount'] : null;
+        $teamAmtVal  = $teamAmount !== null ? (string) $teamAmount : '';
+        $teamPreview = $teamAmount !== null
+            ? '<span style="font-size:11px;color:#829ab1;margin-left:8px;">約 ' . number_format((int) floor($teamAmount / 1000)) . ' 千円</span>'
+            : '';
+
+        $teamDeleteBtn = '';
+        if ($teamTarget !== null) {
+            $teamDeleteBtn = ''
+                . '<form method="post" action="' . Layout::escape($deleteUrl) . '" style="display:inline;">'
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfDelete) . '">'
+                . '<input type="hidden" name="fiscal_year" value="' . $selectedFy . '">'
+                . '<input type="hidden" name="staff_user_id" value="">'
+                . '<button type="button" class="btn btn-ghost btn-sm"'
+                . ' style="color:var(--text-danger);margin-left:4px;"'
+                . ' onclick="targetDeleteConfirm(this.closest(\'form\'))">削除</button>'
+                . '</form>';
+        }
+
+        $teamCard = ''
+            . '<div class="card" style="margin-bottom:16px;">'
+            . '<div class="detail-section-title" style="margin-bottom:12px;">チーム全体目標</div>'
+            . '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+            . '<form method="post" action="' . Layout::escape($saveUrl) . '" style="display:contents;">'
+            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfSave) . '">'
+            . '<input type="hidden" name="fiscal_year" value="' . $selectedFy . '">'
+            . '<input type="hidden" name="staff_user_id" value="">'
+            . '<label style="font-size:13px;min-width:80px;">年度目標額（円）</label>'
+            . '<input type="number" name="target_amount" value="' . Layout::escape($teamAmtVal) . '"'
+            . ' min="0" step="1" placeholder="例: 50000000"'
+            . ' style="width:160px;padding:5px 8px;border:1px solid #d9e2ec;border-radius:4px;font-size:13px;"'
+            . ' oninput="this.nextElementSibling.textContent=this.value?\'約 \'+(Math.floor(parseInt(this.value,10)/1000)).toLocaleString()+\' 千円\':\'\'">'
+            . '<span style="font-size:11px;color:#829ab1;">' . ($teamAmtVal !== '' ? '約 ' . number_format((int) floor($teamAmount / 1000)) . ' 千円' : '') . '</span>'
+            . '<button type="submit" class="btn btn-primary btn-sm" style="padding:4px 14px;">保存</button>'
+            . '</form>'
+            . $teamDeleteBtn
+            . '</div>'
+            . '</div>';
+
+        // --- 担当者別目標テーブル ---
+        $staffRows = '';
+        foreach ($assignableUsers as $user) {
+            $uid         = (int) $user['user_id'];
+            $displayName = Layout::escape((string) $user['display_name']);
+            $existing    = $targetMap[(string) $uid] ?? null;
+            $amtVal      = $existing !== null ? (string) $existing['target_amount'] : '';
+            $previewText = $amtVal !== '' ? '約 ' . number_format((int) floor((int) $amtVal / 1000)) . ' 千円' : '';
+
+            $staffRows .= ''
+                . '<tr>'
+                . '<td style="padding:6px 8px;font-size:13px;">' . $displayName . '</td>'
+                . '<td style="padding:6px 8px;">'
+                . '<form method="post" action="' . Layout::escape($saveUrl) . '" style="display:flex;align-items:center;gap:6px;">'
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfSave) . '">'
+                . '<input type="hidden" name="fiscal_year" value="' . $selectedFy . '">'
+                . '<input type="hidden" name="staff_user_id" value="' . $uid . '">'
+                . '<input type="number" name="target_amount" value="' . Layout::escape($amtVal) . '"'
+                . ' min="0" step="1" placeholder="未設定"'
+                . ' style="width:140px;padding:4px 7px;border:1px solid #d9e2ec;border-radius:4px;font-size:13px;"'
+                . ' oninput="this.nextElementSibling.textContent=this.value?\'約 \'+(Math.floor(parseInt(this.value,10)/1000)).toLocaleString()+\' 千円\':\'\'">'
+                . '<span style="font-size:11px;color:#829ab1;min-width:80px;">' . Layout::escape($previewText) . '</span>'
+                . '<button type="submit" class="btn btn-sm" style="padding:3px 12px;font-size:12px;">保存</button>'
+                . '</form>'
+                . '</td>'
+                . '</tr>';
+        }
+
+        if ($staffRows === '') {
+            $staffRows = '<tr><td colspan="2" class="muted" style="text-align:center;padding:8px;">担当者なし</td></tr>';
+        }
+
+        $staffCard = ''
+            . '<div class="card">'
+            . '<div class="detail-section-title" style="margin-bottom:4px;">担当者別目標</div>'
+            . '<p class="muted" style="margin-bottom:12px;font-size:12.5px;">0 を保存すると実質的に目標未設定と同等になります。</p>'
+            . '<div style="max-height:400px;overflow-y:auto;">'
+            . '<table style="width:100%;border-collapse:collapse;">'
+            . '<thead><tr>'
+            . '<th style="text-align:left;padding:6px 8px;font-size:12px;color:#627d98;border-bottom:1px solid #e3eaf2;">担当者</th>'
+            . '<th style="text-align:left;padding:6px 8px;font-size:12px;color:#627d98;border-bottom:1px solid #e3eaf2;">年度目標額（円）</th>'
+            . '</tr></thead>'
+            . '<tbody>' . $staffRows . '</tbody>'
+            . '</table>'
+            . '</div>'
+            . '</div>';
+
+        // 削除確認ダイアログ
+        $deleteDialog = ''
+            . '<dialog id="dlg-target-delete-confirm">'
+            . '<div class="dlg-title">チーム全体目標を削除</div>'
+            . '<p style="margin:0 0 16px;font-size:13.5px;">削除すると戻せません。</p>'
+            . '<div class="dlg-footer">'
+            . '<button type="button" class="btn" onclick="document.getElementById(\'dlg-target-delete-confirm\').close()">キャンセル</button>'
+            . '<button type="button" class="btn btn-danger" onclick="targetDeleteExecute()">削除する</button>'
+            . '</div>'
+            . '</dialog>';
+
+        $deleteJs = ''
+            . '<script>'
+            . 'var _targetDeleteForm=null;'
+            . 'function targetDeleteConfirm(form){_targetDeleteForm=form;document.getElementById(\'dlg-target-delete-confirm\').showModal();}'
+            . 'function targetDeleteExecute(){document.getElementById(\'dlg-target-delete-confirm\').close();if(_targetDeleteForm){_targetDeleteForm.submit();}}'
+            . '</script>';
+
+        return ''
+            . '<div class="card">'
+            . '<div class="detail-section-title">目標管理</div>'
+            . '<p class="muted" style="margin-bottom:16px;font-size:12.5px;">年度の保険料合計目標（premium_total）を設定します。月次目標と個別種別（損保・生保・件数）は本画面では管理しません。</p>'
+            . $fySelector
+            . '</div>'
+            . $teamCard
+            . $staffCard
+            . $deleteDialog
+            . $deleteJs;
     }
 }

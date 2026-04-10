@@ -51,7 +51,6 @@ final class RenewalCaseRepository
                     c.id AS contract_id,
                     mc.customer_name,
                     c.policy_no,
-                    c.insurer_name,
                     c.product_type,
                     rc.maturity_date,
                     rc.early_renewal_deadline,
@@ -99,7 +98,6 @@ final class RenewalCaseRepository
                     rc.office_staff_id,
                     rc.completed_date,
                     c.policy_no,
-                    c.insurer_name,
                     c.product_type,
                     c.policy_start_date,
                     c.policy_end_date,
@@ -109,7 +107,7 @@ final class RenewalCaseRepository
                     c.remark AS contract_remark,
                     mc.id AS customer_id,
                     mc.customer_name,
-                    mc.assigned_staff_id,
+                    rc.assigned_staff_id,
                     mc.phone,
                     mc.email,
                     mc.address1,
@@ -568,12 +566,10 @@ final class RenewalCaseRepository
 
     private function defaultOrderBy(): string
     {
-        $completedPriority = 'CASE WHEN rc.case_status = "completed" THEN 1 ELSE 0 END';
-        $overduePriority = 'CASE WHEN rc.case_status <> "completed" AND rc.next_action_date IS NOT NULL AND rc.next_action_date < CURDATE() THEN 0 ELSE 1 END';
+        $overduePriority = 'CASE WHEN rc.next_action_date IS NOT NULL AND rc.next_action_date < CURDATE() THEN 0 ELSE 1 END';
         $nextActionNulls = 'CASE WHEN rc.next_action_date IS NULL THEN 1 ELSE 0 END';
 
-        return $completedPriority . ' ASC, '
-            . $overduePriority . ' ASC, '
+        return $overduePriority . ' ASC, '
             . $this->statusPriorityExpression() . ' ASC, '
             . 'rc.maturity_date ASC, '
             . $nextActionNulls . ' ASC, '

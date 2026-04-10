@@ -70,14 +70,16 @@ final class CustomerListView
             $updatedDisplay = $updatedTs !== false ? date('Y/m/d', $updatedTs) : '';
 
             $rowsHtml .= '<tr>'
-                . '<td data-label="顧客名"><a class="text-link" href="' . $detailUrl . '"><strong class="truncate list-row-primary" title="' . Layout::escape((string) ($row['customer_name'] ?? '')) . '">' . Layout::escape((string) ($row['customer_name'] ?? '')) . '</strong></a></td>'
-                . '<td data-label="契約件数">' . Layout::escape((string) ($row['contract_count'] ?? '0')) . '</td>'
-                . '<td data-label="最終更新">' . Layout::escape($updatedDisplay) . '</td>'
+                . '<td class="cell-ellipsis" data-label="顧客名" title="' . Layout::escape((string) ($row['customer_name'] ?? '')) . '"><a class="text-link" href="' . $detailUrl . '">' . Layout::escape((string) ($row['customer_name'] ?? '')) . '</a></td>'
+                . '<td data-label="満期件数" style="text-align:right;">' . (int) ($row['renewal_case_count'] ?? 0) . '</td>'
+                . '<td data-label="事故件数" style="text-align:right;">' . (int) ($row['accident_case_count'] ?? 0) . '</td>'
+                . '<td data-label="活動件数" style="text-align:right;">' . (int) ($row['activity_count'] ?? 0) . '</td>'
+                . '<td data-label="最終更新" style="white-space:nowrap;">' . Layout::escape($updatedDisplay) . '</td>'
                 . '</tr>';
         }
 
         if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="3">該当データはありません。</td></tr>';
+            $rowsHtml = '<tr><td colspan="5">該当データはありません。</td></tr>';
         }
 
         $sortSummary = self::renderSortSummary($sort, $direction);
@@ -85,31 +87,42 @@ final class CustomerListView
         $bottomPager = LP::bottomPager($searchUrl, $criteria, $listState, $pager);
         $createForm  = self::renderCreateForm($createDraft, $createUrl, $createCsrf, $searchUrl);
 
-        $filterFormHtml =
-            '<form method="get" action="' . Layout::escape(LP::formAction($searchUrl)) . '">'
+        $filterPanelHtml =
+            '<div class="search-panel-compact">'
+            . '<div class="toggle-header">'
+            . '<span class="toggle-header-title">検索条件を閉じる</span>'
+            . '<span class="toggle-header-arrow">▲</span>'
+            . '</div>'
+            . '<div class="search-panel-body">'
+            . '<form method="get" action="' . Layout::escape(LP::formAction($searchUrl)) . '">'
             . LP::routeInput($searchUrl)
-            . '<input type="hidden" name="filter_open" value="1">'
             . LP::hiddenInputs(LP::queryParams([], $listState, false, true))
-            . '<div class="list-filter-grid">'
-            . '<label class="list-filter-field"><span>顧客名・よみがな</span><input type="text" name="customer_name" value="' . $customerName . '"></label>'
+            . '<div class="search-row">'
+            . '<div class="search-field"><span class="search-label">顧客名・よみがな</span><input type="text" name="customer_name" class="compact-input w-lg" value="' . $customerName . '"></div>'
+            . '<div class="search-actions">'
+            . '<button class="btn btn-small" type="submit">検索</button>'
+            . '<a class="btn btn-small btn-secondary" href="' . Layout::escape($searchUrl) . '">クリア</a>'
             . '</div>'
-            . '<div class="actions list-filter-actions">'
-            . '<button class="btn" type="submit">検索</button>'
-            . '<a class="btn btn-secondary" href="' . Layout::escape(ListViewHelper::buildUrl($searchUrl, ['filter_open' => '1'])) . '">条件クリア</a>'
             . '</div>'
-            . '</form>';
+            . '</form>'
+            . '</div>'
+            . '</div>';
 
         $tableHtml =
             '<div class="table-wrap">'
             . '<table class="table-fixed table-card list-table">'
             . '<colgroup>'
             . '<col style="width:auto;">'
-            . '<col style="width:100px;">'
+            . '<col style="width:80px;">'
+            . '<col style="width:80px;">'
+            . '<col style="width:80px;">'
             . '<col style="width:110px;">'
             . '</colgroup>'
             . '<thead><tr>'
             . '<th>' . LP::sortLink('顧客名', 'customer_name', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th>' . LP::sortLink('契約件数', 'contract_count', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th style="text-align:right;">満期件数</th>'
+            . '<th style="text-align:right;">事故件数</th>'
+            . '<th style="text-align:right;">活動件数</th>'
             . '<th>' . LP::sortLink('最終更新', 'updated_at', $searchUrl, $criteria, $listState) . '</th>'
             . '</tr></thead>'
             . '<tbody>' . $rowsHtml . '</tbody>'
@@ -120,7 +133,8 @@ final class CustomerListView
             '<div class="list-page-frame">'
             . LP::pageHeader('顧客一覧', '<button class="btn" type="button" data-open-dialog="customer-create-dialog">顧客を追加</button>')
             . $noticeHtml
-            . LP::filterCard($filterFormHtml, $filterOpen, $listErrorHtml)
+            . $listErrorHtml
+            . $filterPanelHtml
             . LP::tableCard($topToolbar, $tableHtml, $bottomPager)
             . '</div>'
             . '<dialog id="customer-create-dialog" class="modal-dialog modal-dialog-wide">'
@@ -209,10 +223,9 @@ final class CustomerListView
         }
 
         $label = match ($sort) {
-            'customer_name'  => '顧客名',
-            'contract_count' => '契約件数',
-            'updated_at'     => '最終更新',
-            default          => '更新順',
+            'customer_name' => '顧客名',
+            'updated_at'    => '最終更新',
+            default         => '更新順',
         };
 
         return '並び順: ' . $label . ' ' . ($direction === 'desc' ? '降順' : '昇順');

@@ -11,7 +11,17 @@
       "Read(//c/xampp/**)",
       "Bash(./xampp-control.exe status:*)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost/insurance-agency/)",
-      "Bash(curl -s \"http://localhost/insurance-agency/?route=activity/new\" -o /dev/null -w \"%{http_code}\")"
+      "Bash(curl -s \"http://localhost/insurance-agency/?route=activity/new\" -o /dev/null -w \"%{http_code}\")",
+      "Bash(TEST_DB_NAME=xs000001_test /c/xampp/php/php.exe vendor/bin/phpunit --testsuite Integration)",
+      "Bash(TEST_DB_NAME=xs000001_test /c/xampp/php/php.exe vendor/bin/phpunit)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(TEST_DB_NAME=xs000001_test /c/xampp/php/php.exe vendor/bin/phpunit --testsuite Unit --filter \"testDecodeContent\")",
+      "Bash(TEST_DB_NAME=xs000001_test /c/xampp/php/php.exe vendor/bin/phpunit --testsuite Unit)",
+      "Bash(TEST_DB_NAME=xs000001_test /c/xampp/php/php.exe vendor/bin/phpunit --testsuite Unit --filter \"testDecodeContent_Cp932VendorChar\" --verbose)",
+      "Bash(/c/xampp/mysql/bin/mysql.exe -u root xs000001_te001 -e \"SHOW COLUMNS FROM t_renewal_case LIKE 'renewal_result';\")",
+      "Bash(TEST_DB_NAME=xs000001_test /c/xampp/php/php.exe vendor/bin/phpunit --filter \"testCloseOldRenewalCases_CurrentlyDoesNothing\")",
+      "Bash(TEST_DB_NAME=xs000001_test /c/xampp/php/php.exe vendor/bin/phpunit --filter \"testImport_OrphanCustomer\")"
     ]
   }
 }

@@ -12,7 +12,5 @@ CREATE TABLE IF NOT EXISTS t_audit_event_detail (
   PRIMARY KEY (id),
   UNIQUE KEY uq_t_audit_event_detail_01 (audit_event_id, field_key),
   KEY idx_t_audit_event_detail_01 (audit_event_id),
-  CONSTRAINT fk_t_audit_event_detail_01
-    FOREIGN KEY (audit_event_id) REFERENCES t_audit_event(id),
   CONSTRAINT chk_t_audit_event_detail_01 CHECK (value_type IN ('STRING', 'NUMBER', 'DATE', 'DATETIME', 'BOOLEAN', 'JSON', 'NULL'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='監査イベント詳細';

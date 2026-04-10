@@ -119,7 +119,7 @@ SCR-ACCIDENT-CASE-DETAIL
 | 通知開始日 | 日付入力 | `start_date` | 任意。未設定時は base_date 起算 |
 | 通知終了日 | 日付入力 | `end_date` | 任意。未設定時は無期限 |
 | 次回通知予定 | 読み取り専用 | 算出値 | base_date + interval_weeks + weekday_cd から算出して表示 |
-| 最終通知日 | 読み取り専用 | `last_notified_on` | 通知実績がない場合は「—」 |
+| 最終通知日 | 読み取り専用 | `last_notified_on` | 通知成績がない場合は「—」 |
 
 表示上の考え方:
 - リマインド未設定（ルール未作成）の場合は「リマインド未設定」と表示し、「設定する」ボタンを出す

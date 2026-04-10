@@ -51,12 +51,17 @@ final class ActivityPurposeTypeRepository
      */
     public function create(string $code, string $label): void
     {
+        $maxOrder = (int) $this->pdo->query(
+            'SELECT COALESCE(MAX(display_order), 0) FROM m_activity_purpose_type'
+        )->fetchColumn();
+
         $stmt = $this->pdo->prepare(
             'INSERT INTO m_activity_purpose_type (code, label, display_order, is_active)
-             VALUES (:code, :label, 0, 1)'
+             VALUES (:code, :label, :display_order, 1)'
         );
         $stmt->bindValue(':code', $code);
         $stmt->bindValue(':label', $label);
+        $stmt->bindValue(':display_order', $maxOrder + 1, PDO::PARAM_INT);
         $stmt->execute();
     }
 
@@ -84,5 +89,55 @@ final class ActivityPurposeTypeRepository
         $stmt->execute();
 
         return $stmt->rowCount();
+    }
+
+    public function delete(string $code): void
+    {
+        $stmt = $this->pdo->prepare('DELETE FROM m_activity_purpose_type WHERE code = :code');
+        $stmt->bindValue(':code', $code);
+        $stmt->execute();
+    }
+
+    public function swapDisplayOrder(string $code, string $direction): bool
+    {
+        $self = $this->findByCode($code);
+        if ($self === null) {
+            return false;
+        }
+        $selfOrder = (int) ($self['display_order'] ?? 0);
+
+        if ($direction === 'up') {
+            $stmt = $this->pdo->prepare(
+                'SELECT code, display_order FROM m_activity_purpose_type
+                 WHERE display_order < :order ORDER BY display_order DESC LIMIT 1'
+            );
+        } else {
+            $stmt = $this->pdo->prepare(
+                'SELECT code, display_order FROM m_activity_purpose_type
+                 WHERE display_order > :order ORDER BY display_order ASC LIMIT 1'
+            );
+        }
+        $stmt->bindValue(':order', $selfOrder, PDO::PARAM_INT);
+        $stmt->execute();
+        $neighbor = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($neighbor)) {
+            return false;
+        }
+
+        $neighborCode  = (string) ($neighbor['code'] ?? '');
+        $neighborOrder = (int) ($neighbor['display_order'] ?? 0);
+
+        $upd = $this->pdo->prepare(
+            'UPDATE m_activity_purpose_type SET display_order = :order WHERE code = :code'
+        );
+        $upd->bindValue(':order', $neighborOrder, PDO::PARAM_INT);
+        $upd->bindValue(':code', $code);
+        $upd->execute();
+
+        $upd->bindValue(':order', $selfOrder, PDO::PARAM_INT);
+        $upd->bindValue(':code', $neighborCode);
+        $upd->execute();
+
+        return true;
     }
 }

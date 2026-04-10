@@ -118,7 +118,7 @@
 | 満期一覧 | `renewal/list` | 全ログインユーザー |
 | 顧客一覧 | `customer/list` | 全ログインユーザー |
 | 事故案件 | `accident/list` | 全ログインユーザー |
-| 実績管理 | `sales/list` | 全ログインユーザー |
+| 成績管理 | `sales/list` | 全ログインユーザー |
 | 営業活動 | `activity/list` | 全ログインユーザー |
 | 設定 | `tenant/settings` | `admin` / `system_admin` のみ |
 | 営業案件 | `sales-case/list` | **Phase C-Lite 完了まで非表示** |

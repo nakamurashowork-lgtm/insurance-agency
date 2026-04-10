@@ -22,7 +22,8 @@ final class ActivityDetailView
         array $customers,
         array $staffUsers,
         array $salesCases,
-        string $listUrl,
+        string $backUrl,
+        string $backLabel,
         string $detailUrl,
         string $updateUrl,
         string $deleteUrl,
@@ -51,7 +52,7 @@ final class ActivityDetailView
             $content =
                 $noticeHtml
                 . '<div class="card"><p>活動が見つかりません。</p>'
-                . '<a href="' . Layout::escape($listUrl) . '" class="btn btn-ghost">一覧に戻る</a></div>';
+                . '<a href="' . Layout::escape($backUrl) . '" class="btn btn-ghost">' . Layout::escape($backLabel) . '</a></div>';
             return Layout::render('活動詳細', $content, $layoutOptions);
         }
 
@@ -81,7 +82,7 @@ final class ActivityDetailView
             . '<input type="hidden" name="route" value="activity/delete">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($deleteCsrf) . '">'
             . '<input type="hidden" name="id" value="' . $id . '">'
-            . '<input type="hidden" name="return_to" value="' . Layout::escape($listUrl) . '">'
+            . '<input type="hidden" name="return_to" value="' . Layout::escape($backUrl) . '">'
             . '<div class="dialog-actions">'
             . '<button type="submit" class="btn btn-danger">削除する</button>'
             . '<button type="button" class="btn btn-ghost" onclick="document.getElementById(\'dlg-delete\').close()">キャンセル</button>'
@@ -101,7 +102,7 @@ final class ActivityDetailView
             . '</div>'
             . '</div>'
             . '<div class="actions">'
-            . '<a href="' . Layout::escape($listUrl) . '" class="btn btn-secondary">一覧に戻る</a>'
+            . '<a href="' . Layout::escape($backUrl) . '" class="btn btn-secondary">' . Layout::escape($backLabel) . '</a>'
             . '<button type="button" class="btn btn-danger btn-small" onclick="document.getElementById(\'dlg-delete\').showModal()">削除</button>'
             . '<button type="submit" class="btn" form="activity-update-form">保存</button>'
             . '</div>'
@@ -116,7 +117,6 @@ final class ActivityDetailView
             . $formHtml
             . '<div class="actions" style="margin-top:4px;">'
             . '<button type="submit" class="btn btn-primary">保存</button>'
-            . '<a href="' . Layout::escape($listUrl) . '" class="btn btn-ghost">一覧に戻る</a>'
             . '</div>'
             . '</form>'
             . $deleteDialog;
@@ -150,6 +150,7 @@ final class ActivityDetailView
         $startTimeVal    = (string) ($data['start_time'] ?? '');
         $endTimeVal      = (string) ($data['end_time'] ?? '');
         $visitPlaceVal   = (string) ($data['visit_place'] ?? '');
+        $subjectVal      = (string) ($data['subject'] ?? '');
         $summaryVal      = (string) ($data['content_summary'] ?? '');
         $nextDateVal     = (string) ($data['next_action_date'] ?? '');
 
@@ -341,6 +342,9 @@ JSCODE;
 
             . '<label class="list-filter-field modal-form-wide"><span>訪問先</span>'
             . '<input type="text" name="visit_place" value="' . Layout::escape($visitPlaceVal) . '" maxlength="200"></label>'
+
+            . '<label class="list-filter-field modal-form-wide"><span>件名' . $req . '</span>'
+            . '<input type="text" name="subject" required maxlength="200" value="' . Layout::escape($subjectVal) . '"></label>'
 
             . '<label class="list-filter-field modal-form-wide"><span>内容要約' . $req . '</span>'
             . '<textarea name="content_summary" required maxlength="500" rows="4" style="width:100%;resize:vertical;">'
@@ -538,6 +542,7 @@ TPJS;
         $purposeTypeVal  = (string) ($data['purpose_type'] ?? '');
         $visitPlaceVal   = (string) ($data['visit_place'] ?? '');
         $intervieweeVal  = (string) ($data['interviewee_name'] ?? '');
+        $subjectVal      = (string) ($data['subject'] ?? '');
         $summaryVal      = (string) ($data['content_summary'] ?? '');
         $nextDateVal     = (string) ($data['next_action_date'] ?? '');
         $resultTypeVal   = (string) ($data['result_type'] ?? '');
@@ -736,6 +741,9 @@ CBJS;
 
             . '<label class="list-filter-field modal-form-wide"><span>訪問先</span>'
             . '<input type="text" name="visit_place" value="' . Layout::escape($visitPlaceVal) . '" maxlength="200"></label>'
+
+            . '<label class="list-filter-field modal-form-wide"><span>件名' . $req . '</span>'
+            . '<input type="text" name="subject" required maxlength="200" value="' . Layout::escape($subjectVal) . '"></label>'
 
             . '<label class="list-filter-field modal-form-wide"><span>内容要約' . $req . '</span>'
             . '<textarea name="content_summary" required maxlength="500" rows="4" style="width:100%;resize:vertical;">'

@@ -100,11 +100,11 @@ final class RenewalCaseListView
 
             $rowsHtml .= '<tr' . $rowClass . '>'
                 . '<td data-label="証券番号"><a class="text-link list-policy-text" href="' . $detailUrl . '" title="' . Layout::escape($policyText) . '">' . Layout::escape($policyText) . '</a></td>'
-                . '<td data-label="満期日">' . self::renderMaturityDate($maturityDate, $status, $today) . '</td>'
-                . '<td data-label="顧客名"><strong class="truncate list-row-primary" title="' . Layout::escape($customerText) . '">' . Layout::escape($customerText) . '</strong></td>'
-                . '<td data-label="種目">' . Layout::escape($productType) . '</td>'
-                . '<td data-label="早期更改締切">' . self::renderEarlyDeadline($earlyDeadline, $status, $today) . '</td>'
-                . '<td data-label="営業担当">' . ($assignedUserName !== '' ? Layout::escape($assignedUserName) : '<span class="muted">−</span>') . '</td>'
+                . '<td data-label="満期日" style="white-space:nowrap;">' . self::renderMaturityDate($maturityDate, $status, $today) . '</td>'
+                . '<td class="cell-ellipsis" data-label="顧客名" title="' . Layout::escape($customerText) . '">' . Layout::escape($customerText) . '</td>'
+                . '<td class="cell-ellipsis" data-label="種目" title="' . Layout::escape($productType) . '">' . Layout::escape($productType) . '</td>'
+                . '<td data-label="早期更改締切" style="white-space:nowrap;">' . self::renderEarlyDeadline($earlyDeadline, $status, $today) . '</td>'
+                . '<td class="cell-ellipsis" data-label="営業担当" title="' . Layout::escape($assignedUserName) . '">' . ($assignedUserName !== '' ? Layout::escape($assignedUserName) : '<span class="muted">−</span>') . '</td>'
                 . '<td data-label="対応状況">' . self::renderStatusBadge($status, $badgeLabelMap) . '</td>'
                 . '<td>' . $deleteForm . '</td>'
                 . '</tr>';
@@ -115,13 +115,9 @@ final class RenewalCaseListView
         }
 
         // ステータスフィルター選択肢
-        if ($allStatuses !== []) {
-            $statuses = ['' => 'すべて'];
-            foreach ($allStatuses as $sRow) {
-                $statuses[(string) ($sRow['code'] ?? '')] = (string) ($sRow['display_name'] ?? '');
-            }
-        } else {
-            $statuses = ['' => 'すべて', 'not_started' => '未対応', 'sj_requested' => 'SJ依頼中', 'doc_prepared' => '書類作成済', 'waiting_return' => '返送待ち', 'quote_sent' => '見積送付済', 'waiting_payment' => '入金待ち', 'completed' => '完了'];
+        $statuses = ['' => 'すべて'];
+        foreach ($allStatuses as $sRow) {
+            $statuses[(string) ($sRow['code'] ?? '')] = (string) ($sRow['display_name'] ?? '');
         }
         $statusOptions = '';
         foreach ($statuses as $value => $label) {
@@ -149,26 +145,33 @@ final class RenewalCaseListView
             ? '<div class="notice">' . Layout::escape($importFlashSuccess) . '</div>'
             : '';
 
-        $filterFormHtml =
-            '<form method="get" action="' . Layout::escape(LP::formAction($searchUrl)) . '">'
+        $filterPanelHtml =
+            '<div class="search-panel-compact">'
+            . '<div class="toggle-header">'
+            . '<span class="toggle-header-title">検索条件を閉じる</span>'
+            . '<span class="toggle-header-arrow">▲</span>'
+            . '</div>'
+            . '<div class="search-panel-body">'
+            . '<form method="get" action="' . Layout::escape(LP::formAction($searchUrl)) . '">'
             . LP::routeInput($searchUrl)
-            . '<input type="hidden" name="filter_open" value="1">'
             . LP::hiddenInputs(LP::queryParams([], $listState, false, true))
-            . '<div class="list-filter-grid">'
-            . '<label class="list-filter-field"><span>顧客名</span><input type="text" name="customer_name" value="' . $customerName . '"></label>'
-            . '<label class="list-filter-field"><span>証券番号</span><input type="text" name="policy_no" value="' . $policyNo . '"></label>'
-            . '<label class="list-filter-field"><span>担当者</span><select name="assigned_staff_id">' . $userOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>種目</span><input type="text" name="product_type" value="' . $filterProductType . '"></label>'
-            . '<label class="list-filter-field"><span>対応状況</span><select name="case_status">' . $statusOptions . '</select></label>'
-            . '<label class="list-filter-field"><span>満期日</span><select name="maturity_window">'
-            . self::renderWindowOptions($maturityWindow)
-            . '</select></label>'
+            . '<div class="search-row">'
+            . '<div class="search-field"><span class="search-label">顧客名</span><input type="text" name="customer_name" class="compact-input w-md" value="' . $customerName . '"></div>'
+            . '<div class="search-field"><span class="search-label">証券番号</span><input type="text" name="policy_no" class="compact-input w-md" value="' . $policyNo . '"></div>'
+            . '<div class="search-field"><span class="search-label">担当者</span><select name="assigned_staff_id" class="compact-input w-md">' . $userOptions . '</select></div>'
+            . '<div class="search-field"><span class="search-label">種目</span><input type="text" name="product_type" class="compact-input w-md" value="' . $filterProductType . '"></div>'
             . '</div>'
-            . '<div class="actions list-filter-actions">'
-            . '<button class="btn" type="submit">検索</button>'
-            . '<a class="btn btn-secondary" href="' . Layout::escape(ListViewHelper::buildUrl($searchUrl, ['filter_open' => '1'])) . '">条件クリア</a>'
+            . '<div class="search-row">'
+            . '<div class="search-field"><span class="search-label">対応状況</span><select name="case_status" class="compact-input w-sm">' . $statusOptions . '</select></div>'
+            . '<div class="search-field"><span class="search-label">満期日</span><select name="maturity_window" class="compact-input w-md">' . self::renderWindowOptions($maturityWindow) . '</select></div>'
+            . '<div class="search-actions">'
+            . '<button class="btn btn-small" type="submit">検索</button>'
+            . '<a class="btn btn-small btn-secondary" href="' . Layout::escape($searchUrl) . '">クリア</a>'
             . '</div>'
-            . '</form>';
+            . '</div>'
+            . '</form>'
+            . '</div>'
+            . '</div>';
 
         $tableHtml =
             '<div class="table-wrap">'
@@ -231,7 +234,8 @@ final class RenewalCaseListView
             '<div class="list-page-frame">'
             . LP::pageHeader('満期一覧', '<button class="btn btn-primary" type="button" data-open-dialog="renewal-import-dialog">+ CSV取込</button>')
             . $noticeHtml
-            . LP::filterCard($filterFormHtml, $filterOpen, $errorHtml)
+            . $errorHtml
+            . $filterPanelHtml
             . LP::tableCard($topToolbar, $tableHtml, $bottomPager)
             . '</div>'
             . $deleteConfirmDialog

@@ -31,8 +31,8 @@ final class SalesCaseRepository
 
     /** @var array<int, string> */
     public const SORTABLE_FIELDS = [
-        'id', 'case_name', 'status', 'prospect_rank',
-        'expected_contract_month', 'expected_premium', 'created_at',
+        'id', 'case_name', 'customer_name', 'case_type', 'product_type',
+        'status', 'prospect_rank', 'expected_contract_month', 'expected_premium', 'created_at',
     ];
 
     public function __construct(private PDO $pdo)
@@ -90,8 +90,19 @@ final class SalesCaseRepository
         $countStmt->execute();
         $total = (int) $countStmt->fetchColumn();
 
-        $allowedSorts = array_flip(self::SORTABLE_FIELDS);
-        $orderColumn  = isset($allowedSorts[$sort]) ? 'sc.' . $sort : 'sc.id';
+        $columnMap = [
+            'id'                      => 'sc.id',
+            'case_name'               => 'sc.case_name',
+            'customer_name'           => 'mc.customer_name',
+            'case_type'               => 'sc.case_type',
+            'product_type'            => 'sc.product_type',
+            'status'                  => 'sc.status',
+            'prospect_rank'           => 'sc.prospect_rank',
+            'expected_contract_month' => 'sc.expected_contract_month',
+            'expected_premium'        => 'sc.expected_premium',
+            'created_at'              => 'sc.created_at',
+        ];
+        $orderColumn  = $columnMap[$sort] ?? 'sc.id';
         $dir          = strtolower($direction) === 'desc' ? 'DESC' : 'ASC';
 
         $perPage = max(1, min(200, $perPage));
@@ -229,12 +240,12 @@ final class SalesCaseRepository
     {
         $stmt = $this->pdo->prepare(
             'INSERT INTO t_sales_case
-                (customer_id, contract_id, case_name, case_type, product_type, status,
+                (customer_id, prospect_name, contract_id, case_name, case_type, product_type, status,
                  prospect_rank, expected_premium, expected_contract_month,
                  referral_source, next_action_date, lost_reason, memo, staff_id,
                  created_by, updated_by)
              VALUES
-                (:customer_id, :contract_id, :case_name, :case_type, :product_type, :status,
+                (:customer_id, :prospect_name, :contract_id, :case_name, :case_type, :product_type, :status,
                  :prospect_rank, :expected_premium, :expected_contract_month,
                  :referral_source, :next_action_date, :lost_reason, :memo, :staff_id,
                  :created_by, :updated_by)'
@@ -252,6 +263,7 @@ final class SalesCaseRepository
         $stmt = $this->pdo->prepare(
             'UPDATE t_sales_case SET
                 customer_id             = :customer_id,
+                prospect_name           = :prospect_name,
                 contract_id             = :contract_id,
                 case_name               = :case_name,
                 case_type               = :case_type,
@@ -304,6 +316,7 @@ final class SalesCaseRepository
         $staffUserId = $nullableInt($input['staff_id'] ?? null) ?? $actorUserId;
 
         $stmt->bindValue(':customer_id', $customerId, $customerId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(':prospect_name', $nullableStr($input['prospect_name'] ?? null));
         $stmt->bindValue(':contract_id', $nullableInt($input['contract_id'] ?? null), PDO::PARAM_INT);
         $stmt->bindValue(':case_name', trim((string) ($input['case_name'] ?? '')));
         $stmt->bindValue(':case_type', trim((string) ($input['case_type'] ?? 'new')));

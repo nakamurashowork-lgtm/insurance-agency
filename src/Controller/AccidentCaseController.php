@@ -100,6 +100,8 @@ final class AccidentCaseController
             $this->config->routeUrl('accident/detail'),
             $this->config->routeUrl('accident/store'),
             $this->guard->session()->issueCsrfToken('accident_create'),
+            $this->config->routeUrl('accident/delete'),
+            $this->guard->session()->issueCsrfToken('accident_delete'),
             $createDraft,
             $openModal,
             $customerOptions,
@@ -130,6 +132,17 @@ final class AccidentCaseController
         if ($id <= 0) {
             $this->guard->session()->setFlash('error', '案件IDが不正です。');
             Responses::redirect($listUrl);
+        }
+
+        // 戻り先解決（from=customer の場合は顧客詳細）
+        $from = (string) ($_GET['from'] ?? '');
+        $fromCustomerId = (int) ($_GET['customer_id'] ?? 0);
+        if ($from === 'customer' && $fromCustomerId > 0) {
+            $backUrl   = $this->config->routeUrl('customer/detail') . '&id=' . $fromCustomerId;
+            $backLabel = '顧客詳細へ戻る';
+        } else {
+            $backUrl   = $listUrl;
+            $backLabel = '一覧へ戻る';
         }
 
         try {
@@ -163,7 +176,8 @@ final class AccidentCaseController
                 $comments,
                 $audits,
                 $assignedUsers,
-                $listUrl,
+                $backUrl,
+                $backLabel,
                 $this->config->routeUrl('accident/update'),
                 $this->config->routeUrl('accident/comment'),
                 $this->config->routeUrl('accident/reminder'),
@@ -344,6 +358,41 @@ final class AccidentCaseController
         Responses::redirect($returnTo);
     }
 
+    public function delete(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+        $this->assertAdmin($auth);
+
+        $criteria  = $this->extractCriteria($_POST);
+        $listState = $this->extractListState($_POST);
+
+        $accidentCaseId = (int) ($_POST['id'] ?? 0);
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('accident_delete', $token)) {
+            $this->guard->session()->setFlash('error', '不正な削除要求を検出しました。');
+            Responses::redirect($this->listUrl($criteria, $listState));
+        }
+
+        if ($accidentCaseId <= 0) {
+            $this->guard->session()->setFlash('error', '案件IDが不正です。');
+            Responses::redirect($this->listUrl($criteria, $listState));
+        }
+
+        try {
+            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $deleted = (new AccidentCaseRepository($pdo))->softDelete($accidentCaseId, (int) ($auth['user_id'] ?? 0));
+            if ($deleted) {
+                $this->guard->session()->setFlash('success', '事故案件を削除しました。');
+            } else {
+                $this->guard->session()->setFlash('error', '対象案件が見つからないか既に削除されています。');
+            }
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '削除に失敗しました。');
+        }
+
+        Responses::redirect($this->listUrl($criteria, $listState));
+    }
+
     public function store(): void
     {
         $auth = $this->guard->requireAuthenticated();
@@ -361,6 +410,7 @@ final class AccidentCaseController
         $customerId = $this->requiredInt($_POST['customer_id'] ?? null);
         $intakeBranch = $this->requiredText($_POST['intake_branch'] ?? null);
         $assignedUserId = $this->requiredInt($_POST['assigned_staff_id'] ?? null);
+        $scStaffName = $this->nullableText($_POST['sc_staff_name'] ?? null);
         $status = trim((string) ($_POST['status'] ?? ''));
 
         try {
@@ -380,6 +430,7 @@ final class AccidentCaseController
             'status' => $status,
             'priority' => 'normal',
             'assigned_staff_id' => $assignedUserId,
+            'sc_staff_name' => $scStaffName,
             'remark' => $this->nullableText($_POST['remark'] ?? null),
         ];
 

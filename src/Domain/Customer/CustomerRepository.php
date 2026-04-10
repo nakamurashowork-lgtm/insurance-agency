@@ -10,7 +10,7 @@ final class CustomerRepository
     /**
      * @var array<int, string>
      */
-    public const SORTABLE_FIELDS = ['customer_name', 'contract_count', 'updated_at'];
+    public const SORTABLE_FIELDS = ['customer_name', 'updated_at'];
 
     public function __construct(private PDO $pdo)
     {
@@ -56,7 +56,9 @@ final class CustomerRepository
                     mc.address2,
                     mc.status,
                     mc.updated_at,
-                    COALESCE(cnt.contract_count, 0) AS contract_count'
+                    COALESCE(rcnt.renewal_case_count, 0) AS renewal_case_count,
+                    COALESCE(acnt.accident_case_count, 0) AS accident_case_count,
+                    COALESCE(avcnt.activity_count, 0) AS activity_count'
             . $query['sql']
             . ' ORDER BY ' . $this->buildOrderBy($sort, $direction)
             . ' LIMIT :limit OFFSET :offset';
@@ -86,11 +88,24 @@ final class CustomerRepository
         $sql =
             ' FROM m_customer mc
              LEFT JOIN (
-                SELECT customer_id, COUNT(*) AS contract_count
-                FROM t_contract
+                SELECT t_contract.customer_id, COUNT(*) AS renewal_case_count
+                FROM t_renewal_case
+                JOIN t_contract ON t_contract.id = t_renewal_case.contract_id AND t_contract.is_deleted = 0
+                WHERE t_renewal_case.is_deleted = 0
+                GROUP BY t_contract.customer_id
+             ) rcnt ON rcnt.customer_id = mc.id
+             LEFT JOIN (
+                SELECT customer_id, COUNT(*) AS accident_case_count
+                FROM t_accident_case
                 WHERE is_deleted = 0
                 GROUP BY customer_id
-             ) cnt ON cnt.customer_id = mc.id
+             ) acnt ON acnt.customer_id = mc.id
+             LEFT JOIN (
+                SELECT customer_id, COUNT(*) AS activity_count
+                FROM t_activity
+                WHERE is_deleted = 0 AND customer_id IS NOT NULL
+                GROUP BY customer_id
+             ) avcnt ON avcnt.customer_id = mc.id
              WHERE mc.is_deleted = 0';
 
         $params = [];
@@ -126,10 +141,9 @@ final class CustomerRepository
         $directionSql = strtoupper($direction) === 'DESC' ? 'DESC' : 'ASC';
 
         return match ($sort) {
-            'customer_name'  => 'mc.customer_name ' . $directionSql . ', mc.id ASC',
-            'contract_count' => 'COALESCE(cnt.contract_count, 0) ' . $directionSql . ', mc.id ASC',
-            'updated_at'     => 'mc.updated_at ' . $directionSql . ', mc.id DESC',
-            default          => 'mc.updated_at DESC, mc.id DESC',
+            'customer_name' => 'mc.customer_name ' . $directionSql . ', mc.id ASC',
+            'updated_at'    => 'mc.updated_at ' . $directionSql . ', mc.id DESC',
+            default         => 'mc.updated_at DESC, mc.id DESC',
         };
     }
 
@@ -170,7 +184,6 @@ final class CustomerRepository
         $stmt = $this->pdo->prepare(
             'SELECT c.id,
                     c.policy_no,
-                    c.insurer_name,
                     c.product_type,
                     c.policy_start_date,
                     c.policy_end_date,
@@ -256,7 +269,7 @@ final class CustomerRepository
     public function findAccidentCases(int $customerId, int $limit = 50): array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT id, accident_no, accepted_date, insurance_category, status, priority, accident_summary
+            'SELECT id, accepted_date, accident_date, insurance_category, sc_staff_name, status
              FROM t_accident_case
              WHERE customer_id = :customer_id
                AND is_deleted = 0

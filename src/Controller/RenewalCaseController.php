@@ -130,6 +130,17 @@ final class RenewalCaseController
             Responses::redirect($listUrl);
         }
 
+        // 戻り先解決（from=customer の場合は顧客詳細）
+        $from = (string) ($_GET['from'] ?? '');
+        $fromCustomerId = (int) ($_GET['customer_id'] ?? 0);
+        if ($from === 'customer' && $fromCustomerId > 0) {
+            $backUrl   = $this->config->routeUrl('customer/detail') . '&id=' . $fromCustomerId;
+            $backLabel = '顧客詳細へ戻る';
+        } else {
+            $backUrl   = $listUrl;
+            $backLabel = '一覧へ戻る';
+        }
+
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
             $repository = new RenewalCaseRepository($pdo);
@@ -184,7 +195,8 @@ final class RenewalCaseController
                 $audits,
                 $this->config->routeUrl('renewal/update'),
                 $this->config->routeUrl('renewal/comment'),
-                $listUrl,
+                $backUrl,
+                $backLabel,
                 $detailUrl,
                 $this->buildListQuery($criteria, $listState),
                 $this->config->routeUrl('customer/detail'),

@@ -24,6 +24,8 @@ final class AccidentCaseListView
         string $detailBaseUrl,
         string $storeUrl,
         string $createCsrf,
+        string $deleteActionUrl,
+        string $deleteCsrfToken,
         ?array $createDraft,
         string $openModal,
         array $customerOptions,
@@ -72,23 +74,11 @@ final class AccidentCaseListView
 
         // ステータスフィルター選択肢とバッジ用ラベルマップ
         $badgeLabelMap = [];
-        if ($allStatuses !== []) {
-            $statusFilterOptions = ['' => 'すべて'];
-            foreach ($allStatuses as $sRow) {
-                $code = (string) ($sRow['code'] ?? '');
-                $statusFilterOptions[$code] = (string) ($sRow['display_name'] ?? $code);
-                $badgeLabelMap[$code] = (string) ($sRow['display_name'] ?? $code);
-            }
-        } else {
-            $statusFilterOptions = [
-                ''             => 'すべて',
-                'accepted'     => '受付',
-                'linked'       => '保険会社連絡済み',
-                'in_progress'  => '対応中',
-                'waiting_docs' => '書類待ち',
-                'resolved'     => '解決済み',
-                'closed'       => '完了',
-            ];
+        $statusFilterOptions = ['' => 'すべて'];
+        foreach ($allStatuses as $sRow) {
+            $code = (string) ($sRow['code'] ?? '');
+            $statusFilterOptions[$code] = (string) ($sRow['display_name'] ?? $code);
+            $badgeLabelMap[$code] = (string) ($sRow['display_name'] ?? $code);
         }
         $statusHtml = '';
         foreach ($statusFilterOptions as $value => $label) {
@@ -103,40 +93,62 @@ final class AccidentCaseListView
             $assignedId   = (int) ($row['assigned_staff_id'] ?? 0);
             $assignedName = $assignedId > 0 ? ($userMap[$assignedId] ?? '-') : '-';
             $reminderHtml = self::formatReminderDate((string) ($row['next_reminder_date'] ?? ''));
+            $deleteFormId = 'form-del-accident-' . $id;
+            $deleteLabel  = (string) ($row['customer_name'] ?? ('ID: ' . $id));
+            $deleteForm = '<form id="' . $deleteFormId . '" method="post" action="' . Layout::escape($deleteActionUrl) . '" style="display:inline;">'
+                . LP::routeInput($deleteActionUrl)
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($deleteCsrfToken) . '">'
+                . '<input type="hidden" name="id" value="' . $id . '">'
+                . LP::hiddenInputs(LP::queryParams($criteria, $listState))
+                . '<button type="button" class="btn-icon-delete" title="削除"'
+                . ' data-delete-form="' . $deleteFormId . '"'
+                . ' data-delete-label="' . Layout::escape($deleteLabel) . '">'
+                . '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>'
+                . '</button>'
+                . '</form>';
             $rowsHtml .= '<tr>'
-                . '<td data-label="契約者名"><a class="text-link" href="' . $detailUrl . '"><strong class="truncate list-row-primary" title="' . Layout::escape((string) ($row['customer_name'] ?? '')) . '">' . Layout::escape((string) ($row['customer_name'] ?? '')) . '</strong></a></td>'
-                . '<td data-label="事故日">' . Layout::escape((string) ($row['accident_date'] ?? '')) . '</td>'
-                . '<td data-label="種目"><span class="truncate" title="' . Layout::escape((string) ($row['product_type'] ?? '')) . '">' . Layout::escape((string) ($row['product_type'] ?? '')) . '</span></td>'
-                . '<td data-label="担当">' . Layout::escape($assignedName) . '</td>'
+                . '<td class="cell-ellipsis" data-label="契約者名" title="' . Layout::escape((string) ($row['customer_name'] ?? '')) . '"><a class="text-link" href="' . $detailUrl . '">' . Layout::escape((string) ($row['customer_name'] ?? '')) . '</a></td>'
+                . '<td data-label="事故日" style="white-space:nowrap;">' . Layout::escape((string) ($row['accident_date'] ?? '')) . '</td>'
+                . '<td class="cell-ellipsis" data-label="種目" title="' . Layout::escape((string) ($row['product_type'] ?? '')) . '">' . Layout::escape((string) ($row['product_type'] ?? '')) . '</td>'
+                . '<td class="cell-ellipsis" data-label="担当" title="' . Layout::escape($assignedName) . '">' . Layout::escape($assignedName) . '</td>'
                 . '<td data-label="状態">' . self::renderStatusBadge((string) ($row['status'] ?? ''), $badgeLabelMap) . '</td>'
                 . '<td data-label="優先度">' . self::renderPriorityBadge((string) ($row['priority'] ?? '')) . '</td>'
                 . '<td data-label="次回リマインド">' . $reminderHtml . '</td>'
+                . '<td>' . $deleteForm . '</td>'
                 . '</tr>';
         }
         if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="7">該当する事故案件はありません。</td></tr>';
+            $rowsHtml = '<tr><td colspan="8">該当する事故案件はありません。</td></tr>';
         }
 
         $sortSummary = self::renderSortSummary($sort, $direction);
         $topToolbar  = LP::toolbar($searchUrl, $criteria, $listState, $pager, $totalCount, $perPage, $sortSummary);
         $bottomPager = LP::bottomPager($searchUrl, $criteria, $listState, $pager);
 
-        $filterFormHtml =
-            '<form method="get" action="' . Layout::escape(LP::formAction($searchUrl)) . '">'
+        $staffSelectHtml = str_replace('<select', '<select class="compact-input w-md"', self::renderUserFilterSelect($staffUsers, $filterUserId));
+        $filterPanelHtml =
+            '<div class="search-panel-compact">'
+            . '<div class="toggle-header">'
+            . '<span class="toggle-header-title">検索条件を閉じる</span>'
+            . '<span class="toggle-header-arrow">▲</span>'
+            . '</div>'
+            . '<div class="search-panel-body">'
+            . '<form method="get" action="' . Layout::escape(LP::formAction($searchUrl)) . '">'
             . LP::routeInput($searchUrl)
-            . '<input type="hidden" name="filter_open" value="1">'
             . LP::hiddenInputs(LP::queryParams([], $listState, false, true))
-            . '<div class="list-filter-grid">'
-            . '<label class="list-filter-field"><span>契約者名</span><input type="text" name="customer_name" value="' . $customerName . '"></label>'
-            . '<label class="list-filter-field"><span>種目</span><input type="text" name="product_type" value="' . $productType . '"></label>'
-            . '<label class="list-filter-field"><span>状態</span><select name="status">' . $statusHtml . '</select></label>'
-            . '<label class="list-filter-field"><span>担当者</span>' . self::renderUserFilterSelect($staffUsers, $filterUserId) . '</label>'
+            . '<div class="search-row">'
+            . '<div class="search-field"><span class="search-label">契約者名</span><input type="text" name="customer_name" class="compact-input w-md" value="' . $customerName . '"></div>'
+            . '<div class="search-field"><span class="search-label">種目</span><input type="text" name="product_type" class="compact-input w-md" value="' . $productType . '"></div>'
+            . '<div class="search-field"><span class="search-label">状態</span><select name="status" class="compact-input w-sm">' . $statusHtml . '</select></div>'
+            . '<div class="search-field"><span class="search-label">担当者</span>' . $staffSelectHtml . '</div>'
+            . '<div class="search-actions">'
+            . '<button class="btn btn-small" type="submit">検索</button>'
+            . '<a class="btn btn-small btn-secondary" href="' . Layout::escape($searchUrl) . '">クリア</a>'
             . '</div>'
-            . '<div class="actions list-filter-actions">'
-            . '<button class="btn" type="submit">検索</button> '
-            . '<a class="btn btn-secondary" href="' . Layout::escape(ListViewHelper::buildUrl($searchUrl, ['filter_open' => '1'])) . '">条件クリア</a>'
             . '</div>'
-            . '</form>';
+            . '</form>'
+            . '</div>'
+            . '</div>';
 
         $tableHtml =
             '<div class="table-wrap">'
@@ -149,28 +161,65 @@ final class AccidentCaseListView
             . '<col class="list-col-status">'
             . '<col class="list-col-priority">'
             . '<col style="width:100px;">'
+            . '<col style="width:44px;">'
             . '</colgroup>'
             . '<thead><tr>'
             . '<th>' . LP::sortLink('契約者名', 'customer_name', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th>事故日</th>'
-            . '<th>種目</th>'
+            . '<th>' . LP::sortLink('事故日', 'accepted_date', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('種目', 'product_type', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>担当</th>'
             . '<th>' . LP::sortLink('状態', 'status', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>' . LP::sortLink('優先度', 'priority', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>次回リマインド</th>'
+            . '<th></th>'
             . '</tr></thead>'
             . '<tbody>' . $rowsHtml . '</tbody>'
             . '</table>'
             . '</div>';
 
+        $deleteConfirmDialog =
+            '<dialog id="dlg-delete-accident-confirm" class="modal-dialog">'
+            . '<div class="modal-head"><h2>削除の確認</h2>'
+            . '<button type="button" class="modal-close" id="dlg-delete-accident-close">×</button>'
+            . '</div>'
+            . '<p id="dlg-delete-accident-msg" style="margin:16px 0;"></p>'
+            . '<div class="actions">'
+            . '<button type="button" id="dlg-delete-accident-ok" class="btn btn-danger">削除する</button>'
+            . '<button type="button" id="dlg-delete-accident-cancel" class="btn btn-ghost">キャンセル</button>'
+            . '</div>'
+            . '</dialog>'
+            . '<script>'
+            . '(function(){'
+            . 'var dlg=document.getElementById("dlg-delete-accident-confirm");'
+            . 'if(!dlg){return;}'
+            . 'var msg=document.getElementById("dlg-delete-accident-msg");'
+            . 'var pendingId=null;'
+            . 'function closeDlg(){if(dlg.open){dlg.close();}pendingId=null;}'
+            . 'document.querySelectorAll("[data-delete-form]").forEach(function(btn){'
+            . 'btn.addEventListener("click",function(){'
+            . 'pendingId=btn.getAttribute("data-delete-form");'
+            . 'var label=btn.getAttribute("data-delete-label")||"この件";'
+            . 'msg.textContent="「"+label+"」を削除しますか？この操作は取り消せません。";'
+            . 'if(!dlg.open){dlg.showModal();}'
+            . '});});'
+            . 'document.getElementById("dlg-delete-accident-ok").addEventListener("click",function(){'
+            . 'if(pendingId){var f=document.getElementById(pendingId);if(f){f.submit();}}'
+            . '});'
+            . 'document.getElementById("dlg-delete-accident-cancel").addEventListener("click",closeDlg);'
+            . 'document.getElementById("dlg-delete-accident-close").addEventListener("click",closeDlg);'
+            . '})();'
+            . '</script>';
+
         $content =
             '<div class="list-page-frame">'
             . LP::pageHeader('事故案件一覧', '<button class="btn" type="button" data-open-dialog="accident-create-dialog">事故案件を追加</button>')
             . $noticeHtml
-            . LP::filterCard($filterFormHtml, $filterOpen, $listErrorHtml)
+            . $listErrorHtml
+            . $filterPanelHtml
             . LP::tableCard($topToolbar, $tableHtml, $bottomPager)
             . '</div>'
-            . self::renderCreateDialog($storeUrl, $createCsrf, $createDraft, $searchUrl, $customerOptions, $currentUser, $allStatuses)
+            . self::renderCreateDialog($storeUrl, $createCsrf, $createDraft, $searchUrl, $customerOptions, $staffUsers, $currentUser, $allStatuses)
+            . $deleteConfirmDialog
             . '<script>'
             . '(function(){const id="accident-create-dialog";const dlg=document.getElementById(id);if(!dlg||typeof dlg.showModal!=="function"){return;}const openBtns=document.querySelectorAll("[data-open-dialog=\""+id+"\"]");openBtns.forEach((btn)=>{btn.addEventListener("click",()=>{if(!dlg.open){dlg.showModal();}});});const closeBtns=dlg.querySelectorAll("[data-close-dialog=\""+id+"\"]");closeBtns.forEach((btn)=>{btn.addEventListener("click",()=>{if(dlg.open){dlg.close();}});});dlg.addEventListener("click",(e)=>{const rect=dlg.getBoundingClientRect();const inside=rect.left<=e.clientX&&e.clientX<=rect.right&&rect.top<=e.clientY&&e.clientY<=rect.bottom;if(!inside&&dlg.open){dlg.close();}});if(' . ($openModal === 'create' ? 'true' : 'false') . '){dlg.showModal();}})()'
             . '</script>';
@@ -184,12 +233,16 @@ final class AccidentCaseListView
      * @param array<string, mixed> $currentUser
      * @param array<int, array<string, mixed>> $allStatuses
      */
+    /**
+     * @param array<int, array<string, mixed>> $staffUsers
+     */
     private static function renderCreateDialog(
         string $storeUrl,
         string $csrfToken,
         ?array $draft,
         string $returnTo,
         array $customerOptions,
+        array $staffUsers,
         array $currentUser,
         array $allStatuses = []
     ): string {
@@ -217,21 +270,38 @@ final class AccidentCaseListView
             }
         }
 
-        $customerId   = (string) ($draft['customer_id'] ?? '');
-        $customerHtml = '<option value="">選択してください</option>';
+        // お客さまコンボボックス用 datalist
+        $selectedCustomerId = (int) ($draft['customer_id'] ?? 0);
+        $selectedCustomerText = '';
+        $customerDlId = 'accident-create-customer-dl';
+        $customerDatalist = '';
         foreach ($customerOptions as $row) {
             $id = (int) ($row['id'] ?? 0);
             if ($id <= 0) {
                 continue;
             }
-            $selected     = $customerId !== '' && (int) $customerId === $id ? ' selected' : '';
-            $label        = (string) ($row['customer_name'] ?? '');
-            $customerHtml .= '<option value="' . $id . '"' . $selected . '>' . Layout::escape($label) . '</option>';
+            $label = (string) ($row['customer_name'] ?? '');
+            if ($id === $selectedCustomerId) {
+                $selectedCustomerText = $label;
+            }
+            $customerDatalist .= '<option value="' . Layout::escape($label) . '" data-id="' . $id . '">';
         }
 
-        $defaultUserId   = (int) ($currentUser['id'] ?? 0);
-        $assignedUserId  = (string) ($draft['assigned_staff_id'] ?? ($defaultUserId > 0 ? (string) $defaultUserId : ''));
-        $assignedUserName = (string) ($currentUser['name'] ?? 'ログインユーザー');
+        // スタッフプルダウン共通生成
+        $defaultUserId  = (int) ($currentUser['id'] ?? 0);
+        $assignedUserId = (int) ($draft['assigned_staff_id'] ?? $defaultUserId);
+        $scStaffName    = Layout::escape((string) ($draft['sc_staff_name'] ?? ''));
+
+        $assignedStaffHtml = '<option value="">未設定</option>';
+        foreach ($staffUsers as $s) {
+            $sid   = (int) ($s['id'] ?? 0);
+            $sname = Layout::escape(trim((string) ($s['staff_name'] ?? $s['name'] ?? '')));
+            if ($sid <= 0 || $sname === '') {
+                continue;
+            }
+            $selA = $sid === $assignedUserId ? ' selected' : '';
+            $assignedStaffHtml .= '<option value="' . $sid . '"' . $selA . '>' . $sname . '</option>';
+        }
 
         $accidentDate      = Layout::escape((string) ($draft['accident_date'] ?? date('Y-m-d')));
         $insuranceCategory = Layout::escape((string) ($draft['insurance_category'] ?? ''));
@@ -246,31 +316,40 @@ final class AccidentCaseListView
             . '<form method="post" action="' . Layout::escape($storeUrl) . '">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfToken) . '">'
             . '<input type="hidden" name="return_to" value="' . Layout::escape($returnTo) . '">'
+            . '<input type="hidden" name="customer_id" id="accident-create-customer-id" value="' . ($selectedCustomerId > 0 ? $selectedCustomerId : '') . '">'
+            . '<datalist id="' . $customerDlId . '">' . $customerDatalist . '</datalist>'
             . '<section class="modal-form-section">'
             . '<h3 class="modal-form-title">受付基本情報</h3>'
             . '<div class="list-filter-grid modal-form-grid">'
             . '<label class="list-filter-field"><span>事故日 <strong class="required-mark">*</strong></span><input type="date" name="accident_date" value="' . $accidentDate . '" required></label>'
             . '<label class="list-filter-field"><span>状態 <strong class="required-mark">*</strong></span><select name="status" required>' . $statusHtml . '</select></label>'
             . '<label class="list-filter-field"><span>保険種類 <strong class="required-mark">*</strong></span><input type="text" name="insurance_category" value="' . $insuranceCategory . '" required></label>'
-            . '<label class="list-filter-field"><span>お客さま名 <strong class="required-mark">*</strong></span><select name="customer_id" required>' . $customerHtml . '</select></label>'
+            . '<label class="list-filter-field"><span>お客さま名 <strong class="required-mark">*</strong></span><input type="text" list="' . $customerDlId . '" id="accident-create-customer-text" autocomplete="off" value="' . Layout::escape($selectedCustomerText) . '" placeholder="顧客名で検索" required></label>'
+            . '<label class="list-filter-field"><span>担当拠点 <strong class="required-mark">*</strong></span><input type="text" name="intake_branch" value="' . $intakeBranch . '" required></label>'
+            . '<label class="list-filter-field"><span>SC担当者</span><input type="text" name="sc_staff_name" value="' . $scStaffName . '" maxlength="100"></label>'
             . '</div>'
             . '</section>'
             . '<section class="modal-form-section">'
             . '<h3 class="modal-form-title">担当情報</h3>'
             . '<div class="list-filter-grid modal-form-grid">'
-            . '<label class="list-filter-field"><span>担当拠点 <strong class="required-mark">*</strong></span><input type="text" name="intake_branch" value="' . $intakeBranch . '" required></label>'
-            . '<label class="list-filter-field"><span>担当者 <strong class="required-mark">*</strong></span><select name="assigned_staff_id" required><option value="' . Layout::escape($assignedUserId) . '" selected>' . Layout::escape($assignedUserName) . '</option></select></label>'
+            . '<label class="list-filter-field"><span>担当者 <strong class="required-mark">*</strong></span><select name="assigned_staff_id" required>' . $assignedStaffHtml . '</select></label>'
             . '</div>'
-            . '</section>'
-            . '<section class="modal-form-section">'
-            . '<h3 class="modal-form-title">備考</h3>'
-            . '<label class="list-filter-field modal-form-wide"><span>備考</span><textarea name="remark" rows="5" style="width:100%;">' . $remark . '</textarea></label>'
             . '</section>'
             . '<div class="actions modal-form-actions">'
             . '<button class="btn" type="submit">登録する</button>'
             . '<button class="btn btn-secondary" type="button" data-close-dialog="accident-create-dialog">キャンセル</button>'
             . '</div>'
             . '</form>'
+            . '<script>(function(){'
+            . 'var txt=document.getElementById("accident-create-customer-text");'
+            . 'var hid=document.getElementById("accident-create-customer-id");'
+            . 'var dl=document.getElementById("' . $customerDlId . '");'
+            . 'if(!txt||!hid||!dl){return;}'
+            . 'function sync(){var v=txt.value;var opts=dl.querySelectorAll("option");var found=false;'
+            . 'for(var i=0;i<opts.length;i++){if(opts[i].value===v){hid.value=opts[i].getAttribute("data-id")||"";found=true;break;}}'
+            . 'if(!found){hid.value="";}}'
+            . 'txt.addEventListener("input",sync);txt.addEventListener("change",sync);'
+            . '})();</script>'
             . '</dialog>';
     }
 
@@ -363,7 +442,9 @@ final class AccidentCaseListView
 
         $label = match ($sort) {
             'accident_no'   => '事故管理番号',
+            'accepted_date' => '事故日',
             'customer_name' => '契約者名',
+            'product_type'  => '種目',
             'status'        => '状態',
             'priority'      => '優先度',
             default         => '事故受付日',

@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS t_accident_case (
   resolved_date       DATE            NULL     COMMENT '解決日',
   assigned_staff_id   BIGINT UNSIGNED NULL     COMMENT '主担当者(m_staff.id)',
   office_staff_id     BIGINT UNSIGNED NULL     COMMENT '事務担当者(m_staff.id)',
+  sc_staff_name       VARCHAR(100)    NULL     COMMENT 'SC担当者名（フリーテキスト）',
   remark              TEXT            NULL     COMMENT '備考',
   is_deleted          TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '削除フラグ',
 

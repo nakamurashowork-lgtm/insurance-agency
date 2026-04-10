@@ -12,6 +12,7 @@ final class AccidentCaseRepository
         'accepted_date',
         'customer_name',
         'policy_no',
+        'product_type',
         'status',
         'priority',
         'resolved_date',
@@ -174,14 +175,15 @@ final class AccidentCaseRepository
     private function buildOrderBy(string $sort, string $direction): string
     {
         $column = match ($sort) {
-            'accident_no' => 'ac.accident_no',
+            'accident_no'   => 'ac.accident_no',
             'accepted_date' => 'ac.accepted_date',
             'customer_name' => 'mc.customer_name',
-            'policy_no' => 'c.policy_no',
-            'status' => 'ac.status',
-            'priority' => 'ac.priority',
+            'policy_no'     => 'c.policy_no',
+            'product_type'  => 'ac.product_type',
+            'status'        => 'ac.status',
+            'priority'      => 'ac.priority',
             'resolved_date' => 'ac.resolved_date',
-            default => 'ac.accepted_date',
+            default         => 'ac.accepted_date',
         };
 
         $dir = strtolower($direction) === 'desc' ? 'DESC' : 'ASC';
@@ -213,6 +215,7 @@ final class AccidentCaseRepository
                     ac.insurer_claim_no,
                     ac.resolved_date,
                     ac.assigned_staff_id,
+                    ac.sc_staff_name,
                     ac.remark,
                     ac.updated_at,
                     mc.customer_name,
@@ -593,6 +596,7 @@ final class AccidentCaseRepository
                  status,
                  priority,
                  assigned_staff_id,
+                 sc_staff_name,
                  remark,
                  created_by,
                  updated_by
@@ -605,24 +609,25 @@ final class AccidentCaseRepository
                  :status,
                  :priority,
                  :assigned_staff_id,
+                 :sc_staff_name,
                  :remark,
                  :created_by,
                  :updated_by
              )'
         );
-        $stmt->execute([
-            'customer_id' => $input['customer_id'],
-            'accepted_date' => $input['accepted_date'],
-            'accident_date' => $input['accident_date'],
-            'insurance_category' => $input['insurance_category'],
-            'accident_location' => $input['accident_location'],
-            'status' => $input['status'],
-            'priority' => $input['priority'],
-            'assigned_staff_id' => $input['assigned_staff_id'],
-            'remark' => $input['remark'],
-            'created_by' => $createdBy,
-            'updated_by' => $createdBy,
-        ]);
+        $stmt->bindValue(':customer_id', $input['customer_id'], PDO::PARAM_INT);
+        $stmt->bindValue(':accepted_date', $input['accepted_date']);
+        $stmt->bindValue(':accident_date', $input['accident_date']);
+        $stmt->bindValue(':insurance_category', $input['insurance_category']);
+        $stmt->bindValue(':accident_location', $input['accident_location']);
+        $stmt->bindValue(':status', $input['status']);
+        $stmt->bindValue(':priority', $input['priority']);
+        $stmt->bindValue(':assigned_staff_id', $input['assigned_staff_id'], PDO::PARAM_INT);
+        $stmt->bindValue(':sc_staff_name', $input['sc_staff_name'] ?? null);
+        $stmt->bindValue(':remark', $input['remark']);
+        $stmt->bindValue(':created_by', $createdBy, PDO::PARAM_INT);
+        $stmt->bindValue(':updated_by', $createdBy, PDO::PARAM_INT);
+        $stmt->execute();
 
         return (int) $this->pdo->lastInsertId();
     }
@@ -847,6 +852,20 @@ final class AccidentCaseRepository
             }
             throw $e;
         }
+    }
+
+    public function softDelete(int $accidentCaseId, int $updatedBy): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE t_accident_case
+             SET is_deleted = 1, updated_by = :updated_by
+             WHERE id = :id
+               AND is_deleted = 0'
+        );
+        $stmt->bindValue(':updated_by', $updatedBy, PDO::PARAM_INT);
+        $stmt->bindValue(':id', $accidentCaseId, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->rowCount() > 0;
     }
 
     public function createComment(int $accidentCaseId, string $commentBody, int $userId): void

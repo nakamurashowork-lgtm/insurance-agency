@@ -80,7 +80,7 @@ Excelの「完了」は業務文脈により `renewed` と `closed` のどちら
 
 ---
 
-## 6. 実績区分（t_sales_performance.performance_type）
+## 6. 成績区分（t_sales_performance.performance_type）
 
 | DB値 | 画面表示ラベル |
 |---|---|

@@ -13,15 +13,12 @@ final class SjnetCsvImportService
     private const EXPECTED_COLUMNS = 44;
 
     // 0-indexed column positions
-    private const COL_MATURITY_MONTH  = 1;   // B: 満期日（月）
-    private const COL_MATURITY_DAY    = 2;   // C: 満期日（日）
     private const COL_CUSTOMER_NAME   = 3;   // D: 顧客名
     private const COL_POSTAL_CODE     = 5;   // F: 郵便番号
     private const COL_ADDRESS1        = 6;   // G: 住所
     private const COL_PHONE           = 7;   // H: ＴＥＬ
-    private const COL_INSURER_NAME    = 14;  // O: 保険会社
     private const COL_START_DATE      = 15;  // P: 保険始期
-    private const COL_END_DATE        = 16;  // Q: 保険終期
+    private const COL_END_DATE        = 16;  // Q: 保険終期（満期日としても使用）
     private const COL_PRODUCT_TYPE    = 17;  // R: 種目種類
     private const COL_POLICY_NO       = 18;  // S: 証券番号
     private const COL_PAYMENT_CYCLE   = 19;  // T: 払込方法
@@ -158,8 +155,7 @@ final class SjnetCsvImportService
 
         $policyNo     = trim($cols[self::COL_POLICY_NO]);
         $customerName = trim($cols[self::COL_CUSTOMER_NAME]);
-        $maturityMonth = trim($cols[self::COL_MATURITY_MONTH]);
-        $maturityDay   = trim($cols[self::COL_MATURITY_DAY]);
+        $endDateRaw   = trim($cols[self::COL_END_DATE]);
 
         // STEP 1: 証券番号チェック
         if ($policyNo === '') {
@@ -173,22 +169,22 @@ final class SjnetCsvImportService
             ];
         }
 
-        // スキップ条件: 顧客名・満期月日が空
-        if ($customerName === '' || $maturityMonth === '' || $maturityDay === '') {
+        // スキップ条件: 顧客名・保険終期が空
+        if ($customerName === '' || $endDateRaw === '') {
             $counters['skip']++;
             return [
                 'raw'          => $raw,
                 'policy_no'    => $policyNo,
                 'customer_name' => $customerName ?: null,
                 'row_status'   => 'skip',
-                'error_message' => '顧客名または満期月日が空のためスキップ',
+                'error_message' => '顧客名または保険終期が空のためスキップ',
             ];
         }
 
         $counters['valid']++;
 
-        // 満期日の決定
-        $maturityDate = $this->resolveMaturityDate((int) $maturityMonth, (int) $maturityDay);
+        // 満期日の決定: Q列（保険終期）をそのまま使用
+        $maturityDate = $this->parseDate($endDateRaw);
         if ($maturityDate === null) {
             $counters['error']++;
             return [
@@ -196,7 +192,7 @@ final class SjnetCsvImportService
                 'policy_no'    => $policyNo,
                 'customer_name' => $customerName,
                 'row_status'   => 'error',
-                'error_message' => '満期月日が不正: ' . $maturityMonth . '月' . $maturityDay . '日',
+                'error_message' => '保険終期の日付が不正: ' . $endDateRaw,
             ];
         }
 
@@ -227,9 +223,8 @@ final class SjnetCsvImportService
         [$resolvedUserId, $mappingStatus] = $this->resolveStaff($agencyCode);
 
         // STEP 4: 契約の登録・更新
-        $insurerName    = trim($cols[self::COL_INSURER_NAME]);
         $startDate      = $this->parseDate(trim($cols[self::COL_START_DATE]));
-        $endDate        = $this->parseDate(trim($cols[self::COL_END_DATE]));
+        $endDate        = $maturityDate; // Q列（保険終期）= 満期日
         $productType    = trim($cols[self::COL_PRODUCT_TYPE]);
         $paymentCycle   = trim($cols[self::COL_PAYMENT_CYCLE]);
         $premiumAmount  = $this->parsePremium(trim($cols[self::COL_PREMIUM_AMOUNT]));
@@ -237,7 +232,6 @@ final class SjnetCsvImportService
         [$contractId, $contractWasInserted] = $this->upsertContract(
             $policyNo,
             (int) $customerId,
-            $insurerName,
             $startDate,
             $endDate,
             $productType,
@@ -281,35 +275,6 @@ final class SjnetCsvImportService
             'matched_renewal_case_id' => $renewalCaseId,
             'row_status'             => $isInsert ? 'insert' : 'update',
         ];
-    }
-
-    /**
-     * 満期年を決定して YYYY-MM-DD 形式で返す
-     */
-    private function resolveMaturityDate(int $month, int $day): ?string
-    {
-        if ($month < 1 || $month > 12 || $day < 1 || $day > 31) {
-            return null;
-        }
-
-        $importYear = (int) $this->importDate->format('Y');
-
-        $candidateA = DateTimeImmutable::createFromFormat('Y-n-j', $importYear . '-' . $month . '-' . $day);
-        if ($candidateA === false) {
-            return null;
-        }
-
-        if ($this->importDate <= $candidateA) {
-            return $candidateA->format('Y-m-d');
-        }
-
-        // 翌年
-        $candidateB = DateTimeImmutable::createFromFormat('Y-n-j', ($importYear + 1) . '-' . $month . '-' . $day);
-        if ($candidateB === false) {
-            return null;
-        }
-
-        return $candidateB->format('Y-m-d');
     }
 
     /**
@@ -404,7 +369,6 @@ final class SjnetCsvImportService
     private function upsertContract(
         string $policyNo,
         int $customerId,
-        string $insurerName,
         ?string $startDate,
         ?string $endDate,
         string $productType,
@@ -451,8 +415,7 @@ final class SjnetCsvImportService
 
             $stmt = $this->pdo->prepare(
                 'UPDATE t_contract
-                 SET insurer_name            = :insurer,
-                     policy_start_date       = :start_date,
+                 SET policy_start_date       = :start_date,
                      policy_end_date         = :end_date,
                      product_type            = :product_type,
                      payment_cycle           = :payment_cycle,
@@ -462,7 +425,6 @@ final class SjnetCsvImportService
                      updated_by              = :updated_by
                  WHERE id = :id'
             );
-            $stmt->bindValue(':insurer', $insurerName !== '' ? $insurerName : null);
             $stmt->bindValue(':start_date', $startDate);
             $stmt->bindValue(':end_date', $endDate);
             $stmt->bindValue(':product_type', $productType !== '' ? $productType : null);
@@ -480,13 +442,13 @@ final class SjnetCsvImportService
         // INSERT
         $stmt = $this->pdo->prepare(
             'INSERT INTO t_contract
-               (customer_id, policy_no, insurer_name,
+               (customer_id, policy_no,
                 policy_start_date, policy_end_date,
                 product_type, payment_cycle, premium_amount,
                 status, sales_staff_id, last_sjnet_imported_at,
                 is_deleted, created_by, updated_by)
              VALUES
-               (:customer_id, :policy_no, :insurer,
+               (:customer_id, :policy_no,
                 :start_date, :end_date,
                 :product_type, :payment_cycle, :premium,
                 \'active\', :sales_staff_id, :imported_at,
@@ -494,7 +456,6 @@ final class SjnetCsvImportService
         );
         $stmt->bindValue(':customer_id', $customerId, PDO::PARAM_INT);
         $stmt->bindValue(':policy_no', $policyNo);
-        $stmt->bindValue(':insurer', $insurerName !== '' ? $insurerName : null);
         $stmt->bindValue(':start_date', $startDate);
         $stmt->bindValue(':end_date', $endDate);
         $stmt->bindValue(':product_type', $productType !== '' ? $productType : null);
@@ -629,11 +590,19 @@ final class SjnetCsvImportService
     }
 
     /**
-     * 保険料文字列を整数に変換する（カンマ区切り除去）
+     * 保険料文字列を整数に変換する（カンマ区切り・通貨記号除去）
+     *
+     * 負値は null を返す。DDL の CHECK (premium_amount >= 0) に違反するため、
+     * 呼び出し側で INSERT/UPDATE 時に 0 へフォールバックさせる。
+     * 返戻金は仕様上「不使用」列（列24）のため、このメソッドには渡らない。
      */
     private function parsePremium(string $value): ?int
     {
         if ($value === '') {
+            return null;
+        }
+        // 符号（-）が含まれる場合は負値と判断して null を返す
+        if (str_contains($value, '-')) {
             return null;
         }
         $cleaned = preg_replace('/[^\d]/', '', $value);

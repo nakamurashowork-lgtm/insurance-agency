@@ -1,15 +1,14 @@
 CREATE TABLE IF NOT EXISTS t_sales_performance (
-  id                  BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '実績ID',
+  id                  BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '成績ID',
 
   customer_id         BIGINT UNSIGNED  NOT NULL COMMENT '顧客ID(m_customer.id)',
   contract_id         BIGINT UNSIGNED  NULL     COMMENT '契約ID(t_contract.id)',
   renewal_case_id     BIGINT UNSIGNED  NULL     COMMENT '満期案件ID(t_renewal_case.id)',
 
-  performance_date    DATE             NOT NULL COMMENT '実績計上日',
-  performance_type    VARCHAR(20)      NOT NULL COMMENT '実績区分(new/renewal/addition/change/cancel_deduction)',
+  performance_date    DATE             NOT NULL COMMENT '成績計上日',
+  performance_type    VARCHAR(20)      NOT NULL COMMENT '成績区分(new/renewal/addition/change/cancel_deduction)',
 
   source_type         VARCHAR(20)      NULL     COMMENT '業務区分(non_life/life)',
-  insurer_name        VARCHAR(100)     NULL     COMMENT '保険会社名',
   policy_no           VARCHAR(50)      NULL     COMMENT '証券番号',
   policy_start_date   DATE             NULL     COMMENT '始期日',
   application_date    DATE             NULL     COMMENT '申込日(主に生保)',
@@ -49,4 +48,4 @@ CREATE TABLE IF NOT EXISTS t_sales_performance (
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci
-  COMMENT='実績';
+  COMMENT='成績';

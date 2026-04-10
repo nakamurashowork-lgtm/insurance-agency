@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS t_sales_case (
   id                      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'ID',
   customer_id             BIGINT UNSIGNED NULL     COMMENT '顧客ID(m_customer.id)',
+  prospect_name           VARCHAR(200)    NULL     COMMENT '見込先名（顧客未登録時のフリーテキスト）',
   contract_id             BIGINT UNSIGNED NULL     COMMENT '契約ID(t_contract.id)',
   case_name               VARCHAR(200)    NOT NULL COMMENT '案件名',
   case_type               VARCHAR(50)     NOT NULL COMMENT '案件種別',

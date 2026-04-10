@@ -32,20 +32,16 @@ final class DashboardController
         $role       = is_array($permissions) ? (string) ($permissions['tenant_role'] ?? 'member') : 'member';
         $tenantCode = (string) ($auth['tenant_code'] ?? '');
 
-        // 実績サマリ スコープ（管理者のみ team 可）
-        $scope = ($_GET['scope'] ?? 'self') === 'team' ? 'team' : 'self';
-        if ($scope === 'team' && $role !== 'admin') {
-            $scope = 'self';
-        }
-        $staffFilter = ($scope === 'self') ? $userId : null;
+        // 担当者選択ドロップダウン パラメータ（デフォルト: all = 全体）
+        $renewalUserParam   = (string) ($_GET['renewal_user']    ?? 'all');
+        $accidentUserParam  = (string) ($_GET['accident_user']   ?? 'all');
+        $salesCaseUserParam = (string) ($_GET['sales_case_user'] ?? 'all');
+        $salesUserParam     = (string) ($_GET['sales_user']      ?? 'all');
 
-        // 業務入口 スコープ（自分/全体、デフォルト全体）
-        $renewalBizScope   = ($_GET['renewal_scope']    ?? 'all') === 'self' ? 'self' : 'all';
-        $accidentBizScope  = ($_GET['accident_scope']   ?? 'all') === 'self' ? 'self' : 'all';
-        $salesCaseBizScope = ($_GET['sales_case_scope'] ?? 'all') === 'self' ? 'self' : 'all';
-        $renewalBizFilter   = ($renewalBizScope   === 'self') ? $userId : null;
-        $accidentBizFilter  = ($accidentBizScope  === 'self') ? $userId : null;
-        $salesCaseBizFilter = ($salesCaseBizScope === 'self') ? $userId : null;
+        $renewalBizFilter   = $this->resolveUserFilter($renewalUserParam,   $userId);
+        $accidentBizFilter  = $this->resolveUserFilter($accidentUserParam,  $userId);
+        $salesCaseBizFilter = $this->resolveUserFilter($salesCaseUserParam, $userId);
+        $staffFilter        = $this->resolveUserFilter($salesUserParam,     $userId);
 
         // 年度計算（4月始まり）
         $today      = new DateTimeImmutable();
@@ -64,7 +60,14 @@ final class DashboardController
             $commonPdo = $this->commonConnectionFactory->create();
             $repo = new DashboardRepository($tenantPdo, $commonPdo, $tenantCode);
 
-            // 要確認エリア: 常に全体（スコープ非連動）
+            // テナント所属ユーザー一覧（ドロップダウン用）
+            try {
+                $data['tenant_users'] = $repo->fetchTenantUsers();
+            } catch (Throwable) {
+                $data['tenant_users'] = [];
+            }
+
+            // 要確認エリア: 常に全体（ドロップダウン非連動）
             try {
                 $data['renewal'] = $repo->getRenewalAlertCounts(null);
             } catch (Throwable) {
@@ -76,7 +79,7 @@ final class DashboardController
                 $data['accident'] = ['error' => true];
             }
 
-            // 業務入口カード: スコープトグル連動
+            // 業務入口カード: 担当者選択ドロップダウン連動
             try {
                 $data['renewal_biz'] = $repo->getRenewalAlertCounts($renewalBizFilter);
             } catch (Throwable) {
@@ -109,15 +112,8 @@ final class DashboardController
                 $data['activity'] = ['error' => true];
             }
 
-            if ($role === 'admin') {
-                try {
-                    $data['daily_report_status'] = $repo->getDailyReportStatus();
-                } catch (Throwable) {
-                    $data['daily_report_status'] = ['error' => true];
-                }
-            }
         } catch (Throwable) {
-            // DB接続自体が失敗した場合は全セクションをエラーにする
+            $data['tenant_users']    = [];
             $data['renewal']         = ['error' => true];
             $data['accident']        = ['error' => true];
             $data['renewal_biz']     = ['error' => true];
@@ -127,19 +123,16 @@ final class DashboardController
             $data['perf_prev']    = [];
             $data['targets']      = ['error' => true];
             $data['activity']     = ['error' => true];
-            if ($role === 'admin') {
-                $data['daily_report_status'] = ['error' => true];
-            }
         }
 
         $dayNames = ['日', '月', '火', '水', '木', '金', '土'];
         $data['fiscal_year']         = $fiscalYear;
         $data['available_years']     = range($currentFiscalYear, $currentFiscalYear - 2, -1);
         $data['current_month']       = $month;
-        $data['scope']               = $scope;
-        $data['renewal_scope']       = $renewalBizScope;
-        $data['accident_scope']      = $accidentBizScope;
-        $data['sales_case_scope']    = $salesCaseBizScope;
+        $data['renewal_user']        = $renewalUserParam;
+        $data['accident_user']       = $accidentUserParam;
+        $data['sales_case_user']     = $salesCaseUserParam;
+        $data['sales_user']          = $salesUserParam;
         $data['role']                = $role;
         $data['today']               = $today->format('Y年n月j日（') . $dayNames[(int) $today->format('w')] . '）';
 
@@ -159,8 +152,30 @@ final class DashboardController
             $this->config->routeUrl('accident/list'),
             $this->config->routeUrl('tenant/settings'),
             $this->config->routeUrl('activity/list'),
+            $this->config->routeUrl('activity/daily'),
             $this->config->routeUrl('dashboard'),
+            $this->config->appPublicUrl,
             $layoutOptions
         ));
+    }
+
+    // ─── ヘルパー ────────────────────────────────────────────────────────
+
+    /**
+     * user パラメータを ?int に変換する（テナント検証なし・初期表示用）。
+     * 'self' / '' → ログインユーザー ID
+     * 'all'       → null（全体）
+     * 数値文字列   → その user_id（1以上のみ許可。不正値は self 扱い）
+     */
+    private function resolveUserFilter(string $param, int $loginUserId): ?int
+    {
+        if ($param === 'all') {
+            return null;
+        }
+        if ($param === '' || $param === 'self') {
+            return $loginUserId;
+        }
+        $num = filter_var($param, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        return $num !== false ? (int) $num : $loginUserId;
     }
 }

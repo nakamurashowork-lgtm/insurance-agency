@@ -23,7 +23,8 @@ final class RenewalCaseDetailView
         array $audits,
         string $updateUrl,
         string $commentUrl,
-        string $listUrl,
+        string $backUrl,
+        string $backLabel,
         string $detailUrl,
         array $listStateParams,
         string $customerDetailBaseUrl,
@@ -54,18 +55,11 @@ final class RenewalCaseDetailView
             $statusNameMap[(string) ($sRow['code'] ?? '')] = (string) ($sRow['display_name'] ?? '');
         }
         $statusHtml = '';
-        if ($renewalStatuses !== []) {
-            foreach ($renewalStatuses as $sRow) {
-                $code = (string) ($sRow['code'] ?? '');
-                $label = (string) ($sRow['display_name'] ?? $code);
-                $selected = $code === $currentStatus ? ' selected' : '';
-                $statusHtml .= '<option value="' . Layout::escape($code) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
-            }
-        } else {
-            foreach (['not_started', 'sj_requested', 'doc_prepared', 'waiting_return', 'quote_sent', 'waiting_payment', 'completed'] as $status) {
-                $selected = $status === $currentStatus ? ' selected' : '';
-                $statusHtml .= '<option value="' . Layout::escape($status) . '"' . $selected . '>' . Layout::escape(self::statusLabel($status)) . '</option>';
-            }
+        foreach ($renewalStatuses as $sRow) {
+            $code = (string) ($sRow['code'] ?? '');
+            $label = (string) ($sRow['display_name'] ?? $code);
+            $selected = $code === $currentStatus ? ' selected' : '';
+            $statusHtml .= '<option value="' . Layout::escape($code) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
         }
 
         $renewalMethodOptions = ['', '対面', '郵送', '電話募集'];
@@ -100,14 +94,6 @@ final class RenewalCaseDetailView
 
         if (!$foundInMaster && $currentProcedureMethod !== '') {
             $pmCurrentOption = '<option value="' . Layout::escape($currentProcedureMethod) . '" selected>' . Layout::escape($currentProcedureMethod) . '（不明）</option>';
-        }
-
-        // Fallback: if no master data at all, use hardcoded list
-        if ($procedureMethods === [] && $pmActiveOptions === '') {
-            foreach (['対面', '対面ナビ', '電話ナビ', '電話募集', '署名・捺印', 'ケータイOR', 'マイページ'] as $method) {
-                $selected = $method === $currentProcedureMethod ? ' selected' : '';
-                $pmActiveOptions .= '<option value="' . Layout::escape($method) . '"' . $selected . '>' . Layout::escape($method) . '</option>';
-            }
         }
 
         $procedureMethodHtml = '<option value=""' . ($currentProcedureMethod === '' ? ' selected' : '') . '>未設定</option>'
@@ -254,7 +240,7 @@ final class RenewalCaseDetailView
             . '<div class="meta-row">' . $statusBadge . '<span class="tag">満期日: ' . Layout::escape($maturityDate) . '</span><span class="tag">' . $nextActionHtml . '</span></div>'
             . '</div>'
             . '<div class="actions">'
-            . '<a class="btn btn-secondary" href="' . Layout::escape($listUrl) . '">一覧へ戻る</a>'
+            . '<a class="btn btn-secondary" href="' . Layout::escape($backUrl) . '">' . Layout::escape($backLabel) . '</a>'
             . '<button class="btn btn-primary" type="submit" form="renewal-update-form">保存</button>'
             . '</div>'
             . '</div>'
@@ -271,7 +257,6 @@ final class RenewalCaseDetailView
             . '<div class="kv"><span class="kv-key">早期更改締切</span><span class="kv-val">' . $earlyDeadlineHtml . '</span></div>'
             . '<div class="kv"><span class="kv-key">始期日</span><span class="kv-val">' . Layout::escape((string) ($detail['policy_start_date'] ?? '')) . '</span></div>'
             . '<div class="kv"><span class="kv-key">保険料</span><span class="kv-val">' . Layout::escape($premiumText) . '</span></div>'
-            . '<div class="kv"><span class="kv-key">保険会社</span><span class="kv-val">' . Layout::escape((string) ($detail['insurer_name'] ?? '')) . '</span></div>'
             . '<div class="kv"><span class="kv-key">営業担当</span><span class="kv-val">' . ($assignedUserName !== '' ? Layout::escape($assignedUserName) : ($assignedUserId !== '' ? Layout::escape($assignedUserId) : '<span class="muted">未設定</span>')) . '</span></div>'
             . '</div>'
             . '<div class="card">'
@@ -341,20 +326,6 @@ final class RenewalCaseDetailView
         return Layout::render('満期詳細', $content, $layoutOptions);
     }
 
-    private static function statusLabel(string $status): string
-    {
-        return match ($status) {
-            'not_started'    => '未対応',
-            'sj_requested'   => 'SJ依頼中',
-            'doc_prepared'   => '書類作成済',
-            'waiting_return' => '返送待ち',
-            'quote_sent'     => '見積送付済',
-            'waiting_payment' => '入金待ち',
-            'completed'      => '完了',
-            default => '未設定',
-        };
-    }
-
     private static function resultLabel(string $result): string
     {
         return match ($result) {
@@ -390,7 +361,7 @@ final class RenewalCaseDetailView
             default => 'badge-danger',
         };
 
-        $label = $statusNameMap[$status] ?? self::statusLabel($status);
+        $label = $statusNameMap[$status] ?? $status;
 
         return '<span class="badge ' . $class . '">' . Layout::escape($label) . '</span>';
     }
@@ -510,25 +481,8 @@ final class RenewalCaseDetailView
         }
 
         return match ($fieldKey) {
-            'case_status' => $statusNameMap[$value] ?? match ($value) {
-                'not_started'    => '未対応',
-                'sj_requested'   => 'SJ依頼中',
-                'doc_prepared'   => '書類作成済',
-                'waiting_return' => '返送待ち',
-                'quote_sent'     => '見積送付済',
-                'waiting_payment' => '入金待ち',
-                'completed'      => '完了',
-                default => $value,
-            },
-            'renewal_method' => match ($value) {
-                '対面', '郵送', '電話募集' => $value,
-                default => $value,
-            },
-            'procedure_method' => match ($value) {
-                '対面', '対面ナビ', '電話ナビ', '電話募集', '署名・捺印', 'ケータイOR', 'マイページ' => $value,
-                default => $value,
-            },
-            default => $value,
+            'case_status' => $statusNameMap[$value] ?? $value,
+            default       => $value,
         };
     }
 

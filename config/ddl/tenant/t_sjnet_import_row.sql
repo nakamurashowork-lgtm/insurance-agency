@@ -27,9 +27,7 @@ CREATE TABLE IF NOT EXISTS t_sjnet_import_row (
   created_at              DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '作成日時',
 
   PRIMARY KEY (id),
-
   UNIQUE KEY uq_t_sjnet_import_row_01 (sjnet_import_batch_id, row_no),
-
   KEY idx_t_sjnet_import_row_01 (policy_no),
   KEY idx_t_sjnet_import_row_02 (maturity_date),
   KEY idx_t_sjnet_import_row_03 (row_status),
@@ -37,15 +35,7 @@ CREATE TABLE IF NOT EXISTS t_sjnet_import_row (
   KEY idx_t_sjnet_import_row_05 (matched_renewal_case_id),
   KEY idx_t_sjnet_import_row_06 (sjnet_agency_code),
   KEY idx_t_sjnet_import_row_07 (resolved_staff_id),
-  KEY idx_t_sjnet_import_row_08 (staff_mapping_status),
-
-  CONSTRAINT fk_t_sjnet_import_row_01
-    FOREIGN KEY (sjnet_import_batch_id) REFERENCES t_sjnet_import_batch(id),
-  CONSTRAINT fk_t_sjnet_import_row_02
-    FOREIGN KEY (matched_contract_id) REFERENCES t_contract(id),
-  CONSTRAINT fk_t_sjnet_import_row_03
-    FOREIGN KEY (matched_renewal_case_id) REFERENCES t_renewal_case(id)
-
+  KEY idx_t_sjnet_import_row_08 (staff_mapping_status)
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci

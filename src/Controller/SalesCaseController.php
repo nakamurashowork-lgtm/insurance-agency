@@ -349,6 +349,7 @@ final class SalesCaseController
     {
         return [
             'customer_id'             => trim((string) ($_POST['customer_id'] ?? '')),
+            'prospect_name'           => trim((string) ($_POST['prospect_name'] ?? '')),
             'contract_id'             => trim((string) ($_POST['contract_id'] ?? '')),
             'case_name'               => trim((string) ($_POST['case_name'] ?? '')),
             'case_type'               => 'other',
