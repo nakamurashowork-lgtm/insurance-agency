@@ -87,6 +87,8 @@ final class DailyReportRepository
                     a.subject,
                     a.content_summary,
                     a.next_action_date,
+                    a.staff_id,
+                    a.created_by,
                     mc.customer_name
              FROM t_activity a
              LEFT JOIN m_customer mc

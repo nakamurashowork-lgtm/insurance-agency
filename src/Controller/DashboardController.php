@@ -5,6 +5,7 @@ namespace App\Controller;
 
 use App\AppConfig;
 use App\Domain\Dashboard\DashboardRepository;
+use App\Domain\Tenant\SalesTargetRepository;
 use App\Http\Responses;
 use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
@@ -32,11 +33,13 @@ final class DashboardController
         $role       = is_array($permissions) ? (string) ($permissions['tenant_role'] ?? 'member') : 'member';
         $tenantCode = (string) ($auth['tenant_code'] ?? '');
 
-        // 担当者選択ドロップダウン パラメータ（デフォルト: all = 全体）
-        $renewalUserParam   = (string) ($_GET['renewal_user']    ?? 'all');
-        $accidentUserParam  = (string) ($_GET['accident_user']   ?? 'all');
-        $salesCaseUserParam = (string) ($_GET['sales_case_user'] ?? 'all');
-        $salesUserParam     = (string) ($_GET['sales_user']      ?? 'all');
+        // 担当者選択ドロップダウン パラメータ（デフォルト: self = ログインユーザー）
+        $renewalUserParam   = (string) ($_GET['renewal_user']    ?? 'self');
+        $accidentUserParam  = (string) ($_GET['accident_user']   ?? 'self');
+        $salesCaseUserParam = (string) ($_GET['sales_case_user'] ?? 'self');
+        $salesUserParam     = (string) ($_GET['sales_user']      ?? 'self');
+        $perfTabRaw = (string) ($_GET['perf_tab'] ?? 'all');
+        $perfTabParam = in_array($perfTabRaw, ['all', 'non_life', 'life'], true) ? $perfTabRaw : 'all';
 
         $renewalBizFilter   = $this->resolveUserFilter($renewalUserParam,   $userId);
         $accidentBizFilter  = $this->resolveUserFilter($accidentUserParam,  $userId);
@@ -106,6 +109,21 @@ final class DashboardController
                 $data['targets']      = ['error' => true];
             }
 
+            // 損保/生保 別の月次サマリ + 業務区分別年度目標
+            try {
+                $data['perf_current_by_source'] = $repo->getPerformanceMonthlySummaryBySourceType($fiscalYear,     $staffFilter);
+                $data['perf_prev_by_source']    = $repo->getPerformanceMonthlySummaryBySourceType($fiscalYear - 1, $staffFilter);
+            } catch (Throwable) {
+                $data['perf_current_by_source'] = ['error' => true];
+                $data['perf_prev_by_source']    = ['error' => true];
+            }
+            try {
+                $targetRepo = new SalesTargetRepository($tenantPdo, $commonPdo, $tenantCode);
+                $data['target_totals'] = $targetRepo->findYearlyTargetTotals($fiscalYear, $staffFilter);
+            } catch (Throwable) {
+                $data['target_totals'] = ['non_life' => 0, 'life' => 0, 'total' => 0];
+            }
+
             try {
                 $data['activity'] = $repo->getActivitySummary($userId);
             } catch (Throwable) {
@@ -122,6 +140,9 @@ final class DashboardController
             $data['perf_current'] = ['error' => true];
             $data['perf_prev']    = [];
             $data['targets']      = ['error' => true];
+            $data['perf_current_by_source'] = ['error' => true];
+            $data['perf_prev_by_source']    = ['error' => true];
+            $data['target_totals']          = ['non_life' => 0, 'life' => 0, 'total' => 0];
             $data['activity']     = ['error' => true];
         }
 
@@ -133,6 +154,7 @@ final class DashboardController
         $data['accident_user']       = $accidentUserParam;
         $data['sales_case_user']     = $salesCaseUserParam;
         $data['sales_user']          = $salesUserParam;
+        $data['perf_tab']            = $perfTabParam;
         $data['role']                = $role;
         $data['today']               = $today->format('Y年n月j日（') . $dayNames[(int) $today->format('w')] . '）';
 

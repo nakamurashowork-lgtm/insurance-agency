@@ -75,13 +75,14 @@ final class SalesPerformanceRepository
                     sp.remark,
                     sp.updated_at,
                     mc.customer_name,
+                    COALESCE(mc.customer_name, sp.prospect_name, "") AS display_customer,
                     c.policy_no AS contract_policy_no,
                     c.policy_start_date AS contract_policy_start_date,
                     c.insurance_category AS contract_insurance_category,
                     c.product_type AS contract_product_type,
                     COALESCE(NULLIF(sp.policy_no, ""), c.policy_no) AS policy_no_display
              FROM t_sales_performance sp
-             INNER JOIN m_customer mc
+             LEFT JOIN m_customer mc
                      ON mc.id = sp.customer_id
                     AND mc.is_deleted = 0
              LEFT JOIN t_contract c
@@ -199,7 +200,7 @@ final class SalesPerformanceRepository
         $stmt = $this->pdo->prepare(
             'SELECT COUNT(*)
              FROM t_sales_performance sp
-             INNER JOIN m_customer mc
+             LEFT JOIN m_customer mc
                      ON mc.id = sp.customer_id
                     AND mc.is_deleted = 0
              LEFT JOIN t_contract c
@@ -220,7 +221,7 @@ final class SalesPerformanceRepository
         $column = match ($sort) {
             'performance_type' => 'sp.performance_type',
             'source_type' => 'sp.source_type',
-            'customer_name' => 'mc.customer_name',
+            'customer_name' => 'COALESCE(mc.customer_name, sp.prospect_name, "")',
             'staff_id' => 'sp.staff_id',
             'policy_no' => 'COALESCE(NULLIF(sp.policy_no, ""), c.policy_no)',
             'product_type' => 'sp.product_type',
@@ -261,13 +262,14 @@ final class SalesPerformanceRepository
                   sp.staff_id,
                   sp.remark,
                   mc.customer_name,
+                  COALESCE(mc.customer_name, sp.prospect_name, "") AS display_customer,
                 c.policy_no AS contract_policy_no,
                 c.policy_start_date AS contract_policy_start_date,
                 c.insurance_category AS contract_insurance_category,
                 c.product_type AS contract_product_type,
                 COALESCE(NULLIF(sp.policy_no, ""), c.policy_no) AS policy_no_display
               FROM t_sales_performance sp
-              INNER JOIN m_customer mc
+              LEFT JOIN m_customer mc
                 ON mc.id = sp.customer_id
                   AND mc.is_deleted = 0
               LEFT JOIN t_contract c
@@ -430,7 +432,7 @@ final class SalesPerformanceRepository
                     ON cust.id = c.customer_id
                    AND cust.is_deleted = 0
              WHERE rc.is_deleted = 0
-               AND rc.case_status NOT IN (\'renewed\', \'lost\', \'closed\')
+               AND rc.case_status NOT IN (SELECT name FROM m_case_status WHERE case_type = \'renewal\' AND is_completed = 1)
              ORDER BY rc.maturity_date DESC, rc.id DESC
              LIMIT :limit'
         );
@@ -449,6 +451,7 @@ final class SalesPerformanceRepository
         $stmt = $this->pdo->prepare(
             'INSERT INTO t_sales_performance (
                 customer_id,
+                prospect_name,
                 contract_id,
                 renewal_case_id,
                 performance_date,
@@ -469,6 +472,7 @@ final class SalesPerformanceRepository
                 updated_by
              ) VALUES (
                 :customer_id,
+                :prospect_name,
                 :contract_id,
                 :renewal_case_id,
                 :performance_date,
@@ -490,27 +494,28 @@ final class SalesPerformanceRepository
              )'
         );
 
-        $stmt->execute([
-            'customer_id' => $input['customer_id'] ?? 0,
-            'contract_id' => $input['contract_id'] ?? null,
-            'renewal_case_id' => $input['renewal_case_id'] ?? null,
-            'performance_date' => $input['performance_date'] ?? null,
-            'performance_type' => $input['performance_type'] ?? null,
-            'source_type' => $input['source_type'] ?? null,
-            'policy_no' => $input['policy_no'] ?? null,
-            'policy_start_date' => $input['policy_start_date'] ?? null,
-            'application_date' => $input['application_date'] ?? null,
-            'insurance_category' => $input['insurance_category'] ?? null,
-            'product_type' => $input['product_type'] ?? null,
-            'premium_amount' => $input['premium_amount'] ?? 0,
-            'installment_count' => $input['installment_count'] ?? null,
-            'receipt_no' => $input['receipt_no'] ?? null,
-            'settlement_month' => $input['settlement_month'] ?? null,
-            'staff_id' => $input['staff_id'] ?? null,
-            'remark' => $input['remark'] ?? null,
-            'created_by' => $userId,
-            'updated_by' => $userId,
-        ]);
+        $customerId = ($input['customer_id'] ?? 0) > 0 ? $input['customer_id'] : null;
+        $stmt->bindValue(':customer_id', $customerId, $customerId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(':prospect_name', $customerId !== null ? null : ($input['prospect_name'] ?? null));
+        $stmt->bindValue(':contract_id', $input['contract_id'] ?? null, PDO::PARAM_INT);
+        $stmt->bindValue(':renewal_case_id', $input['renewal_case_id'] ?? null, PDO::PARAM_INT);
+        $stmt->bindValue(':performance_date', $input['performance_date'] ?? null);
+        $stmt->bindValue(':performance_type', $input['performance_type'] ?? null);
+        $stmt->bindValue(':source_type', $input['source_type'] ?? null);
+        $stmt->bindValue(':policy_no', $input['policy_no'] ?? null);
+        $stmt->bindValue(':policy_start_date', $input['policy_start_date'] ?? null);
+        $stmt->bindValue(':application_date', $input['application_date'] ?? null);
+        $stmt->bindValue(':insurance_category', $input['insurance_category'] ?? null);
+        $stmt->bindValue(':product_type', $input['product_type'] ?? null);
+        $stmt->bindValue(':premium_amount', $input['premium_amount'] ?? 0);
+        $stmt->bindValue(':installment_count', $input['installment_count'] ?? null);
+        $stmt->bindValue(':receipt_no', $input['receipt_no'] ?? null);
+        $stmt->bindValue(':settlement_month', $input['settlement_month'] ?? null);
+        $stmt->bindValue(':staff_id', $input['staff_id'] ?? null, PDO::PARAM_INT);
+        $stmt->bindValue(':remark', $input['remark'] ?? null);
+        $stmt->bindValue(':created_by', $userId, PDO::PARAM_INT);
+        $stmt->bindValue(':updated_by', $userId, PDO::PARAM_INT);
+        $stmt->execute();
     }
 
     /**
@@ -825,224 +830,5 @@ final class SalesPerformanceRepository
         ]);
 
         return $stmt->rowCount();
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
-    public function findContractByPolicyNo(string $policyNo): ?array
-    {
-        $stmt = $this->pdo->prepare(
-            'SELECT id, customer_id, policy_no
-             FROM t_contract
-             WHERE policy_no = :policy_no
-               AND is_deleted = 0
-             LIMIT 1'
-        );
-        $stmt->execute(['policy_no' => $policyNo]);
-        $row = $stmt->fetch();
-
-        return is_array($row) ? $row : null;
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
-    public function findRenewalCaseByContractAndMaturityDate(int $contractId, ?string $maturityDate): ?array
-    {
-        if ($maturityDate === null || $maturityDate === '') {
-            return null;
-        }
-
-        $stmt = $this->pdo->prepare(
-            'SELECT id, contract_id, maturity_date
-             FROM t_renewal_case
-             WHERE contract_id = :contract_id
-               AND maturity_date = :maturity_date
-               AND is_deleted = 0
-             ORDER BY id DESC
-             LIMIT 1'
-        );
-        $stmt->execute([
-            'contract_id' => $contractId,
-            'maturity_date' => $maturityDate,
-        ]);
-        $row = $stmt->fetch();
-
-        return is_array($row) ? $row : null;
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
-    public function findActiveByReceiptNo(string $receiptNo): ?array
-    {
-        $stmt = $this->pdo->prepare(
-            'SELECT id,
-                    customer_id,
-                    contract_id,
-                    renewal_case_id,
-                    performance_date,
-                    performance_type,
-                    insurance_category,
-                    product_type,
-                    premium_amount,
-                    receipt_no,
-                    settlement_month,
-                    staff_id,
-                    remark
-             FROM t_sales_performance
-             WHERE receipt_no = :receipt_no
-               AND is_deleted = 0
-             ORDER BY id DESC
-             LIMIT 1'
-        );
-        $stmt->execute(['receipt_no' => $receiptNo]);
-        $row = $stmt->fetch();
-
-        return is_array($row) ? $row : null;
-    }
-
-    public function createImportBatch(string $fileName, string $sourceEncoding, int $executedBy): int
-    {
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO t_sjnet_import_batch (
-                file_name,
-                source_encoding,
-                import_status,
-                executed_by
-             ) VALUES (
-                :file_name,
-                :source_encoding,
-                :import_status,
-                :executed_by
-             )'
-        );
-        $stmt->execute([
-            'file_name' => $fileName,
-            'source_encoding' => $sourceEncoding,
-            'import_status' => 'running',
-            'executed_by' => $executedBy,
-        ]);
-
-        return (int) $this->pdo->lastInsertId();
-    }
-
-    /**
-     * @param array<string, mixed> $summary
-     */
-    public function finalizeImportBatch(int $batchId, array $summary, string $status): void
-    {
-        $stmt = $this->pdo->prepare(
-            'UPDATE t_sjnet_import_batch
-             SET import_status = :import_status,
-                 total_row_count = :total_row_count,
-                 valid_row_count = :valid_row_count,
-                 duplicate_skip_count = :duplicate_skip_count,
-                 insert_count = :insert_count,
-                 update_count = :update_count,
-                 error_count = :error_count,
-                 finished_at = NOW()
-             WHERE id = :id'
-        );
-        $stmt->execute([
-            'id' => $batchId,
-            'import_status' => $status,
-            'total_row_count' => (int) ($summary['total_row_count'] ?? 0),
-            'valid_row_count' => (int) ($summary['valid_row_count'] ?? 0),
-            'duplicate_skip_count' => (int) ($summary['duplicate_skip_count'] ?? 0),
-            'insert_count' => (int) ($summary['insert_count'] ?? 0),
-            'update_count' => (int) ($summary['update_count'] ?? 0),
-            'error_count' => (int) ($summary['error_count'] ?? 0),
-        ]);
-    }
-
-    /**
-     * @param array<string, mixed> $row
-     */
-    public function createImportRow(int $batchId, array $row): void
-    {
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO t_sjnet_import_row (
-                sjnet_import_batch_id,
-                row_no,
-                raw_payload_json,
-                policy_no,
-                customer_name,
-                maturity_date,
-                matched_contract_id,
-                matched_renewal_case_id,
-                row_status,
-                error_message
-             ) VALUES (
-                :batch_id,
-                :row_no,
-                :raw_payload_json,
-                :policy_no,
-                :customer_name,
-                :maturity_date,
-                :matched_contract_id,
-                :matched_renewal_case_id,
-                :row_status,
-                :error_message
-             )'
-        );
-        $stmt->execute([
-            'batch_id' => $batchId,
-            'row_no' => (int) ($row['row_no'] ?? 0),
-            'raw_payload_json' => (string) ($row['raw_payload_json'] ?? '{}'),
-            'policy_no' => $row['policy_no'] ?? null,
-            'customer_name' => $row['customer_name'] ?? null,
-            'maturity_date' => $row['maturity_date'] ?? null,
-            'matched_contract_id' => $row['matched_contract_id'] ?? null,
-            'matched_renewal_case_id' => $row['matched_renewal_case_id'] ?? null,
-            'row_status' => (string) ($row['row_status'] ?? 'error'),
-            'error_message' => $row['error_message'] ?? null,
-        ]);
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
-    public function findImportBatchById(int $batchId): ?array
-    {
-        $stmt = $this->pdo->prepare(
-            'SELECT *
-             FROM t_sjnet_import_batch
-             WHERE id = :id
-             LIMIT 1'
-        );
-        $stmt->execute(['id' => $batchId]);
-        $row = $stmt->fetch();
-
-        return is_array($row) ? $row : null;
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    public function findImportRowsByBatchId(int $batchId, int $limit = 200): array
-    {
-        $stmt = $this->pdo->prepare(
-            'SELECT id,
-                    row_no,
-                    policy_no,
-                    customer_name,
-                    maturity_date,
-                    matched_contract_id,
-                    matched_renewal_case_id,
-                    row_status,
-                    error_message
-             FROM t_sjnet_import_row
-             WHERE sjnet_import_batch_id = :batch_id
-             ORDER BY row_no ASC
-             LIMIT :limit'
-        );
-        $stmt->bindValue(':batch_id', $batchId, PDO::PARAM_INT);
-        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-        $stmt->execute();
-        $rows = $stmt->fetchAll();
-
-        return is_array($rows) ? $rows : [];
     }
 }

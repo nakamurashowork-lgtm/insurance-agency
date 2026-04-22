@@ -46,10 +46,15 @@ final class ActivityDailyView
         array $layoutOptions,
         int $loginUserId = 0,
         string $deleteUrl = '',
-        string $deleteCsrf = ''
+        string $deleteCsrf = '',
+        ?int $loginStaffMstId = null,
+        bool $isAdmin = false,
+        ?array $storeDraft = null,
+        bool $openStoreModal = false
     ): string {
         $noticeHtml = '';
-        if (is_string($flashError) && $flashError !== '') {
+        // エラーがダイアログ内に表示される場合はページ上部には出さない
+        if (is_string($flashError) && $flashError !== '' && !$openStoreModal) {
             $noticeHtml .= '<div class="error">' . Layout::escape($flashError) . '</div>';
         }
         if (is_string($flashSuccess) && $flashSuccess !== '') {
@@ -98,8 +103,19 @@ final class ActivityDailyView
                     ? '<a href="' . $custUrl . '" class="text-link">' . Layout::escape($custName) . '</a>'
                     : Layout::escape($custName));
 
+            // 権限判定: 管理者 or 本人 (staff_id 一致 or staff_id NULL かつ created_by 一致)
+            $rowStaffId   = $row['staff_id'] ?? null;
+            $rowCreatedBy = (int) ($row['created_by'] ?? 0);
+            if ($isAdmin) {
+                $canDelete = true;
+            } elseif ($rowStaffId !== null && $rowStaffId !== '') {
+                $canDelete = (int) $rowStaffId === ($loginStaffMstId ?? $loginUserId);
+            } else {
+                $canDelete = $rowCreatedBy > 0 && $rowCreatedBy === $loginUserId;
+            }
+
             $deleteFormId = 'form-del-daily-' . $actId;
-            $deleteFormHtml = ($deleteUrl !== '' && $actId > 0)
+            $deleteFormHtml = ($deleteUrl !== '' && $actId > 0 && $canDelete)
                 ? '<form id="' . $deleteFormId . '" method="post" action="' . Layout::escape($deleteUrl) . '" style="display:inline;">'
                   . '<input type="hidden" name="route" value="activity/delete">'
                   . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($deleteCsrf) . '">'
@@ -165,7 +181,7 @@ final class ActivityDailyView
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($commentCsrf) . '">'
             . '<input type="hidden" name="report_date" value="' . Layout::escape($date) . '">'
             . '<input type="hidden" name="staff_id" value="' . $loginUserId . '">'
-            . '<textarea name="comment" rows="5" class="daily-comment-textarea" style="width:100%;padding:10px 12px;border:1px solid #d9e2ec;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;">'
+            . '<textarea name="comment" rows="5" class="daily-comment-textarea" style="width:100%;padding:10px 12px;border:1px solid #d9e2ec;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical;" maxlength="500">'
             . Layout::escape($existingComment)
             . '</textarea>'
             . '<div class="actions" style="margin-top:10px;">'
@@ -175,21 +191,30 @@ final class ActivityDailyView
 
         $commentSectionHtml =
             '<div class="card">'
-            . '<div class="detail-section-title">日報コメント</div>'
+            . '<div class="detail-section-title">日報コメント<span style="font-size:11px;font-weight:400;color:var(--text-secondary);margin-left:8px;">500文字以内</span></div>'
             . $commentBody
             . '</div>';
 
         // 活動登録ダイアログ（最小7項目）
-        $prefill = ['activity_date' => $date, 'staff_id' => (string) $staffUserId];
+        $prefill = array_merge(
+            ['activity_date' => $date, 'staff_id' => (string) $staffUserId],
+            $storeDraft ?? []
+        );
         $formBodyHtml = ActivityDetailView::buildDialogForm(
             $prefill,
             $customers,
             $allowedActivityTypes,
-            $purposeTypes
+            $purposeTypes,
+            $salesCases
         );
 
+        $dialogErrorHtml = '';
+        if ($openStoreModal && is_string($flashError) && $flashError !== '') {
+            $dialogErrorHtml = '<div class="error" style="margin:0 0 12px;">' . Layout::escape($flashError) . '</div>';
+        }
+
         $registerDialog =
-            '<dialog id="dlg-activity-new" class="modal-dialog" style="max-width:600px;width:95%;">'
+            '<dialog id="dlg-activity-new" class="modal-dialog">'
             . '<div class="modal-head">'
             . '<h2>活動を登録</h2>'
             . '<button type="button" class="modal-close" onclick="document.getElementById(\'dlg-activity-new\').close()">×</button>'
@@ -198,13 +223,17 @@ final class ActivityDailyView
             . '<input type="hidden" name="route" value="activity/store">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($storeCsrf) . '">'
             . '<input type="hidden" name="return_to" value="' . Layout::escape($dailyUrl) . '">'
+            . $dialogErrorHtml
             . $formBodyHtml
             . '<div class="dialog-actions" style="margin-top:12px;">'
             . '<button type="submit" class="btn btn-primary">登録</button>'
             . '<button type="button" class="btn btn-ghost" onclick="document.getElementById(\'dlg-activity-new\').close()">キャンセル</button>'
             . '</div>'
             . '</form>'
-            . '</dialog>';
+            . '</dialog>'
+            . ($openStoreModal
+                ? '<script>(function(){var d=document.getElementById("dlg-activity-new");if(d&&typeof d.showModal==="function"&&!d.open){d.showModal();}})();</script>'
+                : '');
 
         $listUrlEscaped = Layout::escape($listUrl);
 
@@ -255,7 +284,7 @@ final class ActivityDailyView
             $css
             . '<div class="daily-page-header">'
             . '<h1 class="title" style="margin:0;">営業日報</h1>'
-            . '<a href="' . $listUrlEscaped . '" class="btn btn-ghost btn-small">過去の活動を検索</a>'
+            . '<a href="' . $listUrlEscaped . '" class="btn btn-ghost btn-small">活動一覧</a>'
             . '</div>'
             . $noticeHtml
 
@@ -264,7 +293,10 @@ final class ActivityDailyView
             . '<div class="daily-date-nav">'
             . '<a href="' . $prevUrl . '" class="btn btn-ghost btn-small">← 前日</a>'
             . '<span class="daily-date-label">' . Layout::escape($date) . '</span>'
-            . '<a href="' . $nextUrl . '" class="btn btn-ghost btn-small">翌日 →</a>'
+            . ($nextDate <= date('Y-m-d')
+                ? '<a href="' . $nextUrl . '" class="btn btn-ghost btn-small">翌日 →</a>'
+                : '<span class="btn btn-ghost btn-small" style="opacity:0.4;pointer-events:none;cursor:default;" aria-disabled="true">翌日 →</span>'
+            )
             . '<span class="daily-staff-label">担当：<strong>' . Layout::escape($staffDisplayName) . '</strong></span>'
             . '</div>'
             . '</div>'
@@ -276,11 +308,20 @@ final class ActivityDailyView
             . '<button type="button" class="btn btn-primary btn-small" onclick="document.getElementById(\'dlg-activity-new\').showModal()">＋ 活動を登録</button>'
             . '</div>'
             // PC テーブル
-            . '<div style="overflow-x:auto;">'
-            . '<table class="list-table activity-table">'
+            . '<div class="table-wrap">'
+            . '<table class="list-table activity-table list-table-daily">'
+            . '<colgroup>'
+            . '<col class="list-col-time">'
+            . '<col class="list-col-type">'
+            . '<col class="list-col-customer">'
+            . '<col>'
+            . '<col class="list-col-next">'
+            . '<col class="list-col-status">'
+            . '<col class="list-col-action">'
+            . '</colgroup>'
             . '<thead><tr>'
-            . '<th style="width:110px;">時刻</th><th style="width:80px;">種別</th><th style="width:18%;">顧客</th>'
-            . '<th>件名 / 内容要約</th><th style="width:110px;">次回予定日</th><th style="width:60px;"></th><th style="width:44px;"></th>'
+            . '<th>時刻</th><th>種別</th><th>顧客</th>'
+            . '<th>活動概要 / 活動詳細</th><th>次回予定日</th><th></th><th></th>'
             . '</tr></thead>'
             . '<tbody>' . $activitiesHtml . '</tbody>'
             . '</table>'
@@ -288,9 +329,6 @@ final class ActivityDailyView
             // スマホカード
             . '<div class="activity-cards" style="padding:10px 12px 4px;">'
             . $activityCardsHtml
-            . '</div>'
-            . '<div style="padding:8px 16px 12px;font-size:12px;color:var(--text-secondary);">'
-            . '詳細編集は各行の詳細ボタンから行います'
             . '</div>'
             . '</div>'
 

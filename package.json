@@ -1,0 +1,24 @@
+{
+  "name": "insurance-agency",
+  "version": "1.0.0",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nakamurashowork-lgtm/insurance-agency.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/nakamurashowork-lgtm/insurance-agency/issues"
+  },
+  "homepage": "https://github.com/nakamurashowork-lgtm/insurance-agency#readme",
+  "description": ""
+}

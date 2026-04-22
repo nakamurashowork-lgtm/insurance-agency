@@ -23,19 +23,17 @@ final class ActivityDetailView
         array $staffUsers,
         array $salesCases,
         string $backUrl,
-        string $backLabel,
         string $detailUrl,
         string $updateUrl,
-        string $deleteUrl,
         string $customerDetailBaseUrl,
         string $updateCsrf,
-        string $deleteCsrf,
         ?string $flashError,
         ?string $flashSuccess,
         ?string $errorMessage,
         array $allowedActivityTypes,
         array $layoutOptions,
-        array $purposeTypes = []
+        array $purposeTypes = [],
+        bool $canEdit = true
     ): string {
         $noticeHtml = '';
         if (is_string($flashError) && $flashError !== '') {
@@ -52,7 +50,7 @@ final class ActivityDetailView
             $content =
                 $noticeHtml
                 . '<div class="card"><p>活動が見つかりません。</p>'
-                . '<a href="' . Layout::escape($backUrl) . '" class="btn btn-ghost">' . Layout::escape($backLabel) . '</a></div>';
+                . '<button type="button" class="btn btn-ghost" onclick="history.back()">戻る</button></div>';
             return Layout::render('活動詳細', $content, $layoutOptions);
         }
 
@@ -70,25 +68,25 @@ final class ActivityDetailView
                 ? '<a href="' . $custUrl . '" class="text-link">' . Layout::escape($custName) . '</a>'
                 : Layout::escape($custName));
 
-        $formHtml = self::buildForm($record, $customers, $staffUsers, $allowedActivityTypes, $id, $purposeTypes, $salesCases);
+        $editButtons = $canEdit
+            ? '<button type="submit" class="btn" form="activity-update-form">保存</button>'
+            : '';
 
-        $deleteDialog =
-            '<dialog id="dlg-delete" class="modal-dialog">'
-            . '<div class="modal-head"><h2>活動の削除</h2>'
-            . '<button type="button" class="modal-close" onclick="document.getElementById(\'dlg-delete\').close()">×</button>'
-            . '</div>'
-            . '<p>この活動を削除しますか？この操作は取り消せません。</p>'
-            . '<form method="post" action="' . Layout::escape($deleteUrl) . '">'
-            . '<input type="hidden" name="route" value="activity/delete">'
-            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($deleteCsrf) . '">'
-            . '<input type="hidden" name="id" value="' . $id . '">'
-            . '<input type="hidden" name="return_to" value="' . Layout::escape($backUrl) . '">'
-            . '<div class="dialog-actions">'
-            . '<button type="submit" class="btn btn-danger">削除する</button>'
-            . '<button type="button" class="btn btn-ghost" onclick="document.getElementById(\'dlg-delete\').close()">キャンセル</button>'
-            . '</div>'
-            . '</form>'
-            . '</dialog>';
+        if ($canEdit) {
+            $formSection =
+                '<form id="activity-update-form" method="post" action="' . Layout::escape($updateUrl) . '">'
+                . '<input type="hidden" name="route" value="activity/update">'
+                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($updateCsrf) . '">'
+                . '<input type="hidden" name="id" value="' . $id . '">'
+                . '<input type="hidden" name="return_to" value="' . Layout::escape($detailUrl) . '">'
+                . self::buildForm($record, $customers, $staffUsers, $allowedActivityTypes, $id, $purposeTypes, $salesCases)
+                . '<div class="actions" style="margin-top:4px;">'
+                . '<button type="submit" class="btn btn-primary">保存</button>'
+                . '</div>'
+                . '</form>';
+        } else {
+            $formSection = self::buildReadOnlyView($record, $customers, $allowedActivityTypes, $purposeTypes);
+        }
 
         $content =
             '<div class="card">'
@@ -102,24 +100,13 @@ final class ActivityDetailView
             . '</div>'
             . '</div>'
             . '<div class="actions">'
-            . '<a href="' . Layout::escape($backUrl) . '" class="btn btn-secondary">' . Layout::escape($backLabel) . '</a>'
-            . '<button type="button" class="btn btn-danger btn-small" onclick="document.getElementById(\'dlg-delete\').showModal()">削除</button>'
-            . '<button type="submit" class="btn" form="activity-update-form">保存</button>'
+            . '<button type="button" class="btn btn-secondary" onclick="history.back()">戻る</button>'
+            . $editButtons
             . '</div>'
             . '</div>'
             . $noticeHtml
             . '</div>'
-            . '<form id="activity-update-form" method="post" action="' . Layout::escape($updateUrl) . '">'
-            . '<input type="hidden" name="route" value="activity/update">'
-            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($updateCsrf) . '">'
-            . '<input type="hidden" name="id" value="' . $id . '">'
-            . '<input type="hidden" name="return_to" value="' . Layout::escape($detailUrl) . '">'
-            . $formHtml
-            . '<div class="actions" style="margin-top:4px;">'
-            . '<button type="submit" class="btn btn-primary">保存</button>'
-            . '</div>'
-            . '</form>'
-            . $deleteDialog;
+            . $formSection;
 
         return Layout::render('活動詳細', $content, $layoutOptions);
     }
@@ -135,12 +122,14 @@ final class ActivityDetailView
      * @param array<int, array<string, mixed>> $customers
      * @param array<string, string> $allowedActivityTypes
      * @param array<int, array<string, mixed>> $purposeTypes  is_active=1 のみ
+     * @param array<int, array<string, mixed>> $salesCases    fetchForDropdown 結果
      */
     public static function buildDialogForm(
         array $data,
         array $customers,
         array $allowedActivityTypes,
-        array $purposeTypes = []
+        array $purposeTypes = [],
+        array $salesCases = []
     ): string {
         $customerIdVal   = (string) ($data['customer_id'] ?? '');
         $activityDateVal = (string) ($data['activity_date'] ?? '');
@@ -153,6 +142,7 @@ final class ActivityDetailView
         $subjectVal      = (string) ($data['subject'] ?? '');
         $summaryVal      = (string) ($data['content_summary'] ?? '');
         $nextDateVal     = (string) ($data['next_action_date'] ?? '');
+        $salesCaseIdVal  = (string) ($data['sales_case_id'] ?? '');
 
         // 顧客データを JSON に変換（検索可能ドロップダウン用）
         $customerList = [];
@@ -161,11 +151,30 @@ final class ActivityDetailView
         }
         $customerJson = json_encode($customerList, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT);
 
+        // 見込案件データを JSON に変換（検索可能コンボボックス用）
+        $salesCaseList = [];
+        foreach ($salesCases as $sc) {
+            $scId     = (int) ($sc['id'] ?? 0);
+            $scName   = (string) ($sc['case_name'] ?? '');
+            $dispCust = (string) ($sc['display_customer'] ?? '');
+            $salesCaseList[] = ['id' => $scId, 'name' => $scName];
+        }
+        $salesCaseJson = json_encode($salesCaseList, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT);
+
         // プレフィルされた顧客名を検索
         $prefilledName = '';
         foreach ($customers as $cust) {
             if ((string) ($cust['id'] ?? '') === $customerIdVal && $customerIdVal !== '') {
                 $prefilledName = (string) ($cust['customer_name'] ?? '');
+                break;
+            }
+        }
+
+        // プレフィルされた見込案件名を検索
+        $prefilledCaseName = '';
+        foreach ($salesCaseList as $sc) {
+            if ($salesCaseIdVal !== '' && (string) $sc['id'] === $salesCaseIdVal) {
+                $prefilledCaseName = $sc['name'];
                 break;
             }
         }
@@ -178,10 +187,10 @@ final class ActivityDetailView
 
         $purposeOptionsHtml = '<option value="">— 選択してください —</option>';
         foreach ($purposeTypes as $pt) {
-            $ptCode  = (string) ($pt['code'] ?? '');
-            $ptLabel = (string) ($pt['label'] ?? '');
-            $sel     = $purposeTypeVal === $ptCode ? ' selected' : '';
-            $purposeOptionsHtml .= '<option value="' . Layout::escape($ptCode) . '"' . $sel . '>' . Layout::escape($ptLabel) . '</option>';
+            $ptName = (string) ($pt['name'] ?? '');
+            if ($ptName === '') { continue; }
+            $sel    = $purposeTypeVal === $ptName ? ' selected' : '';
+            $purposeOptionsHtml .= '<option value="' . Layout::escape($ptName) . '"' . $sel . '>' . Layout::escape($ptName) . '</option>';
         }
 
         $req = '<strong class="required-mark"> *</strong>';
@@ -190,72 +199,59 @@ final class ActivityDetailView
         $js = <<<'JSCODE'
 <script>
 (function() {
-  // 顧客コンボボックス
-  function filterCustomers(q) {
-    var list = document.getElementById('act-dlg-customer-list');
-    if (!list) return;
-    var q2 = q.trim().toLowerCase();
-    var all = window.actDlgCustomers || [];
-    var matched = q2 === '' ? all : all.filter(function(c) {
-      return c.name.toLowerCase().indexOf(q2) >= 0;
-    });
-    if (matched.length === 0) {
-      list.innerHTML = '<div style="padding:8px 12px;color:#888;font-size:13px;">該当なし</div>';
-    } else {
-      var html = '';
-      var items = matched.slice(0, 50);
-      for (var i = 0; i < items.length; i++) {
-        html += '<div class="act-dlg-item" data-id="' + items[i].id + '" style="padding:8px 12px;cursor:pointer;font-size:13px;">'
-          + items[i].name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-          + '</div>';
-      }
-      list.innerHTML = html;
-      // クリック選択（イベント委譲）
-      list.querySelectorAll('.act-dlg-item').forEach(function(el) {
-        el.addEventListener('mousedown', function(e) {
-          e.preventDefault();
-          document.getElementById('act-dlg-customer-id').value = el.dataset.id;
-          document.getElementById('act-dlg-customer-text').value = el.textContent;
-          list.style.display = 'none';
-        });
-        el.addEventListener('mouseover', function() { el.style.background = '#f0f4f8'; });
-        el.addEventListener('mouseout',  function() { el.style.background = ''; });
+  // 汎用コンボボックス（顧客・見込案件共通）
+  function makeCombo(opts) {
+    // opts: { dataKey, textId, hiddenId, listId, max }
+    function getAll() { return window[opts.dataKey] || []; }
+
+    function renderList(q) {
+      var list = document.getElementById(opts.listId);
+      if (!list) return;
+      var q2 = q.trim().toLowerCase();
+      var all = getAll();
+      var matched = q2 === '' ? all : all.filter(function(c) {
+        return c.name.toLowerCase().indexOf(q2) >= 0;
       });
+      if (matched.length === 0) {
+        list.innerHTML = '<div style="padding:8px 12px;color:#888;font-size:13px;">該当なし</div>';
+      } else {
+        var html = '';
+        var items = matched.slice(0, opts.max || 50);
+        for (var i = 0; i < items.length; i++) {
+          html += '<div class="act-dlg-item" data-id="' + items[i].id + '" style="padding:8px 12px;cursor:pointer;font-size:13px;">'
+            + items[i].name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            + '</div>';
+        }
+        list.innerHTML = html;
+        list.querySelectorAll('.act-dlg-item').forEach(function(el) {
+          el.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            document.getElementById(opts.hiddenId).value = el.dataset.id;
+            document.getElementById(opts.textId).value = el.textContent;
+            list.style.display = 'none';
+          });
+          el.addEventListener('mouseover', function() { el.style.background = '#f0f4f8'; });
+          el.addEventListener('mouseout',  function() { el.style.background = ''; });
+        });
+      }
+      list.style.display = '';
     }
-    list.style.display = '';
-  }
 
-  function hideList() {
-    var list = document.getElementById('act-dlg-customer-list');
-    if (list) list.style.display = 'none';
-    // テキストが空なら hidden もクリア
-    var txt = document.getElementById('act-dlg-customer-text');
-    var hid = document.getElementById('act-dlg-customer-id');
-    if (txt && hid && txt.value.trim() === '') { hid.value = ''; }
-  }
-
-  window.actDlgToggleCustomer = function(noCustomer) {
-    var wrap = document.getElementById('act-dlg-customer-wrap');
-    var txt  = document.getElementById('act-dlg-customer-text');
-    var hid  = document.getElementById('act-dlg-customer-id');
-    if (noCustomer) {
-      if (txt) { txt.disabled = true; txt.value = ''; txt.style.background = '#f0f4f8'; txt.style.color = '#999'; }
-      if (hid) { hid.value = ''; }
-      if (wrap) { wrap.style.opacity = '0.5'; }
-      hideList();
-    } else {
-      if (txt) { txt.disabled = false; txt.style.background = ''; txt.style.color = ''; }
-      if (wrap) { wrap.style.opacity = ''; }
+    function hideList() {
+      var list = document.getElementById(opts.listId);
+      if (list) list.style.display = 'none';
+      var txt = document.getElementById(opts.textId);
+      var hid = document.getElementById(opts.hiddenId);
+      if (txt && hid && txt.value.trim() === '') hid.value = '';
     }
-  };
 
-  document.addEventListener('DOMContentLoaded', function() {
-    var txt = document.getElementById('act-dlg-customer-text');
-    if (txt) {
-      txt.addEventListener('input',  function() { filterCustomers(txt.value); });
-      txt.addEventListener('focus',  function() { filterCustomers(txt.value); });
+    document.addEventListener('DOMContentLoaded', function() {
+      var txt = document.getElementById(opts.textId);
+      if (!txt) return;
+      txt.addEventListener('input',  function() { renderList(txt.value); });
+      txt.addEventListener('focus',  function() { renderList(txt.value); });
       txt.addEventListener('keydown', function(e) {
-        var list = document.getElementById('act-dlg-customer-list');
+        var list = document.getElementById(opts.listId);
         if (!list || list.style.display === 'none') return;
         var items = list.querySelectorAll('.act-dlg-item');
         var focused = list.querySelector('.act-dlg-item.focused');
@@ -272,7 +268,7 @@ final class ActivityDetailView
         } else if (e.key === 'Enter') {
           if (focused) {
             e.preventDefault();
-            document.getElementById('act-dlg-customer-id').value = focused.dataset.id;
+            document.getElementById(opts.hiddenId).value = focused.dataset.id;
             txt.value = focused.textContent;
             list.style.display = 'none';
           }
@@ -281,24 +277,11 @@ final class ActivityDetailView
         }
       });
       txt.addEventListener('blur', function() { setTimeout(hideList, 150); });
-    }
+    });
+  }
 
-    // フォーム送信前に顧客IDを検証
-    var form = document.getElementById('activity-new-form');
-    if (form) {
-      form.addEventListener('submit', function(e) {
-        var cb  = document.getElementById('act-dlg-no-customer');
-        var hid = document.getElementById('act-dlg-customer-id');
-        if (cb && cb.checked) { if (hid) hid.value = ''; return; }
-        if (!hid || !hid.value) {
-          e.preventDefault();
-          alert('顧客を選択してください。');
-          var t = document.getElementById('act-dlg-customer-text');
-          if (t) t.focus();
-        }
-      });
-    }
-  });
+  makeCombo({ dataKey:'actDlgCustomers', textId:'act-dlg-customer-text', hiddenId:'act-dlg-customer-id', listId:'act-dlg-customer-list' });
+  makeCombo({ dataKey:'actDlgSCases',    textId:'act-dlg-scase-text',    hiddenId:'act-dlg-scase-id',    listId:'act-dlg-scase-list' });
 })();
 </script>
 JSCODE;
@@ -306,32 +289,37 @@ JSCODE;
         return
             '<input type="hidden" name="activity_date" value="' . Layout::escape($activityDateVal) . '">'
             . ($staffIdVal !== '' ? '<input type="hidden" name="staff_id" value="' . Layout::escape($staffIdVal) . '">' : '')
-            . '<script>window.actDlgCustomers=' . $customerJson . ';</script>'
+            . '<script>window.actDlgCustomers=' . $customerJson . ';window.actDlgSCases=' . $salesCaseJson . ';</script>'
             . '<div class="card">'
             . '<div class="list-filter-grid modal-form-grid">'
 
-            . '<div class="list-filter-field modal-form-wide">'
-            . '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">'
-            . '<input type="checkbox" id="act-dlg-no-customer" onchange="actDlgToggleCustomer(this.checked)" style="width:16px;height:16px;">'
-            . '<span>顧客なし（社内作業・ミーティング等）</span>'
-            . '</label>'
-            . '</div>'
-
             . '<div class="list-filter-field modal-form-wide" id="act-dlg-customer-wrap">'
-            . '<span style="display:block;margin-bottom:4px;font-size:13px;font-weight:500;">顧客' . $req . '</span>'
+            . '<span>既存顧客</span>'
             . '<div style="position:relative;">'
             . '<input type="hidden" name="customer_id" id="act-dlg-customer-id" value="' . Layout::escape($customerIdVal) . '">'
             . '<input type="text" id="act-dlg-customer-text" autocomplete="off"'
             . ' placeholder="顧客名を入力して検索..."'
             . ' value="' . Layout::escape($prefilledName) . '"'
-            . ' style="width:100%;padding:7px 10px;border:1px solid #d9e2ec;border-radius:6px;font-size:14px;box-sizing:border-box;">'
-            . '<div id="act-dlg-customer-list" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:#fff;border:1px solid #d9e2ec;border-top:none;border-radius:0 0 6px 6px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.12);"></div>'
+            . ' style="width:100%;box-sizing:border-box;">'
+            . '<div id="act-dlg-customer-list" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:#fff;border:1px solid var(--border-medium);border-top:none;border-radius:0 0 var(--radius-md) var(--radius-md);z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.12);"></div>'
+            . '</div>'
+            . '</div>'
+
+            . '<div class="list-filter-field modal-form-wide" id="act-dlg-scase-wrap">'
+            . '<span>見込案件</span>'
+            . '<div style="position:relative;">'
+            . '<input type="hidden" name="sales_case_id" id="act-dlg-scase-id" value="' . Layout::escape($salesCaseIdVal) . '">'
+            . '<input type="text" id="act-dlg-scase-text" autocomplete="off"'
+            . ' placeholder="案件名を入力して検索..."'
+            . ' value="' . Layout::escape($prefilledCaseName) . '"'
+            . ' style="width:100%;box-sizing:border-box;">'
+            . '<div id="act-dlg-scase-list" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:#fff;border:1px solid var(--border-medium);border-top:none;border-radius:0 0 var(--radius-md) var(--radius-md);z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.12);"></div>'
             . '</div>'
             . '</div>'
 
             . '<div class="list-filter-field modal-form-wide" style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">'
-            . '<div style="display:flex;align-items:center;gap:8px;"><span style="font-size:13px;font-weight:500;white-space:nowrap;">開始時刻</span>' . self::buildTimePicker('start_time', $startTimeVal) . '</div>'
-            . '<div style="display:flex;align-items:center;gap:8px;"><span style="font-size:13px;font-weight:500;white-space:nowrap;">終了時刻</span>' . self::buildTimePicker('end_time', $endTimeVal) . '</div>'
+            . '<div style="display:flex;align-items:center;gap:8px;"><span style="white-space:nowrap;">開始時刻</span>' . self::buildTimePicker('start_time', $startTimeVal) . '</div>'
+            . '<div style="display:flex;align-items:center;gap:8px;"><span style="white-space:nowrap;">終了時刻</span>' . self::buildTimePicker('end_time', $endTimeVal) . '</div>'
             . '</div>'
 
             . '<label class="list-filter-field"><span>活動種別' . $req . '</span>'
@@ -343,11 +331,11 @@ JSCODE;
             . '<label class="list-filter-field modal-form-wide"><span>訪問先</span>'
             . '<input type="text" name="visit_place" value="' . Layout::escape($visitPlaceVal) . '" maxlength="200"></label>'
 
-            . '<label class="list-filter-field modal-form-wide"><span>件名' . $req . '</span>'
+            . '<label class="list-filter-field modal-form-wide"><span>活動概要' . $req . '</span>'
             . '<input type="text" name="subject" required maxlength="200" value="' . Layout::escape($subjectVal) . '"></label>'
 
-            . '<label class="list-filter-field modal-form-wide"><span>内容要約' . $req . '</span>'
-            . '<textarea name="content_summary" required maxlength="500" rows="4" style="width:100%;resize:vertical;">'
+            . '<label class="list-filter-field modal-form-wide"><span>活動詳細</span>'
+            . '<textarea name="content_summary" maxlength="500" rows="4" style="width:100%;resize:vertical;">'
             . Layout::escape($summaryVal) . '</textarea></label>'
 
             . '<label class="list-filter-field modal-form-wide"><span>次回予定日</span>'
@@ -522,6 +510,90 @@ TPJS;
     }
 
     /**
+     * 閲覧専用表示（編集権限なし時）
+     *
+     * @param array<string, string> $allowedActivityTypes
+     * @param array<int, array<string, mixed>> $purposeTypes
+     */
+    private static function buildReadOnlyView(
+        array $data,
+        array $customers,
+        array $allowedActivityTypes,
+        array $purposeTypes
+    ): string {
+        $customerIdVal   = (string) ($data['customer_id'] ?? '');
+        $startTimeVal    = (string) ($data['start_time'] ?? '');
+        $endTimeVal      = (string) ($data['end_time'] ?? '');
+        $activityTypeVal = (string) ($data['activity_type'] ?? '');
+        $purposeTypeVal  = (string) ($data['purpose_type'] ?? '');
+        $visitPlaceVal   = (string) ($data['visit_place'] ?? '');
+        $subjectVal      = (string) ($data['subject'] ?? '');
+        $summaryVal      = (string) ($data['content_summary'] ?? '');
+        $nextDateVal     = (string) ($data['next_action_date'] ?? '');
+
+        $noCustomer = ($customerIdVal === '' || (int) $customerIdVal === 0);
+        if ($noCustomer) {
+            $custDisplay = '（顧客なし）';
+        } else {
+            $custDisplay = (string) ($data['customer_name'] ?? '');
+            if ($custDisplay === '') {
+                foreach ($customers as $cust) {
+                    if ((string) ($cust['id'] ?? '') === $customerIdVal) {
+                        $custDisplay = (string) ($cust['customer_name'] ?? '');
+                        break;
+                    }
+                }
+            }
+        }
+
+        $actTypeLabel = $allowedActivityTypes[$activityTypeVal] ?? $activityTypeVal;
+
+        $timeDisplay = '';
+        if ($startTimeVal !== '' || $endTimeVal !== '') {
+            $timeDisplay = $startTimeVal !== '' ? $startTimeVal : '';
+            if ($startTimeVal !== '' && $endTimeVal !== '') {
+                $timeDisplay .= ' 〜 ';
+            }
+            $timeDisplay .= $endTimeVal !== '' ? $endTimeVal : '';
+        }
+
+        $labelStyle = 'display:block;margin-bottom:4px;font-size:13px;font-weight:500;color:#486581;';
+        $valStyle   = 'font-size:14px;color:#243b55;';
+        $dashHtml   = '<span style="font-size:14px;color:#9aa5b4;">—</span>';
+
+        $field = static function (string $label, string $value, bool $wide = false) use ($labelStyle, $valStyle, $dashHtml): string {
+            $cls      = 'list-filter-field' . ($wide ? ' modal-form-wide' : '');
+            $valueHtml = $value !== ''
+                ? '<span style="' . $valStyle . '">' . Layout::escape($value) . '</span>'
+                : $dashHtml;
+            return '<div class="' . $cls . '">'
+                . '<span style="' . $labelStyle . '">' . Layout::escape($label) . '</span>'
+                . $valueHtml
+                . '</div>';
+        };
+
+        $html = '<div class="card"><div class="list-filter-grid modal-form-grid">'
+            . $field('顧客', $custDisplay, true)
+            . ($timeDisplay !== '' ? $field('時刻', $timeDisplay, true) : '')
+            . $field('活動種別', $actTypeLabel)
+            . ($purposeTypeVal !== '' ? $field('用件区分', $purposeTypeVal) : '')
+            . ($visitPlaceVal !== '' ? $field('訪問先', $visitPlaceVal, true) : '')
+            . $field('活動概要', $subjectVal, true);
+
+        if ($summaryVal !== '') {
+            $html .= '<div class="list-filter-field modal-form-wide">'
+                . '<span style="' . $labelStyle . '">活動詳細</span>'
+                . '<div style="' . $valStyle . 'white-space:pre-wrap;line-height:1.6;">' . Layout::escape($summaryVal) . '</div>'
+                . '</div>';
+        }
+
+        $html .= ($nextDateVal !== '' ? $field('次回予定日', $nextDateVal) : '')
+            . '</div></div>';
+
+        return $html;
+    }
+
+    /**
      * @param array<string, string> $allowedActivityTypes
      * @param array<int, array<string, mixed>> $purposeTypes
      */
@@ -547,6 +619,7 @@ TPJS;
         $nextDateVal     = (string) ($data['next_action_date'] ?? '');
         $resultTypeVal   = (string) ($data['result_type'] ?? '');
         $staffUserIdVal  = (string) ($data['staff_id'] ?? '');
+        $salesCaseIdVal  = (string) ($data['sales_case_id'] ?? '');
 
         // 顧客コンボボックス用データ
         $customerList = [];
@@ -555,7 +628,27 @@ TPJS;
         }
         $customerJson = json_encode($customerList, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT);
 
-        $noCustomerChecked = ($customerIdVal === '');
+        // 見込案件オプション（サーバーサイドレンダリング）
+        $scIdSet = [];
+        foreach ($salesCases as $sc) {
+            $scIdSet[(string) ((int) ($sc['id'] ?? 0))] = true;
+        }
+        $detailSalesCaseOptionsHtml = '<option value="">— 選択しない —</option>';
+        // Orphan: 既存値が一覧にない場合（完了済み・削除済み案件）
+        if ($salesCaseIdVal !== '' && !isset($scIdSet[$salesCaseIdVal])) {
+            $detailSalesCaseOptionsHtml .= '<option value="' . Layout::escape($salesCaseIdVal) . '" selected>'
+                . Layout::escape('（削除または完了済み案件 #' . $salesCaseIdVal . '）') . '</option>';
+        }
+        foreach ($salesCases as $sc) {
+            $scId     = (int) ($sc['id'] ?? 0);
+            $scName   = (string) ($sc['case_name'] ?? '');
+            $dispCust = (string) ($sc['display_customer'] ?? '');
+            $label    = $dispCust !== '' ? $scName . '（' . $dispCust . '）' : $scName;
+            $sel      = $salesCaseIdVal === (string) $scId ? ' selected' : '';
+            $detailSalesCaseOptionsHtml .= '<option value="' . Layout::escape((string) $scId) . '"' . $sel . '>'
+                . Layout::escape($label) . '</option>';
+        }
+
         $prefilledCustName = '';
         foreach ($customers as $cust) {
             if ((string) ($cust['id'] ?? '') === $customerIdVal && $customerIdVal !== '') {
@@ -572,17 +665,17 @@ TPJS;
 
         // 用件区分（マスタ外の既存値は旧値として先頭表示）
         $purposeOptionsHtml = '<option value="">— 選択してください —</option>';
-        $purposeCodeExists  = false;
+        $purposeExists      = false;
         foreach ($purposeTypes as $pt) {
-            $ptCode  = (string) ($pt['code'] ?? '');
-            $ptLabel = (string) ($pt['label'] ?? '');
-            $sel     = $purposeTypeVal === $ptCode ? ' selected' : '';
+            $ptName = (string) ($pt['name'] ?? '');
+            if ($ptName === '') { continue; }
+            $sel    = $purposeTypeVal === $ptName ? ' selected' : '';
             if ($sel !== '') {
-                $purposeCodeExists = true;
+                $purposeExists = true;
             }
-            $purposeOptionsHtml .= '<option value="' . Layout::escape($ptCode) . '"' . $sel . '>' . Layout::escape($ptLabel) . '</option>';
+            $purposeOptionsHtml .= '<option value="' . Layout::escape($ptName) . '"' . $sel . '>' . Layout::escape($ptName) . '</option>';
         }
-        if ($purposeTypeVal !== '' && !$purposeCodeExists) {
+        if ($purposeTypeVal !== '' && !$purposeExists) {
             $orphanLabel        = '（旧値: ' . $purposeTypeVal . '）';
             $purposeOptionsHtml = '<option value="">— 選択してください —</option>'
                 . '<option value="' . Layout::escape($purposeTypeVal) . '" selected style="color:#999;">' . Layout::escape($orphanLabel) . '</option>'
@@ -597,11 +690,7 @@ TPJS;
             $staffOptionsHtml .= '<option value="' . $uid . '"' . $sel . '>' . Layout::escape($uname) . '</option>';
         }
 
-        $req         = '<strong class="required-mark"> *</strong>';
-        $cbChecked   = $noCustomerChecked ? ' checked' : '';
-        $cbDisabled  = $noCustomerChecked ? ' disabled' : '';
-        $cbOpacity   = $noCustomerChecked ? 'opacity:0.5;' : '';
-        $cbBg        = $noCustomerChecked ? 'background:#f0f4f8;color:#999;' : '';
+        $req = '<strong class="required-mark"> *</strong>';
 
         $detailComboJs = <<<'CBJS'
 <script>
@@ -643,22 +732,10 @@ TPJS;
     if (list) list.style.display = 'none';
     var txt = document.getElementById('detail-cust-text');
     var hid = document.getElementById('detail-cust-id');
-    if (txt && hid && txt.value.trim() === '') { hid.value = ''; }
-  }
-  window.detailToggleNoCustomer = function(noCustomer) {
-    var wrap = document.getElementById('detail-cust-wrap');
-    var txt  = document.getElementById('detail-cust-text');
-    var hid  = document.getElementById('detail-cust-id');
-    if (noCustomer) {
-      if (txt) { txt.disabled = true; txt.value = ''; txt.style.background = '#f0f4f8'; txt.style.color = '#999'; }
-      if (hid) { hid.value = ''; }
-      if (wrap) { wrap.style.opacity = '0.5'; }
-      hideDetailCustList();
-    } else {
-      if (txt) { txt.disabled = false; txt.style.background = ''; txt.style.color = ''; }
-      if (wrap) { wrap.style.opacity = ''; }
+    if (txt && hid && txt.value.trim() === '') {
+      hid.value = '';
     }
-  };
+  }
   document.addEventListener('DOMContentLoaded', function() {
     var txt = document.getElementById('detail-cust-text');
     if (txt) {
@@ -707,26 +784,24 @@ CBJS;
             . '<div class="card">'
             . '<div class="list-filter-grid modal-form-grid">'
 
-            // 顧客なしチェック
-            . '<div class="list-filter-field modal-form-wide">'
-            . '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">'
-            . '<input type="checkbox" id="detail-no-customer" onchange="detailToggleNoCustomer(this.checked)" style="width:16px;height:16px;"' . $cbChecked . '>'
-            . '<span>顧客なし（社内作業・ミーティング等）</span>'
-            . '</label>'
-            . '</div>'
-
             // 顧客コンボボックス
-            . '<div class="list-filter-field modal-form-wide" id="detail-cust-wrap" style="' . $cbOpacity . '">'
-            . '<span style="display:block;margin-bottom:4px;font-size:13px;font-weight:500;">顧客' . $req . '</span>'
+            . '<div class="list-filter-field modal-form-wide" id="detail-cust-wrap">'
+            . '<span style="display:block;margin-bottom:4px;font-size:13px;font-weight:500;">既存顧客</span>'
             . '<div style="position:relative;">'
             . '<input type="hidden" name="customer_id" id="detail-cust-id" value="' . Layout::escape($customerIdVal) . '">'
             . '<input type="text" id="detail-cust-text" autocomplete="off"'
             . ' placeholder="顧客名を入力して検索..."'
             . ' value="' . Layout::escape($prefilledCustName) . '"'
-            . ' style="width:100%;padding:7px 10px;border:1px solid #d9e2ec;border-radius:6px;font-size:14px;box-sizing:border-box;' . $cbBg . '"'
-            . $cbDisabled . '>'
+            . ' style="width:100%;padding:7px 10px;border:1px solid #d9e2ec;border-radius:6px;font-size:14px;box-sizing:border-box;">'
             . '<div id="detail-cust-list" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:200px;overflow-y:auto;background:#fff;border:1px solid #d9e2ec;border-top:none;border-radius:0 0 6px 6px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.12);"></div>'
             . '</div>'
+            . '</div>'
+
+            . '<div class="list-filter-field modal-form-wide" id="detail-scase-wrap">'
+            . '<span style="display:block;margin-bottom:4px;font-size:13px;font-weight:500;">見込案件</span>'
+            . '<select name="sales_case_id" id="detail-scase-select" style="width:100%;padding:7px 10px;border:1px solid #d9e2ec;border-radius:6px;font-size:14px;box-sizing:border-box;background:#fff;">'
+            . $detailSalesCaseOptionsHtml
+            . '</select>'
             . '</div>'
 
             . '<div class="list-filter-field modal-form-wide" style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">'
@@ -742,11 +817,11 @@ CBJS;
             . '<label class="list-filter-field modal-form-wide"><span>訪問先</span>'
             . '<input type="text" name="visit_place" value="' . Layout::escape($visitPlaceVal) . '" maxlength="200"></label>'
 
-            . '<label class="list-filter-field modal-form-wide"><span>件名' . $req . '</span>'
+            . '<label class="list-filter-field modal-form-wide"><span>活動概要' . $req . '</span>'
             . '<input type="text" name="subject" required maxlength="200" value="' . Layout::escape($subjectVal) . '"></label>'
 
-            . '<label class="list-filter-field modal-form-wide"><span>内容要約' . $req . '</span>'
-            . '<textarea name="content_summary" required maxlength="500" rows="4" style="width:100%;resize:vertical;">'
+            . '<label class="list-filter-field modal-form-wide"><span>活動詳細</span>'
+            . '<textarea name="content_summary" maxlength="500" rows="4" style="width:100%;resize:vertical;">'
             . Layout::escape($summaryVal) . '</textarea></label>'
 
             . '<label class="list-filter-field modal-form-wide"><span>次回予定日</span>'

@@ -10,7 +10,6 @@ CREATE TABLE IF NOT EXISTS t_sales_case (
   prospect_rank           VARCHAR(20)     NULL     COMMENT '見込み度',
   expected_premium        DECIMAL(12,0)   NULL     COMMENT '想定保険料',
   expected_contract_month VARCHAR(7)      NULL     COMMENT '契約予定月(YYYY-MM)',
-  referral_source         VARCHAR(200)    NULL     COMMENT '紹介元',
   next_action_date        DATE            NULL     COMMENT '次回予定日',
   lost_reason             VARCHAR(500)    NULL     COMMENT '失注理由',
   memo                    TEXT            NULL     COMMENT 'メモ',

@@ -26,8 +26,6 @@ final class RenewalCaseListView
         string $detailBaseUrl,
         string $csvImportActionUrl,
         string $csvImportCsrfToken,
-        string $deleteActionUrl,
-        string $deleteCsrfToken,
         ?string $importFlashError,
         ?string $importFlashSuccess,
         ?array $importBatch,
@@ -38,7 +36,8 @@ final class RenewalCaseListView
         array $allUsers,
         array $layoutOptions,
         ?string $pageSuccessMessage = null,
-        array $allStatuses = []
+        array $allStatuses = [],
+        string $customerDetailBaseUrl = ''
     ): string {
         $errorHtml = '';
         if (is_string($errorMessage) && $errorMessage !== '') {
@@ -53,71 +52,64 @@ final class RenewalCaseListView
         $customerName      = Layout::escape((string) ($criteria['customer_name'] ?? ''));
         $policyNo          = Layout::escape((string) ($criteria['policy_no'] ?? ''));
         $caseStatus        = (string) ($criteria['case_status'] ?? '');
-        $maturityWindow    = (string) ($criteria['maturity_window'] ?? '30');
+        $maturityWindow    = (string) ($criteria['maturity_window'] ?? 'all');
         $filterUserId      = (string) ($criteria['assigned_staff_id'] ?? '');
         $filterProductType = Layout::escape((string) ($criteria['product_type'] ?? ''));
         $perPage           = (int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE);
         $sort              = (string) ($listState['sort'] ?? '');
         $direction         = (string) ($listState['direction'] ?? 'asc');
-        $filterOpen        = $forceFilterOpen || ListViewHelper::hasActiveFilters(array_diff_key($criteria, ['maturity_window' => true])) || $errorHtml !== '';
+        $filterOpen        = $forceFilterOpen || ListViewHelper::hasActiveFilters($criteria) || $errorHtml !== '';
         $pager             = ListViewHelper::buildPager((int) ($listState['page'] ?? '1'), $perPage, $totalCount);
         $listState['page'] = (string) ($pager['currentPage'] ?? 1);
         $listQuery         = LP::queryParams($criteria, $listState);
 
-        // バッジ用ラベルマップ
-        $badgeLabelMap = [];
+        // 完了扱いの name セット（is_completed_row のグレーアウト・期限色判定に使用）
+        $completedNames = [];
         foreach ($allStatuses as $sRow) {
-            $badgeLabelMap[(string) ($sRow['code'] ?? '')] = (string) ($sRow['display_name'] ?? '');
+            if ((int) ($sRow['is_completed'] ?? 0) === 1) {
+                $completedNames[(string) ($sRow['name'] ?? '')] = true;
+            }
         }
 
-        $rowsHtml = '';
-        $today    = date('Y-m-d');
+        $rowsHtml     = '';
+        $today        = date('Y-m-d');
         foreach ($rows as $row) {
             $id               = (int) ($row['renewal_case_id'] ?? 0);
             $status           = (string) ($row['case_status'] ?? '');
-            $customerText     = (string) ($row['customer_name'] ?? '');
+            $customerId       = isset($row['customer_id']) && $row['customer_id'] !== null ? (int) $row['customer_id'] : null;
+            $rowCustomerName  = (string) ($row['customer_name'] ?? '');
+            $sjnetName        = (string) ($row['sjnet_customer_name'] ?? '');
             $policyText       = (string) ($row['policy_no'] ?? '');
             $productType      = (string) ($row['product_type'] ?? '');
             $maturityDate     = (string) ($row['maturity_date'] ?? '');
             $earlyDeadline    = (string) ($row['early_renewal_deadline'] ?? '');
             $assignedUserName = (string) ($row['assigned_user_name'] ?? '');
             $detailUrl        = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, array_merge(['id' => (string) $id], $listQuery)));
-            $rowClass         = self::isCompletedStatus($status) ? ' class="is-completed-row"' : '';
-
-            $deleteFormId = 'form-del-renewal-' . $id;
-            $deleteLabel  = $policyText !== '' ? $policyText : ('ID: ' . $id);
-            $deleteForm = '<form id="' . $deleteFormId . '" method="post" action="' . Layout::escape($deleteActionUrl) . '" style="display:inline;">'
-                . LP::routeInput($deleteActionUrl)
-                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($deleteCsrfToken) . '">'
-                . '<input type="hidden" name="id" value="' . $id . '">'
-                . LP::hiddenInputs(LP::queryParams($criteria, $listState))
-                . '<button type="button" class="btn-icon-delete" title="削除"'
-                . ' data-delete-form="' . $deleteFormId . '"'
-                . ' data-delete-label="' . Layout::escape($deleteLabel) . '">'
-                . '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>'
-                . '</button>'
-                . '</form>';
+            $isCompletedRow   = isset($completedNames[$status]);
+            $rowClass         = $isCompletedRow ? ' class="is-completed-row"' : '';
 
             $rowsHtml .= '<tr' . $rowClass . '>'
                 . '<td data-label="証券番号"><a class="text-link list-policy-text" href="' . $detailUrl . '" title="' . Layout::escape($policyText) . '">' . Layout::escape($policyText) . '</a></td>'
-                . '<td data-label="満期日" style="white-space:nowrap;">' . self::renderMaturityDate($maturityDate, $status, $today) . '</td>'
-                . '<td class="cell-ellipsis" data-label="顧客名" title="' . Layout::escape($customerText) . '">' . Layout::escape($customerText) . '</td>'
+                . '<td data-label="満期日" style="white-space:nowrap;">' . self::renderMaturityDate($maturityDate, $isCompletedRow, $today) . '</td>'
+                . '<td class="cell-ellipsis" data-label="顧客名">' . self::renderCustomerCell($customerId, $rowCustomerName, $sjnetName, $customerDetailBaseUrl) . '</td>'
                 . '<td class="cell-ellipsis" data-label="種目" title="' . Layout::escape($productType) . '">' . Layout::escape($productType) . '</td>'
-                . '<td data-label="早期更改締切" style="white-space:nowrap;">' . self::renderEarlyDeadline($earlyDeadline, $status, $today) . '</td>'
+                . '<td data-label="早期更改締切" style="white-space:nowrap;">' . self::renderEarlyDeadline($earlyDeadline, $isCompletedRow, $today) . '</td>'
                 . '<td class="cell-ellipsis" data-label="営業担当" title="' . Layout::escape($assignedUserName) . '">' . ($assignedUserName !== '' ? Layout::escape($assignedUserName) : '<span class="muted">−</span>') . '</td>'
-                . '<td data-label="対応状況">' . self::renderStatusBadge($status, $badgeLabelMap) . '</td>'
-                . '<td>' . $deleteForm . '</td>'
+                . '<td data-label="対応状況">' . self::renderStatusBadge($status) . '</td>'
                 . '</tr>';
         }
 
         if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="8">該当データはありません。</td></tr>';
+            $rowsHtml = '<tr><td colspan="7">該当データはありません。</td></tr>';
         }
 
         // ステータスフィルター選択肢
         $statuses = ['' => 'すべて'];
         foreach ($allStatuses as $sRow) {
-            $statuses[(string) ($sRow['code'] ?? '')] = (string) ($sRow['display_name'] ?? '');
+            $name = (string) ($sRow['name'] ?? '');
+            if ($name !== '') {
+                $statuses[$name] = $name;
+            }
         }
         $statusOptions = '';
         foreach ($statuses as $value => $label) {
@@ -133,8 +125,7 @@ final class RenewalCaseListView
             $userOptions .= '<option value="' . Layout::escape((string) $uid) . '"' . $selected . '>' . Layout::escape($uname) . '</option>';
         }
 
-        $sortSummary = self::renderSortSummary($sort, $direction);
-        $topToolbar  = LP::toolbar($searchUrl, $criteria, $listState, $pager, $totalCount, $perPage, $sortSummary);
+        $topToolbar  = LP::toolbar($searchUrl, $criteria, $listState, $pager, $totalCount, $perPage);
         $bottomPager = LP::bottomPager($searchUrl, $criteria, $listState, $pager);
 
         $importReturnToUrl = ListViewHelper::buildUrl($searchUrl, array_merge($listQuery, ['import_dialog' => '1']));
@@ -184,7 +175,6 @@ final class RenewalCaseListView
             . '<col class="list-col-early">'
             . '<col class="list-col-user">'
             . '<col class="list-col-status">'
-            . '<col class="list-col-action">'
             . '</colgroup>'
             . '<thead><tr>'
             . '<th>' . LP::sortLink('証券番号', 'policy_no', $searchUrl, $criteria, $listState) . '</th>'
@@ -194,41 +184,10 @@ final class RenewalCaseListView
             . '<th>' . LP::sortLink('早期更改締切', 'early_renewal_deadline', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>営業担当</th>'
             . '<th>' . LP::sortLink('対応状況', 'case_status', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th></th>'
             . '</tr></thead>'
             . '<tbody>' . $rowsHtml . '</tbody>'
             . '</table>'
             . '</div>';
-
-        $deleteConfirmDialog =
-            '<dialog id="dlg-delete-renewal-confirm" class="modal-dialog">'
-            . '<div class="modal-head"><h2>削除の確認</h2>'
-            . '<button type="button" class="modal-close" id="dlg-delete-renewal-close">×</button>'
-            . '</div>'
-            . '<p id="dlg-delete-renewal-msg" style="margin:16px 0;"></p>'
-            . '<div class="dialog-actions">'
-            . '<button type="button" id="dlg-delete-renewal-ok" class="btn btn-danger">削除する</button>'
-            . '<button type="button" id="dlg-delete-renewal-cancel" class="btn btn-ghost">キャンセル</button>'
-            . '</div>'
-            . '</dialog>'
-            . '<script>(function(){'
-            . 'var dlg=document.getElementById("dlg-delete-renewal-confirm");'
-            . 'if(!dlg||typeof dlg.showModal!=="function"){return;}'
-            . 'var msg=document.getElementById("dlg-delete-renewal-msg");'
-            . 'var pendingId=null;'
-            . 'document.querySelectorAll("[data-delete-form]").forEach(function(btn){'
-            . 'btn.addEventListener("click",function(){'
-            . 'pendingId=btn.getAttribute("data-delete-form");'
-            . 'var label=btn.getAttribute("data-delete-label")||"この件";'
-            . 'msg.textContent="「"+label+"」を削除しますか？この操作は取り消せません。";'
-            . 'if(!dlg.open){dlg.showModal();}});});'
-            . 'function closeDlg(){if(dlg.open){dlg.close();}pendingId=null;}'
-            . 'document.getElementById("dlg-delete-renewal-ok").addEventListener("click",function(){'
-            . 'if(pendingId){var f=document.getElementById(pendingId);if(f){f.submit();}}'
-            . 'closeDlg();});'
-            . 'document.getElementById("dlg-delete-renewal-cancel").addEventListener("click",closeDlg);'
-            . 'document.getElementById("dlg-delete-renewal-close").addEventListener("click",closeDlg);'
-            . '})();</script>';
 
         $content =
             '<div class="list-page-frame">'
@@ -238,7 +197,6 @@ final class RenewalCaseListView
             . $filterPanelHtml
             . LP::tableCard($topToolbar, $tableHtml, $bottomPager)
             . '</div>'
-            . $deleteConfirmDialog
             . '<dialog id="renewal-import-dialog" class="modal-dialog modal-dialog-wide">'
             . '<form method="dialog" class="modal-close-form"><button type="submit" class="modal-close" aria-label="閉じる">×</button></form>'
             . '<div class="modal-head"><h2>SJNET満期データ取込</h2></div>'
@@ -248,19 +206,15 @@ final class RenewalCaseListView
             . '<form method="post" action="' . Layout::escape($csvImportActionUrl) . '" enctype="multipart/form-data">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csvImportCsrfToken) . '">'
             . '<input type="hidden" name="return_to" value="' . Layout::escape($importReturnToUrl) . '">'
-            . '<p class="muted" style="margin-bottom:12px;font-size:12.5px;">SJ-NETからダウンロードしたCSVを選択してください。</p>'
-            . '<div style="font-size:12.5px;line-height:1.7;margin-bottom:16px;">'
+            . '<p class="muted" style="margin-bottom:12px;font-size:13px;">SJ-NETからダウンロードしたCSVを選択してください。</p>'
+            . '<div style="font-size:13px;line-height:1.7;margin-bottom:16px;">'
             . '<p style="margin:0 0 4px;font-weight:600;">■ 必須カラム</p>'
-            . '<p style="margin:0 0 2px;padding-left:1em;">証券番号 / 満期日（月）/ 満期日（日）/ 顧客名 / 保険会社 / 保険始期 / 保険終期 / 種目種類 / 合計保険料 / 代理店ｺｰﾄﾞ</p>'
+            . '<p style="margin:0 0 2px;padding-left:1em;">証券番号 / 顧客名 / 生年月日 / 保険終期 / 種目種類 / 合計保険料 / 代理店ｺｰﾄﾞ</p>'
             . '<p style="margin:0 0 10px;padding-left:1em;" class="muted">1つでも欠けていると取込できません。</p>'
             . '<p style="margin:0 0 4px;font-weight:600;">■ 任意カラム（あれば取り込みます）</p>'
             . '<p style="margin:0 0 2px;padding-left:1em;">郵便番号 / 住所 / ＴＥＬ　<span class="muted">→ 新規顧客の自動登録時のみ使用。既存顧客は不変。</span></p>'
-            . '<p style="margin:0 0 2px;padding-left:1em;">払込方法　<span class="muted">→ 契約情報として登録。</span></p>'
+            . '<p style="margin:0 0 2px;padding-left:1em;">保険始期 / 払込方法　<span class="muted">→ 契約情報として登録。</span></p>'
             . '<p style="margin:0 0 10px;padding-left:1em;">担当者　<span class="muted">→ 取込履歴に参考記録。担当者設定は代理店コードを使用。</span></p>'
-            . '<p style="margin:0 0 4px;font-weight:600;">■ 満期年の判定</p>'
-            . '<p style="margin:0 0 2px;padding-left:1em;">CSVには満期の「月」「日」のみ含まれ、「年」は取込実行日から自動判定します。</p>'
-            . '<p style="margin:0 0 2px;padding-left:1em;" class="muted">取込日以降の月日 → 当年　／　取込日より過去の月日 → 翌年</p>'
-            . '<p style="margin:0 0 10px;"></p>'
             . '<p style="margin:0 0 4px;font-weight:600;">■ 文字コード</p>'
             . '<p style="margin:0;padding-left:1em;" class="muted">Shift-JIS・UTF-8 どちらも対応。</p>'
             . '</div>'
@@ -278,85 +232,51 @@ final class RenewalCaseListView
         return Layout::render('満期一覧', $content, $layoutOptions);
     }
 
+    private static function renderStatusBadge(string $status): string
+    {
+        // 表示名がそのままDB格納値。設定画面で自由に変更可能なので個別色はつけない。
+        $label = $status !== '' ? $status : '未設定';
+        return '<span class="badge badge-gray">' . Layout::escape($label) . '</span>';
+    }
+
     /**
-     * @param array<string, string> $labelMap  code => display_name from master (may be empty)
+     * 顧客名セルの表示: customer_id が設定済みならリンク、未設定ならプレーンテキスト
      */
-    private static function renderStatusBadge(string $status, array $labelMap = []): string
+    private static function renderCustomerCell(?int $customerId, string $customerName, string $sjnetCustomerName, string $customerDetailBaseUrl = ''): string
     {
-        $badgeClass = match ($status) {
-            'not_started'     => 'badge-gray',
-            'sj_requested'    => 'badge-info',
-            'doc_prepared'    => 'badge-info',
-            'waiting_return'  => 'badge-warn',
-            'quote_sent'      => 'badge-info',
-            'waiting_payment' => 'badge-warn',
-            'completed'       => 'badge-success',
-            default           => 'badge-gray',
-        };
-
-        if (isset($labelMap[$status])) {
-            $label = $labelMap[$status];
-        } else {
-            $label = match ($status) {
-                'not_started'     => '未対応',
-                'sj_requested'    => 'SJ依頼中',
-                'doc_prepared'    => '書類作成済',
-                'waiting_return'  => '返送待ち',
-                'quote_sent'      => '見積送付済',
-                'waiting_payment' => '入金待ち',
-                'completed'       => '完了',
-                default           => '未設定',
-            };
+        if ($customerId !== null && $customerName !== '') {
+            $escaped = Layout::escape($customerName);
+            $href = $customerDetailBaseUrl !== '' ? $customerDetailBaseUrl . '&id=' . $customerId : '?route=customer/detail&id=' . $customerId;
+            return '<a class="text-link" href="' . Layout::escape($href) . '" title="' . $escaped . '">' . $escaped . '</a>';
         }
 
-        return '<span class="badge ' . $badgeClass . '">' . Layout::escape($label) . '</span>';
-    }
-
-    private static function renderSortSummary(string $sort, string $direction): string
-    {
-        if ($sort === '') {
-            return '並び順: 業務優先順';
+        $displayName = $sjnetCustomerName !== '' ? $sjnetCustomerName : $customerName;
+        if ($displayName === '') {
+            return '<span class="muted">（顧客未設定）</span>';
         }
-
-        $label = match ($sort) {
-            'customer_name'          => '顧客名',
-            'policy_no'              => '証券番号',
-            'maturity_date'          => '満期日',
-            'case_status'            => '対応状況',
-            'next_action_date'       => '次回対応予定日',
-            'product_type'           => '種目',
-            'early_renewal_deadline' => '早期更改締切',
-            default                  => '業務優先順',
-        };
-
-        return '並び順: ' . $label . ' ' . ($direction === 'desc' ? '降順' : '昇順');
+        return '<span class="muted" title="' . Layout::escape($displayName) . '">' . Layout::escape($displayName) . '</span>';
     }
 
-    private static function isCompletedStatus(string $status): bool
-    {
-        return $status === 'completed';
-    }
-
-    private static function renderMaturityDate(string $maturityDate, string $status, string $today): string
+    private static function renderMaturityDate(string $maturityDate, bool $isCompleted, string $today): string
     {
         if ($maturityDate === '') {
             return '<span class="muted">−</span>';
         }
-        if ($status !== 'completed' && $maturityDate < $today) {
+        if (!$isCompleted && $maturityDate < $today) {
             return '<span style="color:var(--text-danger);font-weight:500;">' . Layout::escape($maturityDate) . '</span>';
         }
         return Layout::escape($maturityDate);
     }
 
-    private static function renderEarlyDeadline(string $earlyDeadline, string $status, string $today): string
+    private static function renderEarlyDeadline(string $earlyDeadline, bool $isCompleted, string $today): string
     {
         if ($earlyDeadline === '') {
             return '<span class="muted">−</span>';
         }
-        if ($status !== 'completed' && $earlyDeadline < $today) {
+        if (!$isCompleted && $earlyDeadline < $today) {
             return '<span style="color:var(--text-danger);font-weight:500;">' . Layout::escape($earlyDeadline) . '</span>';
         }
-        if ($status !== 'completed' && $earlyDeadline <= date('Y-m-d', strtotime($today . ' +7 days'))) {
+        if (!$isCompleted && $earlyDeadline <= date('Y-m-d', strtotime($today . ' +7 days'))) {
             return '<span style="color:var(--text-warning);">' . Layout::escape($earlyDeadline) . '</span>';
         }
         return Layout::escape($earlyDeadline);
@@ -364,7 +284,7 @@ final class RenewalCaseListView
 
     private static function renderWindowOptions(string $current): string
     {
-        $options = ['30' => '満期：今後30日', '60' => '今後60日', '90' => '今後90日', 'all' => '全期間'];
+        $options = ['all' => '全期間', '30' => '今後30日', '60' => '今後60日', '90' => '今後90日'];
         $html    = '';
         foreach ($options as $value => $label) {
             $selected = $current === (string) $value ? ' selected' : '';
@@ -388,6 +308,7 @@ final class RenewalCaseListView
         $insertCount    = (int) ($importBatch['insert_count'] ?? 0);
         $updateCount    = (int) ($importBatch['update_count'] ?? 0);
         $customerInsert = (int) ($importBatch['customer_insert_count'] ?? 0);
+        $unlinkedCount  = (int) ($importBatch['unlinked_count'] ?? 0);
         $skipCount      = (int) ($importBatch['duplicate_skip_count'] ?? 0);
         $errorCount     = (int) ($importBatch['error_count'] ?? 0);
 
@@ -418,17 +339,18 @@ final class RenewalCaseListView
             . '<span style="font-weight:600;">取込結果</span>'
             . '<span class="badge ' . $statusClass . '">' . Layout::escape($statusLabel) . '</span>'
             . '</div>'
-            . '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;font-size:12.5px;">'
+            . '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;font-size:13px;">'
             . '<div><span class="muted">処理行数</span><span style="margin-left:8px;font-weight:500;">' . $totalRows . '行</span></div>'
             . '<div><span class="muted">契約 新規登録</span><span style="margin-left:8px;font-weight:500;">' . $insertCount . '件</span></div>'
             . '<div><span class="muted">契約 更新</span><span style="margin-left:8px;font-weight:500;">' . $updateCount . '件</span></div>'
             . '<div><span class="muted">顧客 自動登録</span><span style="margin-left:8px;font-weight:500;">' . $customerInsert . '件</span></div>'
+            . '<div><span class="muted">未紐づけ契約</span><span style="margin-left:8px;' . ($unlinkedCount > 0 ? 'color:var(--text-warning);font-weight:500;' : '') . '">' . $unlinkedCount . '件</span></div>'
             . '<div><span class="muted">スキップ</span><span style="margin-left:8px;">' . $skipCount . '行</span></div>'
             . '<div><span class="muted">エラー</span><span style="margin-left:8px;' . ($errorCount > 0 ? 'color:var(--text-danger);font-weight:500;' : '') . '">' . $errorCount . '行</span></div>'
             . '</div>'
-            . '<hr style="margin:10px 0;border:none;border-top:1px solid var(--border-color);">'
-            . '<div style="font-size:12.5px;font-weight:600;margin-bottom:4px;">担当者マッピング</div>'
-            . '<div style="display:flex;flex-direction:column;gap:3px;font-size:12.5px;">'
+            . '<hr style="margin:10px 0;border:none;border-top:1px solid var(--border-light);">'
+            . '<div style="font-size:13px;font-weight:600;margin-bottom:4px;">担当者マッピング</div>'
+            . '<div style="display:flex;flex-direction:column;gap:3px;font-size:13px;">'
             . '<div style="display:flex;justify-content:space-between;"><span class="muted">解決済み</span><span style="font-weight:500;">' . $resolvedCount . '件</span></div>'
             . '<div style="display:flex;justify-content:space-between;"><span class="muted">コード未登録</span><span style="' . ($unresolvedCount > 0 ? 'color:var(--text-warning);font-weight:500;' : '') . '">' . $unresolvedCount . '件</span></div>'
             . '<div style="display:flex;justify-content:space-between;"><span class="muted">無効コード</span><span>' . $inactiveCount . '件</span></div>'
@@ -437,49 +359,70 @@ final class RenewalCaseListView
 
         $warnings = '';
         if ($unresolvedCount > 0) {
-            $warnings .= '<div class="error" style="margin-bottom:10px;font-size:12.5px;">'
+            $warnings .= '<div class="error" style="margin-bottom:10px;font-size:13px;">'
                 . Layout::escape($unresolvedCount . '件の代理店コードがマッピング未登録です。テナント設定 > SJNETコード設定 で登録してください。')
                 . '</div>';
         }
 
-        $ambiguousCount = 0;
-        $errorRowsHtml  = '';
+        // 未リンク行（顧客名複数一致）の一覧
+        $unlinkedRowsHtml = '';
+        $errorRowsHtml    = '';
         foreach ($importRows as $row) {
-            if ((string) ($row['row_status'] ?? '') !== 'error') {
-                continue;
+            $rowStatus = (string) ($row['row_status'] ?? '');
+            $rowNo     = Layout::escape((string) ($row['row_no'] ?? ''));
+            $policyNo  = Layout::escape((string) ($row['policy_no'] ?? '−'));
+            $custName  = Layout::escape((string) ($row['customer_name'] ?? ''));
+
+            if ($rowStatus === 'unlinked') {
+                $unlinkedRowsHtml .= '<tr>'
+                    . '<td>' . $rowNo . '</td>'
+                    . '<td>' . $policyNo . '</td>'
+                    . '<td>' . $custName . '</td>'
+                    . '<td><span class="muted">満期詳細画面から顧客を手動で紐づけてください</span></td>'
+                    . '</tr>';
+            } elseif ($rowStatus === 'error') {
+                $errMsg = (string) ($row['error_message'] ?? '');
+                $errorRowsHtml .= '<tr>'
+                    . '<td>' . $rowNo . '</td>'
+                    . '<td>' . $policyNo . '</td>'
+                    . '<td>' . $custName . '</td>'
+                    . '<td><span class="truncate">' . Layout::escape($errMsg) . '</span></td>'
+                    . '</tr>';
             }
-            $errMsg = (string) ($row['error_message'] ?? '');
-            if (str_contains($errMsg, 'ambiguous_customer')) {
-                $ambiguousCount++;
-            }
-            $errorRowsHtml .= '<tr>'
-                . '<td>' . Layout::escape((string) ($row['row_no'] ?? '')) . '</td>'
-                . '<td>' . Layout::escape((string) ($row['policy_no'] ?? '−')) . '</td>'
-                . '<td>' . Layout::escape((string) ($row['customer_name'] ?? '')) . '</td>'
-                . '<td><span class="truncate">' . Layout::escape($errMsg) . '</span></td>'
-                . '</tr>';
         }
 
-        if ($ambiguousCount > 0) {
-            $warnings .= '<div class="error" style="margin-bottom:10px;font-size:12.5px;">'
-                . Layout::escape($ambiguousCount . '件の顧客名が複数一致しました。該当行の契約・満期案件は登録されていません。顧客一覧で名寄せを行ってから、手動で登録してください。')
+        if ($unlinkedCount > 0) {
+            $warnings .= '<div class="warning" style="margin-bottom:10px;font-size:13px;">'
+                . Layout::escape($unlinkedCount . '件の契約が顧客と未紐づけの状態です。満期詳細画面から顧客を手動で設定してください。')
                 . '</div>';
         }
 
-        if ($errorRowsHtml === '') {
-            return $summary . $warnings;
+        $detailsHtml = '';
+
+        if ($unlinkedRowsHtml !== '') {
+            $detailsHtml .= '<details class="details-panel modal-help" open>'
+                . '<summary>未紐づけ行を確認（' . $unlinkedCount . '件）</summary>'
+                . '<div class="table-wrap">'
+                . '<table class="table-fixed table-card">'
+                . '<thead><tr><th>行</th><th>証券番号</th><th>顧客名</th><th>対応方法</th></tr></thead>'
+                . '<tbody>' . $unlinkedRowsHtml . '</tbody>'
+                . '</table>'
+                . '</div>'
+                . '</details>';
         }
 
-        return $summary
-            . $warnings
-            . '<details class="details-panel modal-help" open>'
-            . '<summary>エラー行を確認（' . $errorCount . '件）</summary>'
-            . '<div class="table-wrap">'
-            . '<table class="table-fixed table-card">'
-            . '<thead><tr><th>行</th><th>証券番号</th><th>顧客名</th><th>エラー内容</th></tr></thead>'
-            . '<tbody>' . $errorRowsHtml . '</tbody>'
-            . '</table>'
-            . '</div>'
-            . '</details>';
+        if ($errorRowsHtml !== '') {
+            $detailsHtml .= '<details class="details-panel modal-help" open>'
+                . '<summary>エラー行を確認（' . $errorCount . '件）</summary>'
+                . '<div class="table-wrap">'
+                . '<table class="table-fixed table-card">'
+                . '<thead><tr><th>行</th><th>証券番号</th><th>顧客名</th><th>エラー内容</th></tr></thead>'
+                . '<tbody>' . $errorRowsHtml . '</tbody>'
+                . '</table>'
+                . '</div>'
+                . '</details>';
+        }
+
+        return $summary . $warnings . $detailsHtml;
     }
 }

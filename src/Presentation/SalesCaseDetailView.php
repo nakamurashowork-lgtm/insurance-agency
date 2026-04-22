@@ -10,20 +10,24 @@ use App\Presentation\View\ListViewHelper;
 final class SalesCaseDetailView
 {
     /**
-     * 見込案件詳細（既存の確認・編集・削除専用）
+     * 見込案件詳細（既存の確認・編集専用。削除 UI は撤去）
+     *
+     * 注記: $deleteUrl / $deleteCsrf は呼び出し側（Controller）との API 互換のため
+     * 引数として受け取り続けるが、本 View では参照しない。削除エンドポイント自体は
+     * 残しているため、将来 UI を戻す場合は再利用可能。
      *
      * @param array<string, mixed>|null             $record
      * @param array<int, array<string, mixed>>      $customers
      * @param array<int, array<string, mixed>> $staffUsers
      * @param array<int, array<string, mixed>>      $activities
      * @param array<string, mixed>                  $layoutOptions
+     * @param array<int, array<string, mixed>>      $salesCaseStatuses
      */
     public static function renderDetail(
         ?array $record,
         array $customers,
         array $staffUsers,
         array $activities,
-        string $listUrl,
         string $detailUrl,
         string $updateUrl,
         string $deleteUrl,
@@ -35,7 +39,8 @@ final class SalesCaseDetailView
         ?string $flashSuccess,
         ?string $errorMessage,
         array $layoutOptions,
-        array $productCategories = []
+        array $productCategories = [],
+        array $salesCaseStatuses = []
     ): string {
         $noticeHtml = '';
         if (is_string($flashError) && $flashError !== '') {
@@ -52,40 +57,29 @@ final class SalesCaseDetailView
             $content =
                 $noticeHtml
                 . '<div class="card"><p>見込案件が見つかりません。</p>'
-                . '<a href="' . Layout::escape($listUrl) . '" class="btn btn-ghost">一覧に戻る</a></div>';
+                . '<button type="button" class="btn btn-ghost" onclick="history.back()">戻る</button></div>';
             return Layout::render('見込案件詳細', $content, $layoutOptions);
         }
 
-        $id         = (int) ($record['id'] ?? 0);
-        $custId     = (int) ($record['customer_id'] ?? 0);
-        $custName   = (string) ($record['customer_name'] ?? '');
-        $createdAt  = (string) ($record['created_at'] ?? '');
-        $updatedAt  = (string) ($record['updated_at'] ?? '');
+        $id           = (int) ($record['id'] ?? 0);
+        $custId       = (int) ($record['customer_id'] ?? 0);
+        $custName     = (string) ($record['customer_name'] ?? '');
+        $prospectName = (string) ($record['prospect_name'] ?? '');
+        $createdAt    = (string) ($record['created_at'] ?? '');
+        $updatedAt    = (string) ($record['updated_at'] ?? '');
 
-        $custUrl     = $custId > 0
+        $custUrl      = $custId > 0
             ? Layout::escape(ListViewHelper::buildUrl($customerDetailBaseUrl, ['id' => (string) $custId]))
             : '';
-        $custLinkHtml = $custUrl !== ''
-            ? '<a href="' . $custUrl . '" class="text-link">' . Layout::escape($custName) . '</a>'
-            : Layout::escape($custName);
+        $displayName  = $custId > 0 ? $custName : ($prospectName !== '' ? $prospectName : '');
+        $custLinkHtml = $custId > 0 && $custUrl !== ''
+            ? '<a href="' . $custUrl . '" class="text-link">' . Layout::escape($displayName) . '</a>'
+            : Layout::escape($displayName);
 
-        $formHtml = self::buildForm($record, $customers, $staffUsers, $id, $productCategories);
+        $formHtml = self::buildForm($record, $customers, $staffUsers, $id, $productCategories, $salesCaseStatuses);
 
-        $deleteDialog =
-            '<dialog id="dlg-delete" class="modal-dialog">'
-            . '<div class="modal-head"><h2>見込案件の削除</h2>'
-            . '<button type="button" class="modal-close" onclick="document.getElementById(\'dlg-delete\').close()">×</button>'
-            . '</div>'
-            . '<p>この見込案件を削除しますか？この操作は取り消せません。</p>'
-            . '<form method="post" action="' . Layout::escape($deleteUrl) . '">'
-            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($deleteCsrf) . '">'
-            . '<input type="hidden" name="id" value="' . $id . '">'
-            . '<div class="dialog-actions">'
-            . '<button type="submit" class="btn btn-danger">削除する</button>'
-            . '<button type="button" class="btn btn-ghost" onclick="document.getElementById(\'dlg-delete\').close()">キャンセル</button>'
-            . '</div>'
-            . '</form>'
-            . '</dialog>';
+        // 削除ダイアログは撤去（UI から削除ボタンを除去）。
+        // $deleteUrl / $deleteCsrf は現状の Controller→View シグネチャとの互換のために受け取るが、本 View では未使用。
 
         $activitiesHtml = self::renderLinkedActivities($activities, $activityDetailBaseUrl);
 
@@ -101,8 +95,7 @@ final class SalesCaseDetailView
             . '</div>'
             . '</div>'
             . '<div class="actions">'
-            . '<a href="' . Layout::escape($listUrl) . '" class="btn btn-secondary">一覧に戻る</a>'
-            . '<button type="button" class="btn btn-danger btn-small" onclick="document.getElementById(\'dlg-delete\').showModal()">削除</button>'
+            . '<button type="button" class="btn btn-secondary" onclick="history.back()">戻る</button>'
             . '<button type="submit" class="btn" form="sales-case-update-form">保存</button>'
             . '</div>'
             . '</div>'
@@ -114,11 +107,10 @@ final class SalesCaseDetailView
             . $formHtml
             . '<div class="actions" style="margin-top:8px;">'
             . '<button type="submit" class="btn btn-primary">保存</button>'
-            . '<a href="' . Layout::escape($listUrl) . '" class="btn btn-secondary">一覧に戻る</a>'
+            . '<button type="button" class="btn btn-secondary" onclick="history.back()">戻る</button>'
             . '</div>'
             . '</form>'
-            . $activitiesHtml
-            . $deleteDialog;
+            . $activitiesHtml;
 
         return Layout::render('見込案件詳細', $content, $layoutOptions);
     }
@@ -127,15 +119,19 @@ final class SalesCaseDetailView
      * @param array<string, mixed>                  $data
      * @param array<int, array<string, mixed>>      $customers
      * @param array<int, array<string, mixed>> $staffUsers
+     * @param array<int, array<string, mixed>>      $productCategories
+     * @param array<int, array<string, mixed>>      $salesCaseStatuses
      */
     private static function buildForm(
         array $data,
         array $customers,
         array $staffUsers,
         int $id = 0,
-        array $productCategories = []
+        array $productCategories = [],
+        array $salesCaseStatuses = []
     ): string {
         $customerIdVal        = (string) ($data['customer_id'] ?? '');
+        $prospectNameVal      = (string) ($data['prospect_name'] ?? '');
         $caseNameVal          = (string) ($data['case_name'] ?? '');
         $caseTypeVal          = (string) ($data['case_type'] ?? 'new');
         $productTypeVal       = (string) ($data['product_type'] ?? '');
@@ -143,11 +139,13 @@ final class SalesCaseDetailView
         $prospectRankVal      = (string) ($data['prospect_rank'] ?? '');
         $premiumVal           = ($data['expected_premium'] ?? null) !== null ? (string) $data['expected_premium'] : '';
         $closeMonthVal        = (string) ($data['expected_contract_month'] ?? '');
-        $referralSourceVal    = (string) ($data['referral_source'] ?? '');
         $nextActionDateVal    = (string) ($data['next_action_date'] ?? '');
         $lostReasonVal        = (string) ($data['lost_reason'] ?? '');
         $memoVal              = (string) ($data['memo'] ?? '');
         $staffUserIdVal       = (string) ($data['staff_id'] ?? '');
+
+        $hasCustomerId    = ($customerIdVal !== '' && (int) $customerIdVal > 0);
+        $useProspectInput = (!$hasCustomerId && $prospectNameVal !== '');
 
         $custOptions = '<option value="">-- 顧客を選択 --</option>';
         foreach ($customers as $cust) {
@@ -163,10 +161,22 @@ final class SalesCaseDetailView
             $caseTypeOptions .= '<option value="' . Layout::escape($val) . '"' . $sel . '>' . Layout::escape($label) . '</option>';
         }
 
+        // m_sales_case_status の name（表示名=DB格納値）を選択肢にする。
+        $statusNames = [];
+        foreach ($salesCaseStatuses as $row) {
+            $name = (string) ($row['name'] ?? '');
+            if ($name !== '') {
+                $statusNames[] = $name;
+            }
+        }
+        // 既存値がマスタから削除・無効化されていても現レコードを表示できるよう補完
+        if ($statusVal !== '' && !in_array($statusVal, $statusNames, true)) {
+            $statusNames[] = $statusVal;
+        }
         $statusOptions = '';
-        foreach (SalesCaseRepository::ALLOWED_STATUSES as $val => $label) {
-            $sel = $statusVal === $val ? ' selected' : '';
-            $statusOptions .= '<option value="' . Layout::escape($val) . '"' . $sel . '>' . Layout::escape($label) . '</option>';
+        foreach ($statusNames as $name) {
+            $sel = $statusVal === $name ? ' selected' : '';
+            $statusOptions .= '<option value="' . Layout::escape($name) . '"' . $sel . '>' . Layout::escape($name) . '</option>';
         }
 
         $rankOptions = '<option value="">— 未設定 —</option>';
@@ -185,15 +195,15 @@ final class SalesCaseDetailView
 
         $productOptions = '<option value="">— 未選択 —</option>';
         foreach ($productCategories as $cat) {
-            $catVal  = Layout::escape((string) ($cat['display_name'] ?? ''));
-            $sel     = $productTypeVal === (string) ($cat['display_name'] ?? '') ? ' selected' : '';
+            $catVal  = Layout::escape((string) ($cat['name'] ?? ''));
+            $sel     = $productTypeVal === (string) ($cat['name'] ?? '') ? ' selected' : '';
             $productOptions .= '<option value="' . $catVal . '"' . $sel . '>' . $catVal . '</option>';
         }
         // 既存値がマスタに存在しない場合は先頭に追加
         if ($productTypeVal !== '' && $productCategories !== []) {
             $exists = false;
             foreach ($productCategories as $cat) {
-                if ((string) ($cat['display_name'] ?? '') === $productTypeVal) {
+                if ((string) ($cat['name'] ?? '') === $productTypeVal) {
                     $exists = true;
                     break;
                 }
@@ -206,9 +216,9 @@ final class SalesCaseDetailView
             }
         }
 
-        // 失注理由はステータスが lost のときのみ表示（$id=0 は新規なので非表示）
+        // 失注理由は「失注」名のステータス時のみ表示（$id=0 は新規なので非表示）
         $lostReasonHtml = '';
-        if ($id > 0 && $statusVal === 'lost') {
+        if ($id > 0 && $statusVal === '失注') {
             $lostReasonHtml =
                 '<label class="form-field form-field--full"><span class="form-field-label">失注理由</span>'
                 . '<input type="text" name="lost_reason" value="' . Layout::escape($lostReasonVal) . '" maxlength="500"></label>';
@@ -218,13 +228,16 @@ final class SalesCaseDetailView
             '<div class="card">'
             . '<div class="customer-create-grid">'
 
-            . '<label class="form-field form-field--full"><span class="form-field-label">顧客（既存）</span>'
-            . '<select name="customer_id">' . $custOptions . '</select></label>'
+            . ($useProspectInput
+                ? '<label class="form-field"><span class="form-field-label">顧客（新規）</span>'
+                  . '<input type="text" name="prospect_name" value="' . Layout::escape($prospectNameVal) . '" maxlength="200" placeholder="会社名・氏名など"></label>'
+                : '<label class="form-field"><span class="form-field-label">顧客（既存）</span>'
+                  . '<select name="customer_id">' . $custOptions . '</select></label>')
 
-            . '<label class="form-field form-field--required form-field--full"><span class="form-field-label">案件名</span>'
+            . '<label class="form-field form-field--required"><span class="form-field-label">案件名</span>'
             . '<input type="text" name="case_name" value="' . Layout::escape($caseNameVal) . '" required maxlength="200"></label>'
 
-            . '<label class="form-field form-field--required"><span class="form-field-label">ステータス</span>'
+            . '<label class="form-field form-field--required"><span class="form-field-label">対応状況</span>'
             . '<select name="status" required>' . $statusOptions . '</select></label>'
 
             . '<label class="form-field"><span class="form-field-label">種目</span>'
@@ -244,9 +257,6 @@ final class SalesCaseDetailView
 
             . '<label class="form-field"><span class="form-field-label">担当者</span>'
             . '<select name="staff_id">' . $staffOptions . '</select></label>'
-
-            . '<label class="form-field form-field--full"><span class="form-field-label">紹介元</span>'
-            . '<input type="text" name="referral_source" value="' . Layout::escape($referralSourceVal) . '" maxlength="200"></label>'
 
             . $lostReasonHtml
 

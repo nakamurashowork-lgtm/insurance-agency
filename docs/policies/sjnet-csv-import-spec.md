@@ -40,7 +40,7 @@
 
 | 列番号 | 列名 | 取込用途 | 対応カラム |
 |---|---|---|---|
-| 4 (D) | **顧客名** | 顧客名寄せ・新規登録 | `m_customer.customer_name` |
+| 4 (D) | **顧客名** | 顧客照合・新規登録 | `m_customer.customer_name` |
 | 16 (P) | **保険始期** | 契約登録・更新 | `t_contract.policy_start_date` |
 | 17 (Q) | **保険終期** | 契約の識別キー（policy_no との複合）・契約登録・更新・満期日 | `t_contract.policy_end_date` / `t_renewal_case.maturity_date` |
 | 18 (R) | **種目種類** | 契約登録・更新 | `t_contract.product_type` |
@@ -52,6 +52,7 @@
 
 | 列番号 | 列名 | 取込用途 | 対応カラム |
 |---|---|---|---|
+| 5 (E) | 生年月日 | 顧客照合キー（名前との複合）・新規登録時に保存 | `m_customer.birth_date` |
 | 6 (F) | 郵便番号 | 顧客新規登録時のみ（既存顧客には反映しない） | `m_customer.postal_code` |
 | 7 (G) | 住所 | 同上 | `m_customer.address1` |
 | 8 (H) | ＴＥＬ | 同上 | `m_customer.phone` |
@@ -65,7 +66,6 @@
 | 1 (A) | 満期契約の識別 | |
 | 2 (B) | 満期日（月） | Q列（保険終期）で代替するため不要 |
 | 3 (C) | 満期日（日） | Q列（保険終期）で代替するため不要 |
-| 5 (E) | 生年月日 | |
 | 9 (I) | ＦＡＸ | |
 | 10 (J) | 携帯ＴＥＬ | |
 | 11 (K) | 更改状況 | |
@@ -98,7 +98,7 @@ t_renewal_case.maturity_date  = CSV の Q列（同じ値）
 
 この方式は、業務 Excel の運用（保険終期 = 満期日）と一致する。B列（満期月）・C列（満期日）から年を動的算出する旧ロジックは廃止した。
 
-**廃止した旧ロジック（参考）**  
+**廃止した旧ロジック（参考）**
 以前は B列の月・C列の日から「取込日を基準に当年または翌年」を判定して満期日を算出していた。この算出は業務 Excel の運用と乖離しており、かつ不必要な複雑さを持っていたため廃止した。
 
 ---
@@ -111,48 +111,66 @@ t_renewal_case.maturity_date  = CSV の Q列（同じ値）
 【STEP 1】証券番号（列19）を取得する
   → 空の場合: row_status = 'skip' としてスキップ
 
-【STEP 2】顧客の解決（列4: 顧客名）
-  → m_customer.customer_name で完全一致検索（is_deleted = 0）
-  → 1件ヒット: そのcustomer_idを使用
-  → 0件ヒット: m_customer に新規 INSERT
-      customer_name = 列4
-      postal_code   = 列6（空の場合はNULL）
-      address1      = 列7（空の場合はNULL）
-      phone         = 列8（空の場合はNULL）
-      customer_type = 'individual'（デフォルト）
-      status        = 'active'
+【STEP 2】顧客の照合（列4: 顧客名、列5: 生年月日）
+
+  (A) CSV 生年月日（列5）が存在する場合:
+      m_customer を customer_name = 列4 AND birth_date = 列5 AND is_deleted = 0 で検索
+
+  (B) CSV 生年月日（列5）が空の場合:
+      m_customer を customer_name = 列4 AND is_deleted = 0 で検索
+
+  検索結果による分岐:
+
+  [0件ヒット] → m_customer に新規 INSERT
+      customer_name  = 列4
+      birth_date     = 列5（空の場合は NULL）
+      postal_code    = 列6（空の場合は NULL）
+      address1       = 列7（空の場合は NULL）
+      phone          = 列8（空の場合は NULL）
+      customer_type  = 'individual'（デフォルト）
+      status         = 'active'
       created_by / updated_by = システムユーザーID（取込専用）
-  → 2件以上ヒット: この行は row_status = 'error'、error_type = 'ambiguous_customer' として記録する
-    STEP 4・STEP 5 は実行せず、この行の契約・満期案件の登録・更新をスキップする
-    取込全体は続行する（他の行に影響しない）
+    → INSERT した customer_id を使用して STEP 3 へ
+
+  [1件ヒット] → そのまま customer_id を使用して STEP 3 へ
+    ※ 既存顧客の情報は一切 UPDATE しない
+
+  [複数件ヒット] → 未リンク取込
+    → customer_id = NULL、sjnet_customer_name = 列4 として STEP 3 へ
+    ※ 契約・満期案件は通常通り登録する（STEP 4・5 を続行する）
+    ※ row_status = 'unlinked' として記録する
 
 【STEP 3】担当者の解決（列44: 代理店コード）
   → docs/policies/sjnet_staff_mapping_spec.md のルールに従って解決
 
 【STEP 4】契約の登録・更新（列19: 証券番号 + 列17: 保険終期）
-  ※ STEP 2 で ambiguous_customer となった行はこのステップを実行しない
   → t_contract を policy_no = 列19 AND policy_end_date = 列17（日付変換）AND is_deleted = 0 で検索
     ※ 同一証券番号でも終期日が異なれば別の契約年度として扱う
+
   → ヒット（UPDATE）: 同一年度の再取込
-      policy_start_date  = 列16（日付変換）
-      policy_end_date    = 列17（日付変換）
-      product_type       = 列18
-      payment_cycle      = 列20
-      premium_amount     = 列23（数値変換）
-      sales_user_id      = resolved_staff_user_id（NULL の場合は上書きしない）
+      policy_start_date      = 列16（日付変換）
+      policy_end_date        = 列17（日付変換）
+      product_type           = 列18
+      payment_cycle          = 列20
+      premium_amount         = 列23（数値変換）
+      sales_staff_id         = resolved_staff_user_id（NULL の場合は上書きしない）
+      sjnet_customer_name    = 列4（常に最新値で更新）
       last_sjnet_imported_at = 取込実行日時
-      ※ customer_id は UPDATE しない（既存の顧客紐づけを維持する）
-      ※ 保険会社（列15: O列）は参照しない（損保ジャパン専用のため）
+      ※ customer_id の扱い（再取込時）:
+          - customer_id が既に NULL 以外なら維持（上書きしない）
+          - customer_id が NULL なら STEP 2 の結果を反映する
+
   → ミス（INSERT）: 新年度の契約として新規作成
-      customer_id        = STEP 2 で解決した customer_id
-      policy_no          = 列19
-      policy_start_date  = 列16
-      policy_end_date    = 列17
-      product_type       = 列18
-      payment_cycle      = 列20
-      premium_amount     = 列23
-      sales_user_id      = resolved_staff_user_id
-      status             = 'active'
+      customer_id            = STEP 2 で解決した customer_id（未リンク時は NULL）
+      sjnet_customer_name    = 列4
+      policy_no              = 列19
+      policy_start_date      = 列16
+      policy_end_date        = 列17
+      product_type           = 列18
+      payment_cycle          = 列20
+      premium_amount         = 列23
+      sales_staff_id         = resolved_staff_user_id
+      status                 = 'active'
       last_sjnet_imported_at = 取込実行日時
       ※ INSERT 後、同一 policy_no の旧満期案件のうち
         case_status IN ('renewed', 'lost') かつ maturity_date < 新案件の maturity_date
@@ -162,9 +180,9 @@ t_renewal_case.maturity_date  = CSV の Q列（同じ値）
 【STEP 5】満期案件の登録・更新
   → contract_id + maturity_date（STEP 4 の contract_id と列17の保険終期）で
     t_renewal_case を検索（is_deleted = 0）
-  → ヒット（UPDATE):
+  → ヒット（UPDATE）:
       assigned_user_id = resolved_staff_user_id（既に設定済みの場合は上書きしない）
-  → ミス（INSERT):
+  → ミス（INSERT）:
       contract_id      = STEP 4 の contract_id
       maturity_date    = 列17（保険終期）と同じ値（YYYY-MM-DD）
       case_status      = 'not_started'
@@ -172,7 +190,7 @@ t_renewal_case.maturity_date  = CSV の Q列（同じ値）
       office_user_id   = t_contract.office_user_id を引き継ぐ
 
 【STEP 6】t_sjnet_import_row に結果を記録する
-  row_status = 'insert' / 'update' / 'skip' / 'error'
+  row_status = 'insert' / 'update' / 'skip' / 'unlinked'
 ```
 
 ### 5-2. スキップ対象
@@ -195,8 +213,8 @@ t_renewal_case.maturity_date  = CSV の Q列（同じ値）
   契約 新規登録:      N 件
   契約 更新:          N 件
   顧客 自動登録:      N 件
+  未紐づけ契約:       N 件（顧客名が複数一致したため customer_id 未設定）
   スキップ:           N 行
-  エラー:             N 行（顧客名重複を含む）
 
 【担当者マッピング】（sjnet_staff_mapping_spec.md 準拠）
   担当者解決済み:     N 件
@@ -204,16 +222,15 @@ t_renewal_case.maturity_date  = CSV の Q列（同じ値）
   無効コード:         N 件
 ```
 
-エラー行がある場合、サマリの下にエラー行一覧を表示する。
+未紐づけ契約がある場合、サマリの下に一覧を表示する。
 
-| 行番号 | 証券番号 | 顧客名 | エラー種別 | 対応方法 |
-|---|---|---|---|---|
-| 3 | AB1234567 | 山田 太郎 | 顧客名重複 | 顧客一覧で名寄せ後、手動で契約を登録してください |
-| 7 | — | 鈴木 花子 | 顧客名空欄 | スキップされました |
+| 行番号 | 証券番号 | 顧客名 | 対応方法 |
+|---|---|---|---|
+| 3 | AB1234567 | 山田 太郎 | 満期詳細画面から顧客を手動で紐づけてください |
 
-顧客名重複（ambiguous_customer）が1件以上ある場合:
-> 「N件の顧客名が複数一致しました。該当行の契約・満期案件は登録されていません。顧客一覧で名寄せを行ってから、手動で登録してください。」
-> → 顧客一覧へのリンクを付与する
+未紐づけ契約が1件以上ある場合:
+> 「N件の契約が顧客と未紐づけの状態です。満期詳細画面から顧客を手動で設定してください。」
+> → 満期一覧へのリンクを付与する
 
 ---
 
@@ -233,7 +250,7 @@ t_renewal_case.maturity_date  = CSV の Q列（同じ値）
 取込完了後にダイアログ内に表示する。
 
 - サマリ（セクション6 の内容）
-- 顧客名重複の警告（該当がある場合）
+- 未紐づけ契約の警告（該当がある場合）
 - マッピング未登録の警告（該当がある場合）
 
 ---
@@ -254,6 +271,10 @@ t_renewal_case.maturity_date  = CSV の Q列（同じ値）
 
 以下は本仕様の確定に伴い廃止する。
 
+- `ambiguous_customer` エラー種別
+  → 複数件ヒット時はエラーではなく未リンク取込（row_status = 'unlinked'）として扱う
+- 複数件ヒット時の契約・満期案件登録スキップ
+  → 登録をスキップせず customer_id = NULL で契約・満期案件を登録する
 - `docs/screens/sales-performance-list.md` セクション18（成績管理簿 CSV 取込仕様）
   → 成績管理簿 CSV 取込は業務上不要のため削除する
 - `docs/plans/05_implementation-plan.md` Phase 4C（成績管理簿対応 CSV 取込フェーズ）

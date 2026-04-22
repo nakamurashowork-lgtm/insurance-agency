@@ -10,21 +10,32 @@ use Throwable;
 
 final class SjnetCsvImportService
 {
-    private const EXPECTED_COLUMNS = 44;
+    // CSV ヘッダ名（必須）
+    private const HDR_POLICY_NO      = '証券番号';
+    private const HDR_CUSTOMER_NAME  = '顧客名';
+    private const HDR_BIRTH_DATE     = '生年月日';
+    private const HDR_END_DATE       = '保険終期';
+    private const HDR_PRODUCT_TYPE   = '種目種類';
+    private const HDR_PREMIUM_AMOUNT = '合計保険料';
+    private const HDR_AGENCY_CODE    = '代理店ｺｰﾄﾞ'; // 半角カタカナ
 
-    // 0-indexed column positions
-    private const COL_CUSTOMER_NAME   = 3;   // D: 顧客名
-    private const COL_POSTAL_CODE     = 5;   // F: 郵便番号
-    private const COL_ADDRESS1        = 6;   // G: 住所
-    private const COL_PHONE           = 7;   // H: ＴＥＬ
-    private const COL_START_DATE      = 15;  // P: 保険始期
-    private const COL_END_DATE        = 16;  // Q: 保険終期（満期日としても使用）
-    private const COL_PRODUCT_TYPE    = 17;  // R: 種目種類
-    private const COL_POLICY_NO       = 18;  // S: 証券番号
-    private const COL_PAYMENT_CYCLE   = 19;  // T: 払込方法
-    private const COL_PREMIUM_AMOUNT  = 22;  // W: 合計保険料
-    private const COL_SJNET_STAFF_NAME = 42; // AQ: 担当者
-    private const COL_SJNET_AGENCY_CODE = 43; // AR: 代理店ｺｰﾄﾞ（実際のCSVヘッダは半角カタカナ）
+    // CSV ヘッダ名（任意）
+    private const HDR_POSTAL_CODE   = '郵便番号';
+    private const HDR_ADDRESS1      = '住所';
+    private const HDR_PHONE         = 'ＴＥＬ';
+    private const HDR_START_DATE    = '保険始期';
+    private const HDR_PAYMENT_CYCLE = '払込方法';
+    private const HDR_STAFF_NAME    = '担当者';
+
+    private const REQUIRED_HEADERS = [
+        self::HDR_POLICY_NO,
+        self::HDR_CUSTOMER_NAME,
+        self::HDR_BIRTH_DATE,
+        self::HDR_END_DATE,
+        self::HDR_PRODUCT_TYPE,
+        self::HDR_PREMIUM_AMOUNT,
+        self::HDR_AGENCY_CODE,
+    ];
 
     public function __construct(
         private PDO $pdo,
@@ -36,7 +47,7 @@ final class SjnetCsvImportService
     /**
      * CSVファイルを取り込む
      *
-     * @return array{batch_id: int, total: int, valid: int, skip: int, insert: int, update: int, customer_insert: int, error: int}
+     * @return array{batch_id: int, total: int, valid: int, skip: int, insert: int, update: int, customer_insert: int, unlinked: int, error: int}
      */
     public function import(string $filePath, string $originalFileName): array
     {
@@ -56,23 +67,63 @@ final class SjnetCsvImportService
             'insert'          => 0,
             'update'          => 0,
             'customer_insert' => 0,
+            'unlinked'        => 0,
             'error'           => 0,
         ];
 
-        try {
-            $lines = $this->parseCsvLines($content);
-            $dataRows = array_slice($lines, 1); // ヘッダ行をスキップ
+        $lines = $this->parseCsvLines($content);
 
-            foreach ($dataRows as $rowIndex => $cols) {
-                $rowNo = $rowIndex + 2; // 2行目から（1行目がヘッダ）
-                $counters['total']++;
+        // 空ファイル → 0 件取込として正常終了（エラーにしない）
+        if (count($lines) === 0) {
+            $importRepo->finishBatch($batchId, $counters);
+            return array_merge(['batch_id' => $batchId], $counters);
+        }
 
-                $rowData = $this->processRow($cols, $rowNo, $counters);
-                $importRepo->insertRow($batchId, $rowNo, $rowData);
+        // ヘッダ行を解析して colMap を構築
+        $colMap = [];
+        foreach ($lines[0] as $idx => $header) {
+            $colMap[$header] = $idx;
+        }
+
+        // 必須ヘッダの存在チェック（不足時は fail して例外を投げる）
+        foreach (self::REQUIRED_HEADERS as $required) {
+            if (!array_key_exists($required, $colMap)) {
+                $importRepo->failBatch($batchId);
+                throw new \RuntimeException('CSVヘッダが不足しています: ' . $required);
             }
-        } catch (Throwable) {
-            $importRepo->failBatch($batchId);
-            throw new \RuntimeException('CSV取込中に予期しないエラーが発生しました。');
+        }
+
+        $dataRows = array_slice($lines, 1); // ヘッダ行をスキップ
+
+        foreach ($dataRows as $rowIndex => $cols) {
+            $rowNo = $rowIndex + 2; // 2行目から（1行目がヘッダ）
+            $counters['total']++;
+            $countersBefore = $counters; // processRow 前のスナップショット（total 込み）
+
+            try {
+                $this->pdo->beginTransaction();
+                $rowData = $this->processRow($cols, $rowNo, $counters, $colMap);
+                $this->pdo->commit();
+            } catch (Throwable $e) {
+                if ($this->pdo->inTransaction()) {
+                    $this->pdo->rollBack();
+                }
+                // カウンタを processRow 前の状態に戻して error++ する
+                $counters = $countersBefore;
+                $counters['error']++;
+                $policyNoRaw     = $this->col($cols, $colMap, self::HDR_POLICY_NO);
+                $customerNameRaw = $this->col($cols, $colMap, self::HDR_CUSTOMER_NAME);
+                $rowData = [
+                    'raw'           => $cols,
+                    'policy_no'     => $policyNoRaw !== '' ? $policyNoRaw : null,
+                    'customer_name' => $customerNameRaw !== '' ? $customerNameRaw : null,
+                    'row_status'    => 'error',
+                    'error_message' => 'システムエラー: ' . $e->getMessage(),
+                ];
+            }
+
+            // ログ書き込みはトランザクション外で必ず実行する
+            $importRepo->insertRow($batchId, $rowNo, $rowData);
         }
 
         $importRepo->finishBatch($batchId, $counters);
@@ -140,31 +191,26 @@ final class SjnetCsvImportService
      * 1行を処理して結果配列を返す
      *
      * @param array<int, string> $cols
-     * @param array{total: int, valid: int, skip: int, insert: int, update: int, customer_insert: int, error: int} $counters
+     * @param array{total: int, valid: int, skip: int, insert: int, update: int, customer_insert: int, unlinked: int, error: int} $counters
+     * @param array<string, int> $colMap ヘッダ名 → 列インデックスのマップ
      * @return array<string, mixed>
      */
-    private function processRow(array $cols, int $rowNo, array &$counters): array
+    private function processRow(array $cols, int $rowNo, array &$counters, array $colMap): array
     {
-        // 列数が足りない行はスキップ
-        $maxIndex = self::EXPECTED_COLUMNS - 1;
-        while (count($cols) <= $maxIndex) {
-            $cols[] = '';
-        }
-
         $raw = $cols;
 
-        $policyNo     = trim($cols[self::COL_POLICY_NO]);
-        $customerName = trim($cols[self::COL_CUSTOMER_NAME]);
-        $endDateRaw   = trim($cols[self::COL_END_DATE]);
+        $policyNo     = $this->col($cols, $colMap, self::HDR_POLICY_NO);
+        $customerName = $this->col($cols, $colMap, self::HDR_CUSTOMER_NAME);
+        $endDateRaw   = $this->col($cols, $colMap, self::HDR_END_DATE);
 
         // STEP 1: 証券番号チェック
         if ($policyNo === '') {
             $counters['skip']++;
             return [
-                'raw'          => $raw,
-                'policy_no'    => null,
+                'raw'           => $raw,
+                'policy_no'     => null,
                 'customer_name' => $customerName ?: null,
-                'row_status'   => 'skip',
+                'row_status'    => 'skip',
                 'error_message' => '証券番号が空のためスキップ',
             ];
         }
@@ -173,49 +219,38 @@ final class SjnetCsvImportService
         if ($customerName === '' || $endDateRaw === '') {
             $counters['skip']++;
             return [
-                'raw'          => $raw,
-                'policy_no'    => $policyNo,
+                'raw'           => $raw,
+                'policy_no'     => $policyNo,
                 'customer_name' => $customerName ?: null,
-                'row_status'   => 'skip',
+                'row_status'    => 'skip',
                 'error_message' => '顧客名または保険終期が空のためスキップ',
             ];
         }
 
         $counters['valid']++;
 
-        // 満期日の決定: Q列（保険終期）をそのまま使用
+        // 満期日の決定: 保険終期をそのまま使用
         $maturityDate = $this->parseDate($endDateRaw);
         if ($maturityDate === null) {
-            $counters['error']++;
-            return [
-                'raw'          => $raw,
-                'policy_no'    => $policyNo,
-                'customer_name' => $customerName,
-                'row_status'   => 'error',
-                'error_message' => '保険終期の日付が不正: ' . $endDateRaw,
-            ];
-        }
-
-        // STEP 2: 顧客の解決
-        $agencyCode  = trim($cols[self::COL_SJNET_AGENCY_CODE]);
-        $sjnetStaffName = trim($cols[self::COL_SJNET_STAFF_NAME]);
-
-        [$customerId, $customerWasInserted, $customerError] = $this->resolveCustomer($customerName, $cols);
-        if ($customerError !== null) {
             $counters['error']++;
             return [
                 'raw'           => $raw,
                 'policy_no'     => $policyNo,
                 'customer_name' => $customerName,
-                'maturity_date' => $maturityDate,
-                'sjnet_agency_code' => $agencyCode ?: null,
-                'sjnet_staff_name'  => $sjnetStaffName ?: null,
                 'row_status'    => 'error',
-                'error_message' => $customerError,
+                'error_message' => '保険終期の日付が不正: ' . $endDateRaw,
             ];
         }
 
-        if ($customerWasInserted) {
+        // STEP 2: 顧客の照合
+        $agencyCode     = $this->col($cols, $colMap, self::HDR_AGENCY_CODE);
+        $sjnetStaffName = $this->col($cols, $colMap, self::HDR_STAFF_NAME);
+
+        [$customerId, $customerWasInserted, $isUnlinked] = $this->resolveCustomer($customerName, $cols, $colMap);
+
+        if ($isUnlinked) {
+            $counters['unlinked']++;
+        } elseif ($customerWasInserted) {
             $counters['customer_insert']++;
         }
 
@@ -223,22 +258,21 @@ final class SjnetCsvImportService
         [$resolvedUserId, $mappingStatus] = $this->resolveStaff($agencyCode);
 
         // STEP 4: 契約の登録・更新
-        $startDate      = $this->parseDate(trim($cols[self::COL_START_DATE]));
-        $endDate        = $maturityDate; // Q列（保険終期）= 満期日
-        $productType    = trim($cols[self::COL_PRODUCT_TYPE]);
-        $paymentCycle   = trim($cols[self::COL_PAYMENT_CYCLE]);
-        $premiumAmount  = $this->parsePremium(trim($cols[self::COL_PREMIUM_AMOUNT]));
+        $startDate     = $this->parseDate($this->col($cols, $colMap, self::HDR_START_DATE));
+        $endDate       = $maturityDate; // 保険終期 = 満期日
+        $productType   = $this->col($cols, $colMap, self::HDR_PRODUCT_TYPE);
+        $paymentCycle  = $this->col($cols, $colMap, self::HDR_PAYMENT_CYCLE);
+        $premiumAmount = $this->parsePremium($this->col($cols, $colMap, self::HDR_PREMIUM_AMOUNT));
 
         [$contractId, $contractWasInserted] = $this->upsertContract(
             $policyNo,
-            (int) $customerId,
+            $customerId,
+            $customerName,
             $startDate,
             $endDate,
             $productType,
             $paymentCycle,
-            $premiumAmount,
-            $resolvedUserId,
-            $maturityDate
+            $premiumAmount
         );
 
         if ($contractWasInserted) {
@@ -262,36 +296,65 @@ final class SjnetCsvImportService
             // contractWasInserted=true の場合は既に insert++ 済みなので何もしない
         }
 
+        $rowStatus = $isUnlinked ? 'unlinked' : ($isInsert ? 'insert' : 'update');
+
         return [
-            'raw'                    => $raw,
-            'policy_no'              => $policyNo,
-            'customer_name'          => $customerName,
-            'maturity_date'          => $maturityDate,
-            'sjnet_agency_code'      => $agencyCode ?: null,
-            'sjnet_staff_name'       => $sjnetStaffName ?: null,
-            'resolved_staff_id' => $resolvedUserId,
-            'staff_mapping_status'   => $mappingStatus,
-            'matched_contract_id'    => $contractId,
+            'raw'                     => $raw,
+            'policy_no'               => $policyNo,
+            'customer_name'           => $customerName,
+            'maturity_date'           => $maturityDate,
+            'sjnet_agency_code'       => $agencyCode ?: null,
+            'sjnet_staff_name'        => $sjnetStaffName ?: null,
+            'resolved_staff_id'       => $resolvedUserId,
+            'staff_mapping_status'    => $mappingStatus,
+            'matched_contract_id'     => $contractId,
             'matched_renewal_case_id' => $renewalCaseId,
-            'row_status'             => $isInsert ? 'insert' : 'update',
+            'row_status'              => $rowStatus,
         ];
     }
 
     /**
-     * 顧客を解決（名寄せ or 新規登録）
+     * 顧客を照合する（顧客名+生年月日で検索）
+     *
+     * 照合ロジック:
+     *   - 生年月日が CSV に存在する場合: customer_name AND birth_date AND is_deleted=0 で検索
+     *   - 生年月日が空の場合: customer_name AND birth_date IS NULL AND is_deleted=0 で検索
+     * 結果:
+     *   0件 → 新規 INSERT、customer_id を返す
+     *   1件 → そのまま customer_id を返す（既存顧客は一切 UPDATE しない）
+     *   複数件 → customer_id=NULL で未リンク取込（isUnlinked=true）
      *
      * @param array<int, string> $cols
-     * @return array{0: int|null, 1: bool, 2: string|null}  [customer_id, was_inserted, error_message]
+     * @param array<string, int> $colMap
+     * @return array{0: int|null, 1: bool, 2: bool}  [customer_id, was_inserted, is_unlinked]
      */
-    private function resolveCustomer(string $customerName, array $cols): array
+    private function resolveCustomer(string $customerName, array $cols, array $colMap): array
     {
-        $stmt = $this->pdo->prepare(
-            'SELECT id FROM m_customer
-             WHERE customer_name = :name
-               AND is_deleted = 0
-             LIMIT 3'
-        );
-        $stmt->bindValue(':name', $customerName);
+        $birthDateRaw = $this->col($cols, $colMap, self::HDR_BIRTH_DATE);
+        $birthDate    = $birthDateRaw !== '' ? $this->parseBirthDate($birthDateRaw) : null;
+
+        if ($birthDate !== null) {
+            // 生年月日あり: 顧客名 + 生年月日で照合
+            $stmt = $this->pdo->prepare(
+                'SELECT id FROM m_customer
+                 WHERE customer_name = :name
+                   AND birth_date = :birth_date
+                   AND is_deleted = 0
+                 LIMIT 3'
+            );
+            $stmt->bindValue(':name', $customerName);
+            $stmt->bindValue(':birth_date', $birthDate);
+        } else {
+            // 生年月日なし: 顧客名 + birth_date IS NULL で照合
+            $stmt = $this->pdo->prepare(
+                'SELECT id FROM m_customer
+                 WHERE customer_name = :name
+                   AND birth_date IS NULL
+                   AND is_deleted = 0
+                 LIMIT 3'
+            );
+            $stmt->bindValue(':name', $customerName);
+        }
         $stmt->execute();
         $found = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -300,27 +363,30 @@ final class SjnetCsvImportService
         }
 
         if (count($found) === 1) {
-            return [(int) $found[0]['id'], false, null];
+            // 1件ヒット: 自動リンク（既存顧客の情報は一切 UPDATE しない）
+            return [(int) $found[0]['id'], false, false];
         }
 
         if (count($found) >= 2) {
-            return [null, false, '顧客名が複数一致しています（ambiguous_customer）: ' . $customerName];
+            // 複数件ヒット: 未リンク取込（エラーにしない）
+            return [null, false, true];
         }
 
-        // 0件 → 新規登録
-        $postalCode = trim($cols[self::COL_POSTAL_CODE]) ?: null;
-        $address1   = trim($cols[self::COL_ADDRESS1]) ?: null;
-        $phone      = trim($cols[self::COL_PHONE]) ?: null;
+        // 0件ヒット: 新規 INSERT
+        $postalCode = $this->col($cols, $colMap, self::HDR_POSTAL_CODE) ?: null;
+        $address1   = $this->col($cols, $colMap, self::HDR_ADDRESS1) ?: null;
+        $phone      = $this->col($cols, $colMap, self::HDR_PHONE) ?: null;
 
         $stmt = $this->pdo->prepare(
             'INSERT INTO m_customer
-               (customer_type, customer_name, postal_code, address1, phone,
+               (customer_type, customer_name, birth_date, postal_code, address1, phone,
                 status, is_deleted, created_by, updated_by)
              VALUES
-               (\'individual\', :name, :postal_code, :address1, :phone,
+               (\'individual\', :name, :birth_date, :postal_code, :address1, :phone,
                 \'active\', 0, :created_by, :updated_by)'
         );
         $stmt->bindValue(':name', $customerName);
+        $stmt->bindValue(':birth_date', $birthDate);
         $stmt->bindValue(':postal_code', $postalCode);
         $stmt->bindValue(':address1', $address1);
         $stmt->bindValue(':phone', $phone);
@@ -328,7 +394,19 @@ final class SjnetCsvImportService
         $stmt->bindValue(':updated_by', $this->executedBy, PDO::PARAM_INT);
         $stmt->execute();
 
-        return [(int) $this->pdo->lastInsertId(), true, null];
+        return [(int) $this->pdo->lastInsertId(), true, false];
+    }
+
+    /**
+     * ヘッダ名でカラム値を取得するヘルパ（任意列は colMap に存在しない場合は空文字を返す）
+     *
+     * @param array<int, string> $cols
+     * @param array<string, int> $colMap
+     */
+    private function col(array $cols, array $colMap, string $header): string
+    {
+        $idx = $colMap[$header] ?? null;
+        return $idx !== null ? ($cols[$idx] ?? '') : '';
     }
 
     /**
@@ -342,7 +420,7 @@ final class SjnetCsvImportService
             return [null, null];
         }
 
-        $repo = new StaffRepository($this->pdo);
+        $repo  = new StaffRepository($this->pdo);
         $staff = $repo->findBySjnetCode($agencyCode);
 
         if ($staff === null) {
@@ -364,24 +442,26 @@ final class SjnetCsvImportService
      * ヒット → UPDATE（同年度の再取込）
      * ミス   → INSERT（新年度の契約として新規作成）
      *
+     * UPDATE 時の customer_id 扱い:
+     *   - 既存 customer_id が NULL 以外 → 維持（上書きしない）
+     *   - 既存 customer_id が NULL     → 再照合結果（$customerId）を反映
+     *
      * @return array{0: int, 1: bool}  [contract_id, was_inserted]
      */
     private function upsertContract(
         string $policyNo,
-        int $customerId,
+        ?int $customerId,
+        string $sjnetCustomerName,
         ?string $startDate,
         ?string $endDate,
         string $productType,
         string $paymentCycle,
-        ?int $premiumAmount,
-        ?int $resolvedUserId,
-        string $maturityDate
+        ?int $premiumAmount
     ): array {
-        // 証券番号 + 終期日（policy_end_date）で同一年度の契約を検索する。
-        // policy_end_date が CSV に存在しない（null）の場合は IS NULL で照合する。
+        // 証券番号 + 終期日（policy_end_date）で同一年度の契約を検索する
         if ($endDate !== null) {
             $stmt = $this->pdo->prepare(
-                'SELECT id, sales_staff_id
+                'SELECT id, customer_id
                  FROM t_contract
                  WHERE policy_no = :policy_no
                    AND policy_end_date = :end_date
@@ -392,7 +472,7 @@ final class SjnetCsvImportService
             $stmt->bindValue(':end_date', $endDate);
         } else {
             $stmt = $this->pdo->prepare(
-                'SELECT id, sales_staff_id
+                'SELECT id, customer_id
                  FROM t_contract
                  WHERE policy_no = :policy_no
                    AND policy_end_date IS NULL
@@ -407,30 +487,32 @@ final class SjnetCsvImportService
         $now = $this->importDate->format('Y-m-d H:i:s');
 
         if (is_array($existing)) {
-            $contractId     = (int) $existing['id'];
-            $existingUserId = $existing['sales_staff_id'] !== null ? (int) $existing['sales_staff_id'] : null;
+            $contractId = (int) $existing['id'];
 
-            // sales_staff_id は未設定の場合のみ上書き
-            $newSalesUserId = $existingUserId === null ? $resolvedUserId : $existingUserId;
+            // customer_id: 既存が NULL の場合のみ再照合結果を反映、それ以外は維持
+            $existingCustomerId = $existing['customer_id'] !== null ? (int) $existing['customer_id'] : null;
+            $newCustomerId = $existingCustomerId ?? $customerId;
 
             $stmt = $this->pdo->prepare(
                 'UPDATE t_contract
-                 SET policy_start_date       = :start_date,
+                 SET customer_id             = :customer_id,
+                     sjnet_customer_name     = :sjnet_customer_name,
+                     policy_start_date       = :start_date,
                      policy_end_date         = :end_date,
                      product_type            = :product_type,
                      payment_cycle           = :payment_cycle,
                      premium_amount          = :premium,
-                     sales_staff_id           = :sales_staff_id,
                      last_sjnet_imported_at  = :imported_at,
                      updated_by              = :updated_by
                  WHERE id = :id'
             );
+            $stmt->bindValue(':customer_id', $newCustomerId, $newCustomerId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+            $stmt->bindValue(':sjnet_customer_name', $sjnetCustomerName);
             $stmt->bindValue(':start_date', $startDate);
             $stmt->bindValue(':end_date', $endDate);
             $stmt->bindValue(':product_type', $productType !== '' ? $productType : null);
             $stmt->bindValue(':payment_cycle', $paymentCycle !== '' ? $paymentCycle : null);
             $stmt->bindValue(':premium', $premiumAmount ?? 0, PDO::PARAM_INT);
-            $stmt->bindValue(':sales_staff_id', $newSalesUserId, $newSalesUserId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
             $stmt->bindValue(':imported_at', $now);
             $stmt->bindValue(':updated_by', $this->executedBy, PDO::PARAM_INT);
             $stmt->bindValue(':id', $contractId, PDO::PARAM_INT);
@@ -442,64 +524,32 @@ final class SjnetCsvImportService
         // INSERT
         $stmt = $this->pdo->prepare(
             'INSERT INTO t_contract
-               (customer_id, policy_no,
+               (customer_id, sjnet_customer_name, policy_no,
                 policy_start_date, policy_end_date,
                 product_type, payment_cycle, premium_amount,
-                status, sales_staff_id, last_sjnet_imported_at,
+                status, last_sjnet_imported_at,
                 is_deleted, created_by, updated_by)
              VALUES
-               (:customer_id, :policy_no,
+               (:customer_id, :sjnet_customer_name, :policy_no,
                 :start_date, :end_date,
                 :product_type, :payment_cycle, :premium,
-                \'active\', :sales_staff_id, :imported_at,
+                \'active\', :imported_at,
                 0, :created_by, :updated_by)'
         );
-        $stmt->bindValue(':customer_id', $customerId, PDO::PARAM_INT);
+        $stmt->bindValue(':customer_id', $customerId, $customerId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(':sjnet_customer_name', $sjnetCustomerName);
         $stmt->bindValue(':policy_no', $policyNo);
         $stmt->bindValue(':start_date', $startDate);
         $stmt->bindValue(':end_date', $endDate);
         $stmt->bindValue(':product_type', $productType !== '' ? $productType : null);
         $stmt->bindValue(':payment_cycle', $paymentCycle !== '' ? $paymentCycle : null);
         $stmt->bindValue(':premium', $premiumAmount ?? 0, PDO::PARAM_INT);
-        $stmt->bindValue(':sales_staff_id', $resolvedUserId, $resolvedUserId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
         $stmt->bindValue(':imported_at', $now);
         $stmt->bindValue(':created_by', $this->executedBy, PDO::PARAM_INT);
         $stmt->bindValue(':updated_by', $this->executedBy, PDO::PARAM_INT);
         $stmt->execute();
 
-        $newContractId = (int) $this->pdo->lastInsertId();
-
-        // 新年度契約を INSERT した場合、同一証券番号の旧案件を自動クローズする
-        $this->closeOldRenewalCases($policyNo, $newContractId, $maturityDate);
-
-        return [$newContractId, true];
-    }
-
-    /**
-     * 新年度契約の INSERT 時に、同一証券番号の旧満期案件を自動クローズする
-     *
-     * 対象: 同一 policy_no の旧契約に紐づく満期案件のうち
-     *       case_status IN ('renewed', 'lost') かつ maturity_date < 新案件の maturity_date
-     * 対応途中（not_started/sj_requested 等）の旧案件はクローズしない。
-     */
-    private function closeOldRenewalCases(string $policyNo, int $newContractId, string $newMaturityDate): void
-    {
-        $stmt = $this->pdo->prepare(
-            'UPDATE t_renewal_case rc
-               JOIN t_contract c ON c.id = rc.contract_id
-             SET rc.case_status = \'closed\',
-                 rc.updated_by  = :updated_by
-             WHERE c.policy_no         = :policy_no
-               AND c.id               != :new_contract_id
-               AND rc.maturity_date    < :new_maturity_date
-               AND rc.case_status     IN (\'renewed\', \'lost\')
-               AND rc.is_deleted       = 0'
-        );
-        $stmt->bindValue(':updated_by', $this->executedBy, PDO::PARAM_INT);
-        $stmt->bindValue(':policy_no', $policyNo);
-        $stmt->bindValue(':new_contract_id', $newContractId, PDO::PARAM_INT);
-        $stmt->bindValue(':new_maturity_date', $newMaturityDate);
-        $stmt->execute();
+        return [(int) $this->pdo->lastInsertId(), true];
     }
 
     /**
@@ -526,8 +576,8 @@ final class SjnetCsvImportService
             $renewalId      = (int) $existing['id'];
             $existingUserId = $existing['assigned_staff_id'] !== null ? (int) $existing['assigned_staff_id'] : null;
 
-            // assigned_staff_id は未設定の場合のみ上書き
-            if ($existingUserId === null && $resolvedUserId !== null) {
+            // assigned_staff_id: resolvedUserId がある場合は常に上書き（1年後再取込で担当者が変わりうる）
+            if ($resolvedUserId !== null) {
                 $stmt = $this->pdo->prepare(
                     'UPDATE t_renewal_case
                      SET assigned_staff_id = :uid, updated_by = :updated_by
@@ -548,7 +598,7 @@ final class SjnetCsvImportService
         );
         $contractStmt->bindValue(':id', $contractId, PDO::PARAM_INT);
         $contractStmt->execute();
-        $contractRow = $contractStmt->fetch(PDO::FETCH_ASSOC);
+        $contractRow  = $contractStmt->fetch(PDO::FETCH_ASSOC);
         $officeUserId = is_array($contractRow) && $contractRow['office_staff_id'] !== null
             ? (int) $contractRow['office_staff_id'] : null;
 
@@ -581,6 +631,30 @@ final class SjnetCsvImportService
         if ($value === '') {
             return null;
         }
+        $v = str_replace('/', '-', $value);
+        $d = DateTimeImmutable::createFromFormat('Y-m-d', $v);
+        if ($d !== false && $d->format('Y-m-d') === $v) {
+            return $v;
+        }
+        return null;
+    }
+
+    /**
+     * 生年月日文字列を YYYY-MM-DD に変換する
+     * YYYY/MM/DD・YYYY-MM-DD・YYYYMMDD を受け付ける
+     */
+    private function parseBirthDate(string $value): ?string
+    {
+        if ($value === '') {
+            return null;
+        }
+        // YYYYMMDD（8桁）
+        if (preg_match('/^\d{8}$/', $value)) {
+            $v = substr($value, 0, 4) . '-' . substr($value, 4, 2) . '-' . substr($value, 6, 2);
+            $d = DateTimeImmutable::createFromFormat('Y-m-d', $v);
+            return ($d !== false && $d->format('Y-m-d') === $v) ? $v : null;
+        }
+        // YYYY/MM/DD or YYYY-MM-DD
         $v = str_replace('/', '-', $value);
         $d = DateTimeImmutable::createFromFormat('Y-m-d', $v);
         if ($d !== false && $d->format('Y-m-d') === $v) {

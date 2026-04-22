@@ -1,0 +1,143 @@
+{
+  "results": [
+    {
+      "label": "dev login → dashboard",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-01: ダイアログが自動オープン",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-01: 取込結果セクションが表示される",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-01: ステータス = 完了",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-01: 処理行数 = 1行",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-01: 契約 新規登録 = 1件",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-01: 顧客 自動登録 = 1件",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-02: ステータス = 完了",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-02: 処理行数 = 1行",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-02: 契約 新規登録 = 1件（既存顧客に紐づく）",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-02: 顧客 自動登録 = 0件（既存顧客がマッチしたため）",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-03: ステータス = 完了（未紐づけでも完了扱い）",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-03: 未紐づけ契約 = 1件",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-03: 未紐づけ契約数がオレンジ（warning）色で表示",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-04: ステータス = 完了",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-04: 契約 更新 = 1件（既存契約・案件が更新）",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-04: 契約 新規登録 = 0件（新規作成なし）",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-05: ステータス = 一部エラーあり",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-05: 処理行数 = 3行",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-05: スキップ = 1行（証券番号なし）",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-05: エラー = 1行（日付不正）",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-05: エラー件数が赤（danger）色で表示",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-05: import_error flash メッセージが表示される",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-06: ダイアログが自動オープン",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-06: 取込結果セクションが表示されない（ヘッダー検証失敗で中断）",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-06: エラーメッセージがダイアログ内に表示",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-07: ステータス = 完了",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-07: 処理行数 = 1行",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-07: 担当者マッピング 解決済み = 1件",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-07: コード未登録 = 0件",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-08: ステータス = 完了",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-08: 契約 更新 = 1件（2回目は update になる）",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-08: 契約 新規登録 = 0件（重複インポートで新規作成なし）",
+      "status": "PASS"
+    },
+    {
+      "label": "TC-08: 顧客 自動登録 = 0件（顧客は既存）",
+      "status": "PASS"
+    }
+  ],
+  "passCount": 34,
+  "failCount": 0,
+  "timestamp": "2026-04-16T04:40:25.889Z"
+}

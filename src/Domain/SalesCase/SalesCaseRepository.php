@@ -17,15 +17,6 @@ final class SalesCaseRepository
         'other'      => 'その他',
     ];
 
-    /** @var array<string, string> */
-    public const ALLOWED_STATUSES = [
-        'open'        => '商談中',
-        'negotiating' => '交渉中',
-        'won'         => '成約',
-        'lost'        => '失注',
-        'on_hold'     => '保留',
-    ];
-
     /** @var array<int, string> */
     public const ALLOWED_PROSPECT_RANKS = ['A', 'B', 'C'];
 
@@ -55,7 +46,7 @@ final class SalesCaseRepository
 
         $customerName = trim((string) ($criteria['customer_name'] ?? ''));
         if ($customerName !== '') {
-            $where[] = 'mc.customer_name LIKE :customer_name';
+            $where[] = '(mc.customer_name LIKE :customer_name OR sc.prospect_name LIKE :customer_name)';
             $params[':customer_name'] = '%' . $customerName . '%';
         }
 
@@ -66,7 +57,7 @@ final class SalesCaseRepository
         }
 
         $status = trim((string) ($criteria['status'] ?? ''));
-        if ($status !== '' && array_key_exists($status, self::ALLOWED_STATUSES)) {
+        if ($status !== '') {
             $where[] = 'sc.status = :status';
             $params[':status'] = $status;
         }
@@ -75,6 +66,12 @@ final class SalesCaseRepository
         if ($prospectRank !== '' && in_array($prospectRank, self::ALLOWED_PROSPECT_RANKS, true)) {
             $where[] = 'sc.prospect_rank = :prospect_rank';
             $params[':prospect_rank'] = $prospectRank;
+        }
+
+        $caseName = trim((string) ($criteria['case_name'] ?? ''));
+        if ($caseName !== '') {
+            $where[] = 'sc.case_name LIKE :case_name';
+            $params[':case_name'] = '%' . $caseName . '%';
         }
 
         $whereClause = 'WHERE ' . implode(' AND ', $where);
@@ -110,7 +107,7 @@ final class SalesCaseRepository
         $page    = max(1, min($maxPage, $page));
         $offset  = ($page - 1) * $perPage;
 
-        $dataSql = "SELECT sc.id, sc.customer_id, sc.case_name, sc.case_type, sc.product_type,
+        $dataSql = "SELECT sc.id, sc.customer_id, sc.prospect_name, sc.case_name, sc.case_type, sc.product_type,
                            sc.status, sc.prospect_rank, sc.expected_premium,
                            sc.expected_contract_month, sc.staff_id, sc.next_action_date,
                            sc.created_at,
@@ -192,17 +189,21 @@ final class SalesCaseRepository
     }
 
     /**
-     * For use in activity form dropdown. Excludes won/lost cases.
+     * For use in activity form dropdown. Excludes statuses marked is_completed=1.
      *
      * @return array<int, array<string, mixed>>
      */
     public function fetchForDropdown(int $limit = 500): array
     {
         $stmt = $this->pdo->prepare(
-            "SELECT sc.id, sc.case_name, mc.customer_name
+            "SELECT sc.id, sc.case_name, sc.customer_id,
+                    mc.customer_name,
+                    sc.prospect_name,
+                    COALESCE(mc.customer_name, sc.prospect_name, '') AS display_customer
              FROM t_sales_case sc
              LEFT JOIN m_customer mc ON mc.id = sc.customer_id AND mc.is_deleted = 0
-             WHERE sc.is_deleted = 0 AND sc.status NOT IN ('won', 'lost')
+             WHERE sc.is_deleted = 0
+               AND sc.status NOT IN (SELECT name FROM m_sales_case_status WHERE is_completed = 1)
              ORDER BY sc.created_at DESC
              LIMIT :limit"
         );
@@ -242,12 +243,12 @@ final class SalesCaseRepository
             'INSERT INTO t_sales_case
                 (customer_id, prospect_name, contract_id, case_name, case_type, product_type, status,
                  prospect_rank, expected_premium, expected_contract_month,
-                 referral_source, next_action_date, lost_reason, memo, staff_id,
+                 next_action_date, lost_reason, memo, staff_id,
                  created_by, updated_by)
              VALUES
                 (:customer_id, :prospect_name, :contract_id, :case_name, :case_type, :product_type, :status,
                  :prospect_rank, :expected_premium, :expected_contract_month,
-                 :referral_source, :next_action_date, :lost_reason, :memo, :staff_id,
+                 :next_action_date, :lost_reason, :memo, :staff_id,
                  :created_by, :updated_by)'
         );
         $this->bindInputValues($stmt, $input, $actorUserId);
@@ -272,7 +273,6 @@ final class SalesCaseRepository
                 prospect_rank           = :prospect_rank,
                 expected_premium        = :expected_premium,
                 expected_contract_month = :expected_contract_month,
-                referral_source         = :referral_source,
                 next_action_date        = :next_action_date,
                 lost_reason             = :lost_reason,
                 memo                    = :memo,
@@ -321,7 +321,7 @@ final class SalesCaseRepository
         $stmt->bindValue(':case_name', trim((string) ($input['case_name'] ?? '')));
         $stmt->bindValue(':case_type', trim((string) ($input['case_type'] ?? 'new')));
         $stmt->bindValue(':product_type', $nullableStr($input['product_type'] ?? null));
-        $stmt->bindValue(':status', trim((string) ($input['status'] ?? 'open')));
+        $stmt->bindValue(':status', trim((string) ($input['status'] ?? '')));
         $stmt->bindValue(':prospect_rank', $nullableStr($input['prospect_rank'] ?? null));
 
         $premiumStr = trim((string) ($input['expected_premium'] ?? ''));
@@ -329,7 +329,6 @@ final class SalesCaseRepository
         $stmt->bindValue(':expected_premium', $premium, $premium !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
 
         $stmt->bindValue(':expected_contract_month', $nullableStr($input['expected_contract_month'] ?? null));
-        $stmt->bindValue(':referral_source', $nullableStr($input['referral_source'] ?? null));
         $stmt->bindValue(':next_action_date', $nullableStr($input['next_action_date'] ?? null));
         $stmt->bindValue(':lost_reason', $nullableStr($input['lost_reason'] ?? null));
         $stmt->bindValue(':memo', $nullableStr($input['memo'] ?? null));

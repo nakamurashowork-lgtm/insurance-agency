@@ -100,9 +100,9 @@ final class ActivityListView
 
             $rowsHtml .=
                 '<tr>'
-                . '<td data-label="活動日" style="white-space:nowrap;"><a href="' . $dailyUrl . '" class="text-link">' . Layout::escape($actDate) . '</a></td>'
+                . '<td data-label="活動日" style="white-space:nowrap;">' . Layout::escape($actDate) . '</td>'
                 . '<td class="cell-ellipsis" data-label="顧客名" title="' . Layout::escape($custName) . '">' . $custHtml . '</td>'
-                . '<td class="cell-ellipsis" data-label="件名" title="' . Layout::escape($subject) . '"><a href="' . $detailUrl . '" class="text-link">' . Layout::escape($subject) . '</a></td>'
+                . '<td class="cell-ellipsis" data-label="活動概要" title="' . Layout::escape($subject) . '"><a href="' . $detailUrl . '" class="text-link">' . Layout::escape($subject) . '</a></td>'
                 . '<td class="cell-ellipsis" data-label="担当者" title="' . Layout::escape($staffName) . '">' . Layout::escape($staffName) . '</td>'
                 . '<td data-label="活動種別">' . Layout::escape($typeLabel) . '</td>'
                 . '<td data-label="次回予定日" style="white-space:nowrap;">' . Layout::escape($nextDate) . '</td>'
@@ -117,15 +117,15 @@ final class ActivityListView
             '<div class="table-wrap">'
             . '<table class="table-fixed table-card list-table list-table-activity">'
             . '<colgroup>'
-            . '<col style="width:100px">'
-            . '<col style="width:180px">'
+            . '<col class="list-col-date">'
+            . '<col class="list-col-customer">'
             . '<col>'
-            . '<col style="width:110px">'
-            . '<col style="width:90px">'
-            . '<col style="width:100px">'
+            . '<col class="list-col-type">'
+            . '<col class="list-col-user">'
+            . '<col class="list-col-next">'
             . '</colgroup>'
             . '<thead><tr>'
-            . '<th>活動日</th><th>顧客名</th><th>件名</th>'
+            . '<th>活動日</th><th>顧客名</th><th>活動概要</th>'
             . '<th>担当者</th><th>活動種別</th><th>次回予定日</th>'
             . '</tr></thead>'
             . '<tbody>' . $rowsHtml . '</tbody>'
@@ -162,7 +162,7 @@ final class ActivityListView
             . '</div>';
 
         $dailyViewUrl = Layout::escape(ListViewHelper::buildUrl($dailyBaseUrl, ['date' => date('Y-m-d'), 'staff' => $staffUserId]));
-        $headerActionsHtml = '<a href="' . $dailyViewUrl . '" class="btn">日報ビュー</a>';
+        $headerActionsHtml = '<a href="' . $dailyViewUrl . '" class="btn">営業日報</a>';
 
         $content =
             '<div class="list-page-frame">'

@@ -1,0 +1,71 @@
+{
+  "results": [
+    {
+      "label": "dev login → dashboard redirect",
+      "status": "PASS"
+    },
+    {
+      "label": "未紐づけバッジ表示: \"未紐づけ 1件\"",
+      "status": "PASS"
+    },
+    {
+      "label": "TEST-PHASE-C-001: 顧客名がプレーンテキスト（リンクなし）",
+      "status": "PASS"
+    },
+    {
+      "label": "TEST-PHASE-C-001: sjnet_customer_name 表示あり",
+      "status": "PASS"
+    },
+    {
+      "label": "TEST-PHASE-A-001: 顧客名がリンク表示",
+      "status": "PASS"
+    },
+    {
+      "label": "TEST-PHASE-B-001: 顧客名がリンク表示",
+      "status": "PASS"
+    },
+    {
+      "label": "TEST-PHASE-D-001: 顧客名がリンク表示",
+      "status": "PASS"
+    },
+    {
+      "label": "詳細: 「未紐づけ」バッジ表示あり（未リンク状態）",
+      "status": "PASS"
+    },
+    {
+      "label": "詳細: 「紐づける」ボタン表示あり",
+      "status": "PASS"
+    },
+    {
+      "label": "詳細: sjnet_customer_name「フェーズC同姓同名」表示あり",
+      "status": "PASS"
+    },
+    {
+      "label": "モーダル: 検索フォーム表示あり",
+      "status": "PASS"
+    },
+    {
+      "label": "モーダル: 候補 2 件表示（期待: 2件）",
+      "status": "PASS"
+    },
+    {
+      "label": "詳細（紐づけ後）: 顧客名がリンク表示: \"フェーズC同姓同名\"",
+      "status": "PASS"
+    },
+    {
+      "label": "バッジ: 非表示（0件で消えた）",
+      "status": "PASS"
+    },
+    {
+      "label": "一覧（紐づけ後）: TEST-PHASE-C-001 の顧客名がリンク表示",
+      "status": "PASS"
+    },
+    {
+      "label": "解除後: 「未紐づけ」バッジ表示に戻った",
+      "status": "PASS"
+    }
+  ],
+  "passCount": 16,
+  "failCount": 0,
+  "timestamp": "2026-04-11T10:28:23.293Z"
+}

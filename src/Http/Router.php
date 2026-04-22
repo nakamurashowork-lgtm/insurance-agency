@@ -33,10 +33,7 @@ final class Router
         if (!isset($this->routes[$key])) {
             http_response_code(404);
             header('Content-Type: text/html; charset=UTF-8');
-            $homeUrl = $this->appUrl !== ''
-                ? $this->appUrl . '/?route='
-                : '/?route=';
-            echo '<h1>404 Not Found</h1><p>ページが見つかりません。</p><p><a href="' . htmlspecialchars($homeUrl, ENT_QUOTES, 'UTF-8') . '">ホームへ</a></p>';
+            echo '<h1>404 Not Found</h1><p>ページが見つかりません。</p><p><a href="?route=">ホームへ</a></p>';
             return;
         }
 

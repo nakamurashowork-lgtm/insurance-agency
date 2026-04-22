@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS t_sjnet_import_batch (
   insert_count        INT             NOT NULL DEFAULT 0 COMMENT '新規件数（契約）',
   update_count        INT             NOT NULL DEFAULT 0 COMMENT '更新件数（契約）',
   customer_insert_count INT           NOT NULL DEFAULT 0 COMMENT '顧客自動登録件数',
+  unlinked_count      INT             NOT NULL DEFAULT 0 COMMENT '未紐づけ件数（顧客名複数一致のためcustomer_id=NULLで登録した契約件数）',
   error_count         INT             NOT NULL DEFAULT 0 COMMENT 'エラー件数',
   started_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '開始日時',
   finished_at         DATETIME        NULL COMMENT '終了日時',
@@ -25,5 +26,6 @@ CREATE TABLE IF NOT EXISTS t_sjnet_import_batch (
   CONSTRAINT chk_t_sjnet_import_batch_05 CHECK (insert_count >= 0),
   CONSTRAINT chk_t_sjnet_import_batch_06 CHECK (update_count >= 0),
   CONSTRAINT chk_t_sjnet_import_batch_07 CHECK (customer_insert_count >= 0),
+  CONSTRAINT chk_t_sjnet_import_batch_09 CHECK (unlinked_count >= 0),
   CONSTRAINT chk_t_sjnet_import_batch_08 CHECK (error_count >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='SJNET取込バッチ';

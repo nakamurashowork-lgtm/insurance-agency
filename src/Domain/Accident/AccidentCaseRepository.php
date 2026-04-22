@@ -10,6 +10,7 @@ final class AccidentCaseRepository
     public const SORTABLE_FIELDS = [
         'accident_no',
         'accepted_date',
+        'accident_date',
         'customer_name',
         'policy_no',
         'product_type',
@@ -54,7 +55,7 @@ final class AccidentCaseRepository
         $offset = ($page - 1) * $perPage;
 
         $sql =
-            'SELECT ac.id,
+            "SELECT ac.id,
                     ac.accident_no,
                     ac.accepted_date,
                     ac.accident_date,
@@ -64,15 +65,18 @@ final class AccidentCaseRepository
                     ac.resolved_date,
                     ac.updated_at,
                     ac.assigned_staff_id,
+                    ac.customer_id,
+                    ac.prospect_name,
                     mc.customer_name,
+                    COALESCE(mc.customer_name, ac.prospect_name, '') AS display_customer,
                     c.policy_no
              FROM t_accident_case ac
-             INNER JOIN m_customer mc
-                     ON mc.id = ac.customer_id
-                    AND mc.is_deleted = 0
+             LEFT JOIN m_customer mc
+                    ON mc.id = ac.customer_id
+                   AND mc.is_deleted = 0
              LEFT JOIN t_contract c
                     ON c.id = ac.contract_id
-                   AND c.is_deleted = 0'
+                   AND c.is_deleted = 0"
             . $whereSql
             . $this->buildOrderBy($sort, $direction)
             . ' LIMIT :limit OFFSET :offset';
@@ -117,7 +121,7 @@ final class AccidentCaseRepository
 
         $customerName = trim((string) ($criteria['customer_name'] ?? ''));
         if ($customerName !== '') {
-            $sql .= ' AND mc.customer_name LIKE :customer_name';
+            $sql .= ' AND (mc.customer_name LIKE :customer_name OR ac.prospect_name LIKE :customer_name)';
             $params['customer_name'] = '%' . $customerName . '%';
         }
 
@@ -145,6 +149,12 @@ final class AccidentCaseRepository
             $params['assigned_staff_id'] = $assignedUserId;
         }
 
+        $priority = trim((string) ($criteria['priority'] ?? ''));
+        if (in_array($priority, ['high', 'normal', 'low'], true)) {
+            $sql .= ' AND ac.priority = :priority';
+            $params['priority'] = $priority;
+        }
+
         return $sql;
     }
 
@@ -156,9 +166,9 @@ final class AccidentCaseRepository
         $stmt = $this->pdo->prepare(
             'SELECT COUNT(*)
              FROM t_accident_case ac
-             INNER JOIN m_customer mc
-                     ON mc.id = ac.customer_id
-                    AND mc.is_deleted = 0
+             LEFT JOIN m_customer mc
+                    ON mc.id = ac.customer_id
+                   AND mc.is_deleted = 0
              LEFT JOIN t_contract c
                     ON c.id = ac.contract_id
                    AND c.is_deleted = 0'
@@ -174,16 +184,22 @@ final class AccidentCaseRepository
 
     private function buildOrderBy(string $sort, string $direction): string
     {
+        // ユーザー指定のソートが無い場合のデフォルト: 事故日 DESC
+        if ($sort === '') {
+            return ' ORDER BY ac.accident_date DESC, ac.id DESC';
+        }
+
         $column = match ($sort) {
             'accident_no'   => 'ac.accident_no',
             'accepted_date' => 'ac.accepted_date',
-            'customer_name' => 'mc.customer_name',
+            'accident_date' => 'ac.accident_date',
+            'customer_name' => "COALESCE(mc.customer_name, ac.prospect_name, '')",
             'policy_no'     => 'c.policy_no',
             'product_type'  => 'ac.product_type',
             'status'        => 'ac.status',
             'priority'      => 'ac.priority',
             'resolved_date' => 'ac.resolved_date',
-            default         => 'ac.accepted_date',
+            default         => 'ac.accident_date',
         };
 
         $dir = strtolower($direction) === 'desc' ? 'DESC' : 'ASC';
@@ -198,8 +214,9 @@ final class AccidentCaseRepository
     public function findDetailById(int $id): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT ac.id,
+            "SELECT ac.id,
                     ac.customer_id,
+                    ac.prospect_name,
                     ac.contract_id,
                     ac.accident_no,
                     ac.accepted_date,
@@ -219,8 +236,8 @@ final class AccidentCaseRepository
                     ac.remark,
                     ac.updated_at,
                     mc.customer_name,
+                    COALESCE(mc.customer_name, ac.prospect_name, '') AS display_customer,
                     mc.phone,
-                    mc.email,
                     mc.postal_code,
                     mc.address1,
                     mc.address2,
@@ -232,15 +249,15 @@ final class AccidentCaseRepository
                       ORDER BY rc.id DESC
                       LIMIT 1) AS renewal_case_id
              FROM t_accident_case ac
-             INNER JOIN m_customer mc
-                     ON mc.id = ac.customer_id
-                    AND mc.is_deleted = 0
+             LEFT JOIN m_customer mc
+                    ON mc.id = ac.customer_id
+                   AND mc.is_deleted = 0
              LEFT JOIN t_contract c
                     ON c.id = ac.contract_id
                    AND c.is_deleted = 0
              WHERE ac.id = :id
                AND ac.is_deleted = 0
-             LIMIT 1'
+             LIMIT 1"
         );
         $stmt->execute(['id' => $id]);
         $row = $stmt->fetch();
@@ -411,8 +428,9 @@ final class AccidentCaseRepository
                 $this->insertAccidentAuditEventDetails($eventId, $details);
             }
 
-            // ステータスが closed になった場合はリマインドを自動無効化
-            if ($input['status'] === 'closed') {
+            // ステータスが完了扱い（m_case_status.is_completed=1）になった場合はリマインドを自動無効化
+            $newStatus = (string) ($input['status'] ?? '');
+            if ($newStatus !== '' && $this->isCompletedAccidentStatus($newStatus)) {
                 $this->disableReminderOnClose($id, $updatedBy, $eventId);
             }
 
@@ -424,6 +442,153 @@ final class AccidentCaseRepository
             }
             throw $e;
         }
+    }
+
+    /**
+     * @param array<string, mixed> $input
+     */
+    public function updateBasicInfo(int $id, array $input, int $updatedBy): int
+    {
+        $before = $this->findBasicInfoForAudit($id);
+        if ($before === null) {
+            return 0;
+        }
+
+        $this->pdo->beginTransaction();
+
+        try {
+            $customerId = $input['customer_id'];
+            $stmt = $this->pdo->prepare(
+                'UPDATE t_accident_case
+                 SET customer_id        = :customer_id,
+                     prospect_name      = :prospect_name,
+                     accepted_date      = :accepted_date,
+                     accident_date      = :accident_date,
+                     insurance_category = :insurance_category,
+                     accident_location  = :accident_location,
+                     sc_staff_name      = :sc_staff_name,
+                     updated_by         = :updated_by
+                 WHERE id = :id
+                   AND is_deleted = 0'
+            );
+            $stmt->bindValue(':customer_id', $customerId, $customerId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+            $stmt->bindValue(':prospect_name', $input['prospect_name'] ?? null);
+            $stmt->bindValue(':accepted_date', $input['accepted_date']);
+            $stmt->bindValue(':accident_date', $input['accident_date']);
+            $stmt->bindValue(':insurance_category', $input['insurance_category']);
+            $stmt->bindValue(':accident_location', $input['accident_location']);
+            $stmt->bindValue(':sc_staff_name', $input['sc_staff_name']);
+            $stmt->bindValue(':updated_by', $updatedBy, PDO::PARAM_INT);
+            $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+            $stmt->execute();
+
+            $affected = $stmt->rowCount();
+            if ($affected === 0) {
+                $this->pdo->rollBack();
+                return 0;
+            }
+
+            $after = $this->findBasicInfoForAudit($id);
+            if ($after === null) {
+                $this->pdo->rollBack();
+                return 0;
+            }
+
+            $details = $this->buildBasicInfoAuditDetails($before, $after);
+            $eventId = $this->insertAccidentAuditEvent($id, $updatedBy, '事故基本情報を更新');
+            if ($details !== []) {
+                $this->insertAccidentAuditEventDetails($eventId, $details);
+            }
+
+            $this->pdo->commit();
+            return $affected;
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    private function findBasicInfoForAudit(int $id): ?array
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT ac.customer_id, ac.prospect_name,
+                    COALESCE(mc.customer_name, ac.prospect_name, '') AS display_customer,
+                    ac.accepted_date, ac.accident_date,
+                    ac.insurance_category, ac.accident_location, ac.sc_staff_name
+             FROM t_accident_case ac
+             LEFT JOIN m_customer mc ON mc.id = ac.customer_id AND mc.is_deleted = 0
+             WHERE ac.id = :id AND ac.is_deleted = 0
+             LIMIT 1"
+        );
+        $stmt->execute(['id' => $id]);
+        $row = $stmt->fetch();
+
+        if (!is_array($row)) {
+            return null;
+        }
+
+        $normalize = fn(mixed $v): ?string => ($v === null || trim((string) $v) === '') ? null : trim((string) $v);
+
+        return [
+            'customer_id'        => $normalize($row['customer_id']),
+            'display_customer'   => $normalize($row['display_customer']),
+            'accepted_date'      => $normalize($row['accepted_date']),
+            'accident_date'      => $normalize($row['accident_date']),
+            'insurance_category' => $normalize($row['insurance_category']),
+            'accident_location'  => $normalize($row['accident_location']),
+            'sc_staff_name'      => $normalize($row['sc_staff_name']),
+        ];
+    }
+
+    /**
+     * @param array<string, string|null> $before
+     * @param array<string, string|null> $after
+     * @return array<int, array<string, string|null>>
+     */
+    private function buildBasicInfoAuditDetails(array $before, array $after): array
+    {
+        $fields = [
+            'display_customer'   => ['label' => '顧客名',     'value_type' => 'STRING'],
+            'accepted_date'      => ['label' => '受付日',     'value_type' => 'DATE'],
+            'accident_date'      => ['label' => '事故発生日', 'value_type' => 'DATE'],
+            'insurance_category' => ['label' => '保険種類',   'value_type' => 'STRING'],
+            'accident_location'  => ['label' => '担当拠点',   'value_type' => 'STRING'],
+            'sc_staff_name'      => ['label' => 'SC担当者',   'value_type' => 'STRING'],
+        ];
+
+        $details = [];
+        foreach ($fields as $fieldKey => $meta) {
+            $beforeValue = $before[$fieldKey] ?? null;
+            $afterValue  = $after[$fieldKey]  ?? null;
+            if ($beforeValue === $afterValue) {
+                continue;
+            }
+            $details[] = [
+                'field_key'         => $fieldKey,
+                'field_label'       => (string) $meta['label'],
+                'value_type'        => (string) $meta['value_type'],
+                'before_value_text' => $beforeValue,
+                'after_value_text'  => $afterValue,
+            ];
+        }
+
+        return $details;
+    }
+
+    /**
+     * 事故案件ステータス名が m_case_status で is_completed=1 となっているか判定。
+     */
+    private function isCompletedAccidentStatus(string $statusName): bool
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT COUNT(*) FROM m_case_status
+             WHERE case_type = 'accident' AND name = :name AND is_completed = 1"
+        );
+        $stmt->bindValue(':name', $statusName);
+        $stmt->execute();
+        return (int) $stmt->fetchColumn() > 0;
     }
 
     private function disableReminderOnClose(int $accidentCaseId, int $updatedBy, int $auditEventId): void
@@ -589,6 +754,7 @@ final class AccidentCaseRepository
         $stmt = $this->pdo->prepare(
             'INSERT INTO t_accident_case (
                  customer_id,
+                 prospect_name,
                  accepted_date,
                  accident_date,
                  insurance_category,
@@ -602,6 +768,7 @@ final class AccidentCaseRepository
                  updated_by
              ) VALUES (
                  :customer_id,
+                 :prospect_name,
                  :accepted_date,
                  :accident_date,
                  :insurance_category,
@@ -615,7 +782,9 @@ final class AccidentCaseRepository
                  :updated_by
              )'
         );
-        $stmt->bindValue(':customer_id', $input['customer_id'], PDO::PARAM_INT);
+        $customerId = $input['customer_id'] ?? null;
+        $stmt->bindValue(':customer_id', $customerId, $customerId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+        $stmt->bindValue(':prospect_name', $input['prospect_name'] ?? null);
         $stmt->bindValue(':accepted_date', $input['accepted_date']);
         $stmt->bindValue(':accident_date', $input['accident_date']);
         $stmt->bindValue(':insurance_category', $input['insurance_category']);

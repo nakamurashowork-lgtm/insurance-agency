@@ -15,7 +15,7 @@ final class ProcedureMethodRepository
     public function findAll(): array
     {
         $rows = $this->pdo->query(
-            'SELECT id, label, display_order, is_active, created_at, updated_at
+            'SELECT id, name, display_order, is_active, created_at, updated_at
              FROM m_procedure_method
              ORDER BY is_active DESC, display_order ASC, id ASC'
         )->fetchAll();
@@ -26,7 +26,7 @@ final class ProcedureMethodRepository
     public function findActive(): array
     {
         $rows = $this->pdo->query(
-            'SELECT id, label, display_order
+            'SELECT id, name, display_order
              FROM m_procedure_method
              WHERE is_active = 1
              ORDER BY display_order ASC, id ASC'
@@ -34,18 +34,18 @@ final class ProcedureMethodRepository
         return is_array($rows) ? $rows : [];
     }
 
-    /** @return string[]  有効な label 一覧（バリデーション用） */
-    public function findActiveLabels(): array
+    /** @return list<string>  有効な name 一覧（バリデーション用） */
+    public function findActiveNames(): array
     {
         $rows = $this->findActive();
-        return array_map(static fn(array $r) => (string) $r['label'], $rows);
+        return array_values(array_map(static fn(array $r) => (string) ($r['name'] ?? ''), $rows));
     }
 
     /** @return array<string, mixed>|null */
     public function findById(int $id): ?array
     {
         $stmt = $this->pdo->prepare(
-            'SELECT id, label, display_order, is_active FROM m_procedure_method WHERE id = :id LIMIT 1'
+            'SELECT id, name, display_order, is_active FROM m_procedure_method WHERE id = :id LIMIT 1'
         );
         $stmt->bindValue(':id', $id, PDO::PARAM_INT);
         $stmt->execute();
@@ -53,27 +53,57 @@ final class ProcedureMethodRepository
         return is_array($row) ? $row : null;
     }
 
-    public function create(string $label): int
+    public function existsByName(string $name, ?int $excludeId = null): bool
     {
+        if ($excludeId === null) {
+            $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM m_procedure_method WHERE name = :name');
+            $stmt->bindValue(':name', $name);
+        } else {
+            $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM m_procedure_method WHERE name = :name AND id <> :id');
+            $stmt->bindValue(':name', $name);
+            $stmt->bindValue(':id', $excludeId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    /** @throws \DomainException */
+    public function create(string $name): int
+    {
+        $name = trim($name);
+        if ($name === '') {
+            throw new \DomainException('名前を入力してください。');
+        }
+        if ($this->existsByName($name)) {
+            throw new \DomainException('同じ名前の手続方法が既に登録されています。');
+        }
         $maxOrder = (int) $this->pdo->query(
             'SELECT COALESCE(MAX(display_order), 0) FROM m_procedure_method'
         )->fetchColumn();
 
         $stmt = $this->pdo->prepare(
-            'INSERT INTO m_procedure_method (label, display_order, is_active) VALUES (:label, :display_order, 1)'
+            'INSERT INTO m_procedure_method (name, display_order, is_active) VALUES (:name, :display_order, 1)'
         );
-        $stmt->bindValue(':label', $label);
+        $stmt->bindValue(':name', $name);
         $stmt->bindValue(':display_order', $maxOrder + 1, PDO::PARAM_INT);
         $stmt->execute();
         return (int) $this->pdo->lastInsertId();
     }
 
-    public function update(int $id, string $label): int
+    /** @throws \DomainException */
+    public function update(int $id, string $name): int
     {
+        $name = trim($name);
+        if ($name === '') {
+            throw new \DomainException('名前を入力してください。');
+        }
+        if ($this->existsByName($name, $id)) {
+            throw new \DomainException('同じ名前の手続方法が既に登録されています。');
+        }
         $stmt = $this->pdo->prepare(
-            'UPDATE m_procedure_method SET label = :label WHERE id = :id'
+            'UPDATE m_procedure_method SET name = :name WHERE id = :id'
         );
-        $stmt->bindValue(':label', $label);
+        $stmt->bindValue(':name', $name);
         $stmt->bindValue(':id', $id, PDO::PARAM_INT);
         $stmt->execute();
         return $stmt->rowCount();

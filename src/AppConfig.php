@@ -63,16 +63,19 @@ final class AppConfig
             && $this->googleRedirectUri !== '';
     }
 
+    /**
+     * ルート URL を「現在のリクエストホスト相対」で返す（クエリのみの URL）。
+     * 内部リダイレクト / フォーム action / ナビリンクはすべてブラウザが
+     * 現在のホストに対して解決するため、APP_URL と APP_PUBLIC_URL で
+     * ホストが異なる場合でも session cookie のホスト跨ぎによる破綻を避けられる。
+     *
+     * 外部送信（LINEWORKS 通知など）で絶対 URL が必要な場合は、
+     * `build_lineworks_absolute_url()` など APP_PUBLIC_URL を参照する別関数を使うこと。
+     */
     public function routeUrl(string $route = ''): string
     {
         $normalizedRoute = trim($route, '/');
-        $url = '?route=' . $normalizedRoute;
-
-        if ($this->appUrl !== '') {
-            return $this->appUrl . '/' . $url;
-        }
-
-        return '/?' . ltrim($url, '?');
+        return '?route=' . $normalizedRoute;
     }
 
     public function assertCommonDbConfigured(): void

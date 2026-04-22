@@ -7,25 +7,21 @@ use App\AppConfig;
 use App\Domain\Customer\CustomerRepository;
 use App\Domain\SalesCase\SalesCaseRepository;
 use App\Http\Responses;
+use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
 use App\Presentation\CustomerDetailView;
 use App\Presentation\CustomerListView;
 use App\Presentation\View\ListViewHelper;
 use App\Security\AuthGuard;
+use PDO;
 use Throwable;
 
 final class CustomerController
 {
-    private const ALLOWED_RETURN_PREFIXES = [
-        'customer/list',
-        'renewal/detail',
-        'sales/detail',
-        'accident/detail',
-    ];
-
     public function __construct(
         private AuthGuard $guard,
         private TenantConnectionFactory $tenantConnectionFactory,
+        private CommonConnectionFactory $commonConnectionFactory,
         private AppConfig $config
     ) {
     }
@@ -64,7 +60,7 @@ final class CustomerController
             $total = (int) ($result['total'] ?? 0);
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
         } catch (Throwable) {
-            $listError = '顧客一覧の取得に失敗しました。接続設定を確認してください。';
+            $listError = '顧客一覧の取得に失敗しました。時間をおいて再度お試しください。解消しない場合は管理者へご連絡ください。';
         }
 
         Responses::html(CustomerListView::render(
@@ -93,12 +89,6 @@ final class CustomerController
         $listState = $this->extractListState($_GET);
         $listUrl = $this->listUrl($criteria, $listState);
         $customerId = (int) ($_GET['id'] ?? 0);
-        $returnToPath = $this->resolveReturnTo($_GET['return_to'] ?? null);
-        $rtParts  = explode('?', $returnToPath, 2);
-        $returnTo = $this->config->routeUrl($rtParts[0]);
-        if (isset($rtParts[1])) {
-            $returnTo .= '&' . $rtParts[1];
-        }
         if ($customerId <= 0) {
             $this->guard->session()->setFlash('error', '顧客IDが不正です。');
             Responses::redirect($listUrl);
@@ -118,6 +108,9 @@ final class CustomerController
             $activities    = $repository->findActivities($customerId, 5);
             $accidentCases = $repository->findAccidentCases($customerId);
             $salesCases    = (new SalesCaseRepository($pdo))->findByCustomerId($customerId);
+            $audits        = $repository->findAuditEvents($customerId, 30);
+            $auditUserNames = $this->fetchUserNamesByRows($audits, 'changed_by');
+            $audits        = $this->attachAuditUserNames($audits, $auditUserNames);
             $flashError   = $this->guard->session()->consumeFlash('error');
             $flashSuccess = $this->guard->session()->consumeFlash('success');
             $editDraft    = $this->consumeEditDraft($customerId);
@@ -131,9 +124,9 @@ final class CustomerController
                 $activities,
                 $accidentCases,
                 $salesCases,
+                $audits,
                 $listUrl,
                 $detailUrl,
-                $returnTo,
                 $this->config->routeUrl('renewal/detail'),
                 $this->config->routeUrl('activity/list'),
                 $this->config->routeUrl('activity/detail'),
@@ -194,6 +187,18 @@ final class CustomerController
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
             $repository = new CustomerRepository($pdo);
+
+            if ($repository->findDuplicateByNameAndBirth(
+                $customerId,
+                (string) ($input['customer_name'] ?? ''),
+                $input['birth_date'] ?? null
+            )) {
+                $this->guard->session()->setFlash('error', '同名・同生年月日の顧客が既に登録されています。');
+                $this->storeEditDraft($customerId, $input);
+                $this->storeEditErrors($customerId, ['同名・同生年月日の顧客が既に登録されています。']);
+                Responses::redirect(ListViewHelper::buildUrl($detailUrl, ['open_modal' => 'edit']));
+            }
+
             $repository->update($customerId, $input, (int) ($auth['user_id'] ?? 0));
             $this->guard->session()->setFlash('success', '顧客情報を更新しました。');
             Responses::redirect($detailUrl);
@@ -227,6 +232,17 @@ final class CustomerController
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
             $repository = new CustomerRepository($pdo);
+
+            if ($repository->findDuplicateByNameAndBirth(
+                0,
+                (string) ($input['customer_name'] ?? ''),
+                $input['birth_date'] ?? null
+            )) {
+                $this->guard->session()->setFlash('error', '同名・同生年月日の顧客が既に登録されています。');
+                $this->storeCreateDraft($input);
+                Responses::redirect(ListViewHelper::buildUrl($returnTo, ['open_modal' => 'create']));
+            }
+
             $newId = $repository->create($input, (int) ($auth['user_id'] ?? 0));
             $this->guard->session()->setFlash('success', '顧客を登録しました。');
             Responses::redirect(ListViewHelper::buildUrl(
@@ -248,6 +264,7 @@ final class CustomerController
     {
         return [
             'customer_name' => trim((string) ($source['customer_name'] ?? '')),
+            'customer_type' => trim((string) ($source['customer_type'] ?? '')),
         ];
     }
 
@@ -301,21 +318,6 @@ final class CustomerController
         return ListViewHelper::buildUrl($this->config->routeUrl('customer/list'), $this->buildListQuery($criteria, $listState));
     }
 
-    private function resolveReturnTo(?string $rawReturnTo): string
-    {
-        $default = 'customer/list';
-        if ($rawReturnTo === null || $rawReturnTo === '') {
-            return $default;
-        }
-        $decoded = urldecode($rawReturnTo);
-        foreach (self::ALLOWED_RETURN_PREFIXES as $prefix) {
-            if (str_starts_with($decoded, $prefix)) {
-                return $decoded;
-            }
-        }
-        return $default;
-    }
-
     private function validateReturnTo(mixed $returnTo): string
     {
         $default = $this->config->routeUrl('customer/list');
@@ -339,9 +341,8 @@ final class CustomerController
         return [
             'customer_type'      => trim((string) ($_POST['customer_type'] ?? '')),
             'customer_name'      => trim((string) ($_POST['customer_name'] ?? '')),
-            'customer_name_kana' => $this->nullableText($_POST['customer_name_kana'] ?? null),
+            'birth_date'         => $this->nullableText($_POST['birth_date'] ?? null),
             'phone'              => $this->nullableText($_POST['phone'] ?? null),
-            'email'              => $this->nullableText($_POST['email'] ?? null),
             'postal_code'        => $this->nullableText($_POST['postal_code'] ?? null),
             'address1'           => $this->nullableText($_POST['address1'] ?? null),
             'address2'           => $this->nullableText($_POST['address2'] ?? null),
@@ -369,11 +370,8 @@ final class CustomerController
             $errors[] = '顧客名は200文字以内で入力してください。';
         }
 
-        $email = $input['email'] ?? null;
-        if ($email !== null && $email !== '') {
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $errors[] = 'メールアドレスの形式が正しくありません。';
-            }
+        if (!$this->isValidBirthDate($input['birth_date'] ?? null)) {
+            $errors[] = '生年月日は YYYY-MM-DD 形式で入力してください。';
         }
 
         return $errors;
@@ -409,7 +407,14 @@ final class CustomerController
     private function collectUpdateInput(): array
     {
         return [
-            'note' => $this->nullableText($_POST['note'] ?? null),
+            'customer_name'      => trim((string) ($_POST['customer_name'] ?? '')),
+            'birth_date'         => $this->nullableText($_POST['birth_date'] ?? null),
+            'customer_type'      => trim((string) ($_POST['customer_type'] ?? '')),
+            'phone'              => $this->nullableText($_POST['phone'] ?? null),
+            'postal_code'        => $this->nullableText($_POST['postal_code'] ?? null),
+            'address1'           => $this->nullableText($_POST['address1'] ?? null),
+            'address2'           => $this->nullableText($_POST['address2'] ?? null),
+            'note'               => $this->nullableText($_POST['note'] ?? null),
         ];
     }
 
@@ -419,7 +424,39 @@ final class CustomerController
      */
     private function validateUpdateInput(array $input): array
     {
-        return [];
+        $errors = [];
+
+        $customerName = (string) ($input['customer_name'] ?? '');
+        if ($customerName === '') {
+            $errors[] = '顧客名は必須です。';
+        } elseif (mb_strlen($customerName) > 200) {
+            $errors[] = '顧客名は200文字以内で入力してください。';
+        }
+
+        if (!$this->isValidBirthDate($input['birth_date'] ?? null)) {
+            $errors[] = '生年月日は YYYY-MM-DD 形式で入力してください。';
+        }
+
+        if (!in_array((string) ($input['customer_type'] ?? ''), ['individual', 'corporate'], true)) {
+            $errors[] = '顧客種別を選択してください。';
+        }
+        return $errors;
+    }
+
+    private function isValidBirthDate(mixed $value): bool
+    {
+        if ($value === null) {
+            return true;
+        }
+        $text = trim((string) $value);
+        if ($text === '') {
+            return true;
+        }
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $text) !== 1) {
+            return false;
+        }
+        $parts = explode('-', $text);
+        return checkdate((int) $parts[1], (int) $parts[2], (int) $parts[0]);
     }
 
     /**
@@ -469,6 +506,38 @@ final class CustomerController
     /**
      * @param array<string, mixed> $input
      */
+    /**
+     * 顧客紐づけモーダル用の名前検索 JSON API
+     * GET api/customer/search-for-link?q=NAME
+     */
+    public function searchForLink(): void
+    {
+        $this->guard->requireAuthenticated();
+        $auth = $this->guard->requireAuthenticated();
+        $q = trim((string) ($_GET['q'] ?? ''));
+        if ($q === '') {
+            Responses::json(['customers' => []]);
+        }
+
+        try {
+            $pdo  = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $repo = new CustomerRepository($pdo);
+            $rows = $repo->searchForLink($q, 20);
+            $customers = [];
+            foreach ($rows as $row) {
+                $customers[] = [
+                    'id'            => (int) ($row['id'] ?? 0),
+                    'customer_name' => (string) ($row['customer_name'] ?? ''),
+                    'birth_date'    => (string) ($row['birth_date'] ?? ''),
+                    'phone'         => (string) ($row['phone'] ?? ''),
+                ];
+            }
+            Responses::json(['customers' => $customers]);
+        } catch (Throwable) {
+            Responses::json(['customers' => [], 'error' => '検索に失敗しました']);
+        }
+    }
+
     private function storeCreateDraft(array $input): void
     {
         $this->guard->session()->setFlash('customer_create_draft', json_encode($input, JSON_UNESCAPED_UNICODE) ?: '{}');
@@ -486,6 +555,81 @@ final class CustomerController
 
         $decoded = json_decode($raw, true);
         return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, string>
+     */
+    private function fetchUserNamesByRows(array $rows, string $key): array
+    {
+        $userIds = [];
+        foreach ($rows as $row) {
+            $id = (int) ($row[$key] ?? 0);
+            if ($id > 0) {
+                $userIds[$id] = true;
+            }
+        }
+
+        return $this->fetchUserNames(array_keys($userIds));
+    }
+
+    /**
+     * @param array<int, int> $ids
+     * @return array<int, string>
+     */
+    private function fetchUserNames(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        try {
+            $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+            $pdo = $this->commonConnectionFactory->create();
+            $stmt = $pdo->prepare(
+                'SELECT id, COALESCE(NULLIF(display_name, ""), name) AS name
+                 FROM users
+                 WHERE id IN (' . $placeholders . ')
+                   AND status = 1
+                   AND is_deleted = 0'
+            );
+            foreach ($ids as $index => $id) {
+                $stmt->bindValue($index + 1, $id, PDO::PARAM_INT);
+            }
+            $stmt->execute();
+
+            $names = [];
+            $rows = $stmt->fetchAll();
+            if (is_array($rows)) {
+                foreach ($rows as $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    $id = (int) ($row['id'] ?? 0);
+                    $name = trim((string) ($row['name'] ?? ''));
+                    if ($id > 0 && $name !== '') {
+                        $names[$id] = $name;
+                    }
+                }
+            }
+            return $names;
+        } catch (Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $audits
+     * @param array<int, string> $userNames
+     * @return array<int, array<string, mixed>>
+     */
+    private function attachAuditUserNames(array $audits, array $userNames): array
+    {
+        foreach ($audits as $index => $row) {
+            $changedBy = (int) ($row['changed_by'] ?? 0);
+            $audits[$index]['changed_by_name'] = $userNames[$changedBy] ?? '不明なユーザー';
+        }
+        return $audits;
     }
 
 }

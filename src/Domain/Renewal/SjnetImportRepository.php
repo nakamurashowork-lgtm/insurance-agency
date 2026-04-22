@@ -33,7 +33,7 @@ final class SjnetImportRepository
     /**
      * バッチを完了状態に更新する
      *
-     * @param array{total: int, valid: int, skip: int, insert: int, update: int, customer_insert: int, error: int} $counters
+     * @param array{total: int, valid: int, skip: int, insert: int, update: int, customer_insert: int, unlinked: int, error: int} $counters
      */
     public function finishBatch(int $batchId, array $counters): void
     {
@@ -58,6 +58,7 @@ final class SjnetImportRepository
                  insert_count          = :insert,
                  update_count          = :update,
                  customer_insert_count = :customer_insert,
+                 unlinked_count        = :unlinked,
                  error_count           = :error,
                  finished_at           = NOW()
              WHERE id = :id'
@@ -69,6 +70,7 @@ final class SjnetImportRepository
         $stmt->bindValue(':insert', $insertCount, PDO::PARAM_INT);
         $stmt->bindValue(':update', $updateCount, PDO::PARAM_INT);
         $stmt->bindValue(':customer_insert', (int) ($counters['customer_insert'] ?? 0), PDO::PARAM_INT);
+        $stmt->bindValue(':unlinked', (int) ($counters['unlinked'] ?? 0), PDO::PARAM_INT);
         $stmt->bindValue(':error', $errorCount, PDO::PARAM_INT);
         $stmt->bindValue(':id', $batchId, PDO::PARAM_INT);
         $stmt->execute();
@@ -146,7 +148,7 @@ final class SjnetImportRepository
         $stmt = $this->pdo->prepare(
             'SELECT id, file_name, source_encoding, import_status,
                     total_row_count, valid_row_count, duplicate_skip_count,
-                    insert_count, update_count, customer_insert_count, error_count,
+                    insert_count, update_count, customer_insert_count, unlinked_count, error_count,
                     started_at, finished_at
              FROM t_sjnet_import_batch
              WHERE id = :id'

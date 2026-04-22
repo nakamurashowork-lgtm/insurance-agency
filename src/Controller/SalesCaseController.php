@@ -6,6 +6,7 @@ namespace App\Controller;
 use App\AppConfig;
 use App\Domain\SalesCase\SalesCaseRepository;
 use App\Domain\Tenant\ProductCategoryRepository;
+use App\Domain\Tenant\SalesCaseStatusRepository;
 use App\Domain\Tenant\StaffRepository;
 use App\Http\Responses;
 use App\Infra\TenantConnectionFactory;
@@ -37,6 +38,7 @@ final class SalesCaseController
         $staffUsers        = [];
         $customers         = [];
         $productCategories = [];
+        $salesCaseStatuses = [];
         $loginStaffId      = 0;
         $error             = null;
 
@@ -61,7 +63,8 @@ final class SalesCaseController
                 $rows[$i]['staff_name'] = $staffNameMap[(int) ($row['staff_id'] ?? 0)] ?? '';
             }
             $customers         = $repository->fetchCustomers();
-            $productCategories = (new ProductCategoryRepository($tenantPdo))->findAll();
+            $productCategories = (new ProductCategoryRepository($tenantPdo))->findActiveNames();
+            $salesCaseStatuses = (new SalesCaseStatusRepository($tenantPdo))->findActive();
 
             // ログインユーザーに対応するm_staffレコードを特定
             $loginUserId = (int) ($auth['user_id'] ?? 0);
@@ -97,7 +100,8 @@ final class SalesCaseController
             $flashError,
             $flashSuccess,
             $error,
-            ControllerLayoutHelper::build($this->guard, $this->config, 'sales_case')
+            ControllerLayoutHelper::build($this->guard, $this->config, 'sales_case'),
+            $salesCaseStatuses
         ));
     }
 
@@ -118,6 +122,7 @@ final class SalesCaseController
         $staffUsers        = [];
         $activities        = [];
         $productCategories = [];
+        $salesCaseStatuses = [];
         $error             = null;
 
         try {
@@ -133,7 +138,8 @@ final class SalesCaseController
             $customers         = $repository->fetchCustomers();
             $staffUsers        = (new StaffRepository($tenantPdo))->findActive();
             $activities        = $repository->fetchLinkedActivities($id);
-            $productCategories = (new ProductCategoryRepository($tenantPdo))->findAll();
+            $productCategories = (new ProductCategoryRepository($tenantPdo))->findActiveNames();
+            $salesCaseStatuses = (new SalesCaseStatusRepository($tenantPdo))->findActive();
 
             $staffNameMap = $this->buildUserNameMap($staffUsers);
             $record['staff_name'] = $staffNameMap[(int) ($record['staff_id'] ?? 0)] ?? '';
@@ -153,7 +159,6 @@ final class SalesCaseController
             $customers,
             $staffUsers,
             $activities,
-            $listUrl,
             $detailUrl,
             $this->config->routeUrl('sales-case/update'),
             $this->config->routeUrl('sales-case/delete'),
@@ -174,7 +179,8 @@ final class SalesCaseController
                     ['label' => '見込案件詳細'],
                 ]
             ),
-            $productCategories
+            $productCategories,
+            $salesCaseStatuses
         ));
     }
 
@@ -192,18 +198,20 @@ final class SalesCaseController
         $returnTo = trim((string) ($_POST['return_to'] ?? ''));
         $fallback = $this->config->routeUrl('sales-case/list');
 
-        $errors = $this->validateInput($input);
-        if ($errors !== []) {
-            $this->guard->session()->setFlash('error', implode(' ', $errors));
-            Responses::redirect($returnTo !== '' ? $returnTo : $fallback);
-        }
-
         try {
-            $tenantPdo  = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $tenantPdo   = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $validStatus = $this->validStatusNames($tenantPdo);
+
+            $errors = $this->validateInput($input, $validStatus);
+            if ($errors !== []) {
+                $this->guard->session()->setFlash('error', implode(' ', $errors));
+                Responses::redirect($returnTo !== '' ? $returnTo : $fallback);
+            }
+
             $repository = new SalesCaseRepository($tenantPdo);
             $newId      = $repository->create($input, (int) ($auth['user_id'] ?? 0));
             $this->guard->session()->setFlash('success', '見込案件を登録しました。');
-            Responses::redirect($this->detailUrl($newId));
+            Responses::redirect($returnTo !== '' ? $returnTo : $fallback);
         } catch (Throwable) {
             $this->guard->session()->setFlash('error', '見込案件の登録に失敗しました。');
             Responses::redirect($returnTo !== '' ? $returnTo : $fallback);
@@ -227,14 +235,17 @@ final class SalesCaseController
         }
 
         $input  = $this->collectInput();
-        $errors = $this->validateInput($input);
-        if ($errors !== []) {
-            $this->guard->session()->setFlash('error', implode(' ', $errors));
-            Responses::redirect($this->detailUrl($id));
-        }
 
         try {
-            $tenantPdo  = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $tenantPdo   = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $validStatus = $this->validStatusNames($tenantPdo);
+
+            $errors = $this->validateInput($input, $validStatus);
+            if ($errors !== []) {
+                $this->guard->session()->setFlash('error', implode(' ', $errors));
+                Responses::redirect($this->detailUrl($id));
+            }
+
             $repository = new SalesCaseRepository($tenantPdo);
             $updated    = $repository->update($id, $input, (int) ($auth['user_id'] ?? 0));
             if ($updated > 0) {
@@ -316,8 +327,9 @@ final class SalesCaseController
     private function extractCriteria(array $source): array
     {
         return [
+            'case_name'     => trim((string) ($source['case_name'] ?? '')),
             'customer_name' => trim((string) ($source['customer_name'] ?? '')),
-            'staff_id' => trim((string) ($source['staff_id'] ?? '')),
+            'staff_id'      => trim((string) ($source['staff_id'] ?? '')),
             'status'        => trim((string) ($source['status'] ?? '')),
             'prospect_rank' => trim((string) ($source['prospect_rank'] ?? '')),
         ];
@@ -358,7 +370,6 @@ final class SalesCaseController
             'prospect_rank'           => trim((string) ($_POST['prospect_rank'] ?? '')),
             'expected_premium'        => trim((string) ($_POST['expected_premium'] ?? '')),
             'expected_contract_month' => trim((string) ($_POST['expected_contract_month'] ?? '')),
-            'referral_source'         => trim((string) ($_POST['referral_source'] ?? '')),
             'next_action_date'        => trim((string) ($_POST['next_action_date'] ?? '')),
             'lost_reason'             => trim((string) ($_POST['lost_reason'] ?? '')),
             'memo'                    => trim((string) ($_POST['memo'] ?? '')),
@@ -368,9 +379,10 @@ final class SalesCaseController
 
     /**
      * @param array<string, mixed> $input
+     * @param list<string>         $validStatusNames 有効な status name の許容一覧（DB から動的取得）
      * @return string[]
      */
-    private function validateInput(array $input): array
+    private function validateInput(array $input, array $validStatusNames): array
     {
         $errors = [];
 
@@ -380,7 +392,7 @@ final class SalesCaseController
         }
 
         $status = trim((string) ($input['status'] ?? ''));
-        if (!array_key_exists($status, SalesCaseRepository::ALLOWED_STATUSES)) {
+        if ($status === '' || !in_array($status, $validStatusNames, true)) {
             $errors[] = 'ステータスを選択してください。';
         }
 
@@ -400,6 +412,16 @@ final class SalesCaseController
         }
 
         return $errors;
+    }
+
+    /**
+     * 見込案件ステータスマスタから有効な name 一覧を取得する。
+     *
+     * @return list<string>
+     */
+    private function validStatusNames(PDO $pdo): array
+    {
+        return (new SalesCaseStatusRepository($pdo))->findActiveNames();
     }
 
     /**

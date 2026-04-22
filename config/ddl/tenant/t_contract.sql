@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS t_contract (
   id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '契約ID',
-  customer_id         BIGINT UNSIGNED NOT NULL COMMENT '契約者顧客ID(m_customer.id)',
+  customer_id         BIGINT UNSIGNED NULL     COMMENT '契約者顧客ID(m_customer.id) — CSV未リンク時はNULL',
+  sjnet_customer_name VARCHAR(200)    NULL     COMMENT 'SJNET取込時の顧客名(列4) — customer_idがNULLの場合の表示用',
   insured_customer_id BIGINT UNSIGNED NULL COMMENT '被保険者顧客ID(m_customer.id)',
   policy_no           VARCHAR(50)     NOT NULL COMMENT '証券番号',
   insurance_category  VARCHAR(50)     NULL COMMENT '保険種類',

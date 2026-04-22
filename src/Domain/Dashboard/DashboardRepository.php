@@ -9,13 +9,19 @@ use Throwable;
 final class DashboardRepository
 {
     /** @var array<int, string> */
-    private const RENEWAL_DONE_STATUSES = ['completed', 'cancelled', 'lost'];
+    private const ACCIDENT_HIGH_PRIORITIES = ['high'];
 
-    /** @var array<int, string> */
-    private const ACCIDENT_DONE_STATUSES = ['resolved', 'closed'];
+    /**
+     * case_type='renewal' の完了扱い name サブクエリ。
+     */
+    private const RENEWAL_DONE_SUBQUERY =
+        '(SELECT name FROM m_case_status WHERE case_type = \'renewal\' AND is_completed = 1)';
 
-    /** @var array<int, string> */
-    private const ACCIDENT_HIGH_PRIORITIES = ['high', 'urgent'];
+    /**
+     * case_type='accident' の完了扱い name サブクエリ。
+     */
+    private const ACCIDENT_DONE_SUBQUERY =
+        '(SELECT name FROM m_case_status WHERE case_type = \'accident\' AND is_completed = 1)';
 
     public function __construct(
         private PDO $pdo,
@@ -71,7 +77,6 @@ final class DashboardRepository
      */
     public function getRenewalAlertCounts(?int $staffUserId): array
     {
-        $doneSql = self::quotedList(self::RENEWAL_DONE_STATUSES);
         $userJoin = $staffUserId !== null
             ? 'INNER JOIN m_staff ms ON ms.id = rc.assigned_staff_id AND ms.user_id = :staff_user_id'
             : '';
@@ -86,7 +91,7 @@ final class DashboardRepository
              FROM t_renewal_case rc
              ' . $userJoin . '
              WHERE rc.is_deleted = 0
-               AND rc.case_status NOT IN (' . $doneSql . ')';
+               AND rc.case_status NOT IN ' . self::RENEWAL_DONE_SUBQUERY;
 
         $stmt = $this->pdo->prepare($sql);
         if ($staffUserId !== null) {
@@ -111,7 +116,6 @@ final class DashboardRepository
      */
     public function getAccidentAlertCounts(?int $staffUserId): array
     {
-        $doneSql    = self::quotedList(self::ACCIDENT_DONE_STATUSES);
         $userJoin   = $staffUserId !== null
             ? 'LEFT JOIN m_staff ms ON ms.id = ac.assigned_staff_id AND ms.user_id = :staff_user_id'
             : '';
@@ -119,14 +123,14 @@ final class DashboardRepository
 
         $sql =
             'SELECT
-                COALESCE(SUM(CASE WHEN ac.priority IN ("high", "urgent") THEN 1 ELSE 0 END), 0) AS `high_priority`,
+                COALESCE(SUM(CASE WHEN ac.priority = "high" THEN 1 ELSE 0 END), 0) AS `high_priority`,
                 COALESCE(SUM(CASE WHEN ac.priority = "normal"            THEN 1 ELSE 0 END), 0) AS `mid_priority`,
                 COALESCE(SUM(CASE WHEN ac.priority = "low"               THEN 1 ELSE 0 END), 0) AS `low_priority`,
                 COALESCE(COUNT(*), 0) AS `open`
              FROM t_accident_case ac
              ' . $userJoin . '
              WHERE ac.is_deleted = 0
-               AND ac.status NOT IN (' . $doneSql . ')
+               AND ac.status NOT IN ' . self::ACCIDENT_DONE_SUBQUERY . '
                ' . $userWhere;
 
         $stmt = $this->pdo->prepare($sql);
@@ -146,7 +150,7 @@ final class DashboardRepository
 
     /**
      * 見込管理サマリ（見込度別件数・今月成約予定件数）を返す。
-     * 完了ステータス（won, lost）を除いた未完了件数を集計する。
+     * m_sales_case_status.is_completed=1 の name に該当するステータスを除外する。
      *
      * @return array{rank_a: int, rank_b: int, rank_c: int, closing_this_month: int}
      */
@@ -166,7 +170,7 @@ final class DashboardRepository
              FROM t_sales_case sc
              ' . $userJoin . '
              WHERE sc.is_deleted = 0
-               AND sc.status NOT IN (\'won\', \'lost\')
+               AND sc.status NOT IN (SELECT name FROM m_sales_case_status WHERE is_completed = 1)
                ' . $userWhere;
 
         $stmt = $this->pdo->prepare($sql);
@@ -241,6 +245,81 @@ final class DashboardRepository
                 if (isset($result[$m])) {
                     $result[$m]['premium'] = (int) ($row['premium'] ?? 0);
                     $result[$m]['count']   = (int) ($row['cnt']     ?? 0);
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * 業務区分別（損保/生保）の月別成績サマリを返す。
+     * source_type IN ('non_life','life') で絞り込み、12ヶ月分を 4月始まりで返す。
+     *
+     * @return array{
+     *     non_life: array<int, array{premium: int, count: int}>,
+     *     life:     array<int, array{premium: int, count: int}>,
+     * }
+     */
+    public function getPerformanceMonthlySummaryBySourceType(int $fiscalYear, ?int $staffUserId): array
+    {
+        $fyStart  = $fiscalYear      . '-04';
+        $fyEnd12  = $fiscalYear      . '-12';
+        $fyStart1 = ($fiscalYear + 1) . '-01';
+        $fyEnd    = ($fiscalYear + 1) . '-03';
+
+        $userJoin  = $staffUserId !== null
+            ? 'LEFT JOIN m_staff ms ON ms.id = sp.staff_id AND ms.user_id = :staff_user_id'
+            : '';
+        $userWhere = $staffUserId !== null ? 'AND ms.id IS NOT NULL' : '';
+
+        $sql =
+            'SELECT sp.source_type AS src,
+                    CAST(SUBSTRING(sp.settlement_month, 6, 2) AS UNSIGNED) AS perf_month,
+                    COALESCE(SUM(sp.premium_amount), 0) AS premium,
+                    COUNT(*) AS cnt
+             FROM t_sales_performance sp
+             ' . $userJoin . '
+             WHERE sp.is_deleted = 0
+               AND sp.settlement_month IS NOT NULL
+               AND sp.source_type IN (\'non_life\', \'life\')
+               AND (
+                   sp.settlement_month BETWEEN :fy_start AND :fy_end12
+                   OR sp.settlement_month BETWEEN :fy_start1 AND :fy_end
+               )
+               ' . $userWhere . '
+             GROUP BY sp.source_type, CAST(SUBSTRING(sp.settlement_month, 6, 2) AS UNSIGNED)';
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':fy_start',  $fyStart);
+        $stmt->bindValue(':fy_end12',  $fyEnd12);
+        $stmt->bindValue(':fy_start1', $fyStart1);
+        $stmt->bindValue(':fy_end',    $fyEnd);
+        if ($staffUserId !== null) {
+            $stmt->bindValue(':staff_user_id', $staffUserId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+        $dbRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $initMonths = static function (): array {
+            $out = [];
+            foreach ([4,5,6,7,8,9,10,11,12,1,2,3] as $m) {
+                $out[$m] = ['premium' => 0, 'count' => 0];
+            }
+            return $out;
+        };
+        $result = [
+            'non_life' => $initMonths(),
+            'life'     => $initMonths(),
+        ];
+
+        if (is_array($dbRows)) {
+            foreach ($dbRows as $row) {
+                $src = (string) ($row['src'] ?? '');
+                $m   = (int) ($row['perf_month'] ?? 0);
+                if (($src === 'non_life' || $src === 'life') && isset($result[$src][$m])) {
+                    $result[$src][$m]['premium'] = (int) ($row['premium'] ?? 0);
+                    $result[$src][$m]['count']   = (int) ($row['cnt']     ?? 0);
                 }
             }
         }
@@ -364,31 +443,31 @@ final class DashboardRepository
     public function getRenewalSummary(): ?array
     {
         try {
-            $renewalDoneSql = self::quotedList(self::RENEWAL_DONE_STATUSES);
+            $doneSub = self::RENEWAL_DONE_SUBQUERY;
 
             $stmt = $this->pdo->prepare(
                 'SELECT
                     COALESCE(SUM(CASE
                         WHEN rc.next_action_date = CURDATE()
-                         AND rc.case_status NOT IN (' . $renewalDoneSql . ')
+                         AND rc.case_status NOT IN ' . $doneSub . '
                         THEN 1 ELSE 0 END), 0) AS due_today,
                     COALESCE(SUM(CASE
                         WHEN rc.maturity_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
-                         AND rc.case_status NOT IN (' . $renewalDoneSql . ')
+                         AND rc.case_status NOT IN ' . $doneSub . '
                         THEN 1 ELSE 0 END), 0) AS upcoming_30,
                     COALESCE(SUM(CASE
                         WHEN rc.next_action_date < CURDATE()
-                         AND rc.case_status NOT IN (' . $renewalDoneSql . ')
+                         AND rc.case_status NOT IN ' . $doneSub . '
                         THEN 1 ELSE 0 END), 0) AS overdue,
                     COALESCE(SUM(CASE
                         WHEN rc.maturity_date BETWEEN DATE_FORMAT(CURDATE(), "%Y-%m-01")
                                               AND LAST_DAY(CURDATE())
-                         AND rc.case_status NOT IN (' . $renewalDoneSql . ')
+                         AND rc.case_status NOT IN ' . $doneSub . '
                         THEN 1 ELSE 0 END), 0) AS this_month_not_completed,
                     COALESCE(SUM(CASE
                         WHEN rc.early_renewal_deadline IS NOT NULL
                          AND rc.early_renewal_deadline < CURDATE()
-                         AND rc.case_status NOT IN (' . $renewalDoneSql . ')
+                         AND rc.case_status NOT IN ' . $doneSub . '
                         THEN 1 ELSE 0 END), 0) AS early_deadline_overdue
                  FROM t_renewal_case rc
                  WHERE rc.is_deleted = 0'
@@ -418,27 +497,36 @@ final class DashboardRepository
     public function getAccidentSummary(): ?array
     {
         try {
-            $accidentDoneSql         = self::quotedList(self::ACCIDENT_DONE_STATUSES);
+            $accidentDoneSub         = self::ACCIDENT_DONE_SUBQUERY;
             $accidentHighPrioritySql = self::quotedList(self::ACCIDENT_HIGH_PRIORITIES);
+
+            // 初期対応前の件数は「一番最初の有効ステータス（= display_order 最小）」とする。
+            $firstStatusRow = $this->pdo->query(
+                "SELECT name FROM m_case_status
+                 WHERE case_type = 'accident' AND is_active = 1
+                 ORDER BY display_order ASC, id ASC LIMIT 1"
+            )->fetch(PDO::FETCH_ASSOC);
+            $firstStatusName = is_array($firstStatusRow) ? (string) ($firstStatusRow['name'] ?? '') : '';
 
             $stmt = $this->pdo->prepare(
                 'SELECT
                     COALESCE(SUM(CASE
-                        WHEN ac.status NOT IN (' . $accidentDoneSql . ')
+                        WHEN ac.status NOT IN ' . $accidentDoneSub . '
                         THEN 1 ELSE 0 END), 0) AS open_count,
                     COALESCE(SUM(CASE
                         WHEN ac.priority IN (' . $accidentHighPrioritySql . ')
-                         AND ac.status NOT IN (' . $accidentDoneSql . ')
+                         AND ac.status NOT IN ' . $accidentDoneSub . '
                         THEN 1 ELSE 0 END), 0) AS high_priority_open_count,
                     COALESCE(SUM(CASE
                         WHEN ac.resolved_date BETWEEN DATE_FORMAT(CURDATE(), "%Y-%m-01") AND CURDATE()
                         THEN 1 ELSE 0 END), 0) AS resolved_this_month,
                     COALESCE(SUM(CASE
-                        WHEN ac.status = "accepted"
+                        WHEN ac.status = :first_status
                         THEN 1 ELSE 0 END), 0) AS new_accepted_count
                  FROM t_accident_case ac
                  WHERE ac.is_deleted = 0'
             );
+            $stmt->bindValue(':first_status', $firstStatusName);
             $stmt->execute();
 
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -499,7 +587,7 @@ final class DashboardRepository
                  INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.is_deleted = 0
                  LEFT  JOIN m_staff ms ON ms.id = rc.assigned_staff_id AND ms.is_active = 1
                  WHERE rc.is_deleted = 0
-                   AND rc.case_status NOT IN (' . self::quotedList(self::RENEWAL_DONE_STATUSES) . ')
+                   AND rc.case_status NOT IN ' . self::RENEWAL_DONE_SUBQUERY . '
                    AND rc.maturity_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
                  ORDER BY rc.maturity_date ASC, rc.id ASC
                  LIMIT :limit'
@@ -519,10 +607,9 @@ final class DashboardRepository
     public function getAccidentOpenRows(int $limit = 5): array
     {
         try {
-            $accidentDoneSql = self::quotedList(self::ACCIDENT_DONE_STATUSES);
             $stmt = $this->pdo->prepare(
                 'SELECT ac.id AS accident_case_id,
-                        mc.customer_name,
+                        COALESCE(mc.customer_name, ac.prospect_name, \'\') AS customer_name,
                         ac.accident_date,
                         ac.accepted_date,
                         ac.product_type,
@@ -530,10 +617,10 @@ final class DashboardRepository
                         ac.status,
                         ms.staff_name AS assigned_staff_name
                  FROM t_accident_case ac
-                 INNER JOIN m_customer mc ON mc.id = ac.customer_id AND mc.is_deleted = 0
+                 LEFT  JOIN m_customer mc ON mc.id = ac.customer_id AND mc.is_deleted = 0
                  LEFT  JOIN m_staff ms ON ms.id = ac.assigned_staff_id AND ms.is_active = 1
                  WHERE ac.is_deleted = 0
-                   AND ac.status NOT IN (' . $accidentDoneSql . ')
+                   AND ac.status NOT IN ' . self::ACCIDENT_DONE_SUBQUERY . '
                  ORDER BY ac.accepted_date DESC, ac.id DESC
                  LIMIT :limit'
             );

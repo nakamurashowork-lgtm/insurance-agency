@@ -4,12 +4,12 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\AppConfig;
-use App\Domain\Sales\SalesCsvImportService;
 use App\Domain\Sales\SalesPerformanceRepository;
 use App\Domain\Tenant\StaffRepository;
 use App\Http\Responses;
 use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
+use App\Presentation\SalesPerformanceBulkView;
 use App\Presentation\SalesPerformanceDetailView;
 use App\Presentation\SalesPerformanceListView;
 use App\Presentation\View\ListViewHelper;
@@ -81,19 +81,8 @@ final class SalesPerformanceController
             $performanceMonths = $repository->fetchPerformanceMonths();
             $staffUserNames = $this->buildUserNameMap($staffUsers);
             $rows = $this->attachStaffNamesToRows($rows, $staffUserNames);
-
-            $importBatchId = (int) ($_GET['import_batch_id'] ?? 0);
-            if ($importBatchId > 0) {
-                $importBatch = $repository->findImportBatchById($importBatchId);
-                if ($importBatch !== null) {
-                    $importRows = $repository->findImportRowsByBatchId($importBatchId, 500);
-                    if ($openModal === '') {
-                        $openModal = 'import';
-                    }
-                }
-            }
         } catch (Throwable) {
-            $error = '成績一覧の取得に失敗しました。接続設定を確認してください。';
+            $error = '成績一覧の取得に失敗しました。時間をおいて再度お試しください。解消しない場合は管理者へご連絡ください。';
         }
 
         $flashError = $this->guard->session()->consumeFlash('error');
@@ -113,18 +102,16 @@ final class SalesPerformanceController
             $openModal,
             $listUrl,
             $this->config->routeUrl('sales/detail'),
+            $this->config->routeUrl('customer/detail'),
             $this->config->routeUrl('sales/create'),
-            $this->config->routeUrl('sales/import'),
             $this->config->routeUrl('sales/delete'),
+            $this->config->routeUrl('sales/bulk'),
             $this->guard->session()->issueCsrfToken('sales_create'),
-            $this->guard->session()->issueCsrfToken('sales_import'),
             $this->guard->session()->issueCsrfToken('sales_delete'),
             $flashError,
             $flashSuccess,
             $error,
             self::ALLOWED_TYPES,
-            $importBatch,
-            $importRows,
             (string) ($_GET['filter_open'] ?? '') === '1',
             ControllerLayoutHelper::build($this->guard, $this->config, 'sales')
         ));
@@ -175,7 +162,7 @@ final class SalesPerformanceController
                 $record = array_merge($record, (array) $editDraft['input']);
             }
         } catch (Throwable) {
-            $error = '成績詳細の取得に失敗しました。接続設定を確認してください。';
+            $error = '成績詳細の取得に失敗しました。時間をおいて再度お試しください。解消しない場合は管理者へご連絡ください。';
         }
 
         $flashError = $this->guard->session()->consumeFlash('error');
@@ -200,7 +187,6 @@ final class SalesPerformanceController
             $flashSuccess,
             $error,
             $this->config->routeUrl('customer/detail'),
-            $this->config->routeUrl('renewal/detail'),
             ControllerLayoutHelper::build(
                 $this->guard,
                 $this->config,
@@ -212,51 +198,6 @@ final class SalesPerformanceController
                 ]
             )
         ));
-    }
-
-    public function import(): void
-    {
-        $auth = $this->guard->requireAuthenticated();
-        $returnTo = $this->validateReturnTo($_POST['return_to'] ?? null);
-        $token = (string) ($_POST['_csrf_token'] ?? '');
-        if (!$this->guard->session()->validateAndConsumeCsrfToken('sales_import', $token)) {
-            $this->guard->session()->setFlash('error', '不正な操作です。再度お試しください。');
-            Responses::redirect($returnTo);
-        }
-
-        $file = $_FILES['csv_file'] ?? null;
-        if (!is_array($file) || (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            $this->guard->session()->setFlash('error', 'CSVファイルを指定してください。');
-            Responses::redirect($returnTo);
-        }
-
-        $tmpName = (string) ($file['tmp_name'] ?? '');
-        $originalName = (string) ($file['name'] ?? 'upload.csv');
-        if ($tmpName === '' || !is_uploaded_file($tmpName) && !is_file($tmpName)) {
-            $this->guard->session()->setFlash('error', 'CSVファイルの読込に失敗しました。');
-            Responses::redirect($returnTo);
-        }
-
-        try {
-            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $repository = new SalesPerformanceRepository($pdo);
-            $service = new SalesCsvImportService($repository);
-            $result = $service->importFile($tmpName, $originalName, (int) ($auth['user_id'] ?? 0));
-
-            if (($result['status'] ?? '') === 'failed') {
-                $this->guard->session()->setFlash('error', 'CSV取込に失敗しました。内容を確認してください。');
-            } else {
-                $this->guard->session()->setFlash('success', 'CSV取込が完了しました。');
-            }
-
-            Responses::redirect(ListViewHelper::buildUrl($returnTo, [
-                'import_batch_id' => (string) ((int) ($result['batch_id'] ?? 0)),
-                'open_modal' => 'import',
-            ]));
-        } catch (Throwable) {
-            $this->guard->session()->setFlash('error', 'CSV取込に失敗しました。内容を確認してください。');
-            Responses::redirect(ListViewHelper::buildUrl($returnTo, ['open_modal' => 'import']));
-        }
     }
 
     public function create(): void
@@ -309,6 +250,22 @@ final class SalesPerformanceController
         }
 
         $input = $this->collectInput();
+
+        // 編集では成績区分ラジオを disabled にしているため、performance_type_detail は送信されない。
+        // その場合は既存レコードの performance_type を維持する（上書きしない）。
+        if (trim((string) ($_POST['performance_type_detail'] ?? '')) === '') {
+            try {
+                $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+                $repository = new SalesPerformanceRepository($pdo);
+                $current = $repository->findById($id);
+                if (is_array($current) && isset($current['performance_type'])) {
+                    $input['performance_type'] = (string) $current['performance_type'];
+                }
+            } catch (Throwable) {
+                // findById に失敗した場合は collectInput() の値のままバリデーションへ進む
+            }
+        }
+
         $errors = $this->validateInput($input);
         if ($errors !== []) {
             $this->guard->session()->setFlash('error', implode(' ', $errors));
@@ -364,6 +321,136 @@ final class SalesPerformanceController
         }
 
         Responses::redirect($this->config->routeUrl('sales/list'));
+    }
+
+    /**
+     * 月次一括入力画面の表示。
+     */
+    public function bulkView(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+
+        $settlementMonth = trim((string) ($_GET['settlement_month'] ?? ''));
+        if (!preg_match('/^\d{4}-\d{2}$/', $settlementMonth)) {
+            $settlementMonth = date('Y-m');
+        }
+
+        $formType = trim((string) ($_GET['form_type'] ?? 'non_life'));
+        if (!in_array($formType, self::ALLOWED_FORM_TYPES, true)) {
+            $formType = 'non_life';
+        }
+
+        $existingRows = [];
+        $customers = [];
+        $staffUsers = [];
+        $renewalCases = [];
+        $months = [];
+        $error = null;
+
+        try {
+            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $repository = new SalesPerformanceRepository($pdo);
+            $result = $repository->searchPage(
+                ['settlement_month' => $settlementMonth],
+                1,
+                500,
+                'performance_date',
+                'asc'
+            );
+            $existingRows = (array) ($result['rows'] ?? []);
+            $customers = $repository->fetchCustomers(5000);
+            $staffUsers = (new StaffRepository($pdo))->findActive();
+            $renewalCases = $repository->fetchRenewalCases(500);
+            $months = $repository->fetchPerformanceMonths();
+            // 精算月候補に settlement_month 実績がない場合は、performance_date の年月を流用する
+            if (!in_array($settlementMonth, $months, true)) {
+                array_unshift($months, $settlementMonth);
+            }
+        } catch (Throwable) {
+            $error = '月次一括入力画面の取得に失敗しました。時間をおいて再度お試しください。';
+        }
+
+        $listUrl = $this->config->routeUrl('sales/list');
+        $bulkUrl = ListViewHelper::buildUrl(
+            $this->config->routeUrl('sales/bulk'),
+            ['settlement_month' => $settlementMonth, 'form_type' => $formType]
+        );
+        $rowSaveUrl = $this->config->routeUrl('sales/bulk/row-save');
+        $csrfToken = $this->guard->session()->issueCsrfToken('sales_bulk_create');
+
+        $flashError = $this->guard->session()->consumeFlash('error');
+        $flashSuccess = $this->guard->session()->consumeFlash('success');
+
+        Responses::html(SalesPerformanceBulkView::render(
+            $settlementMonth,
+            $formType,
+            $existingRows,
+            $customers,
+            $staffUsers,
+            $renewalCases,
+            $months,
+            $bulkUrl,
+            $rowSaveUrl,
+            $listUrl,
+            $csrfToken,
+            $flashError,
+            $flashSuccess,
+            $error,
+            ControllerLayoutHelper::build(
+                $this->guard,
+                $this->config,
+                'sales',
+                [
+                    ['label' => 'ホーム', 'url' => $this->config->routeUrl('dashboard')],
+                    ['label' => '成績一覧', 'url' => $listUrl],
+                    ['label' => '一括入力'],
+                ]
+            )
+        ));
+    }
+
+    /**
+     * 月次一括入力画面の1行分を保存するエンドポイント（JSON 返却）。
+     */
+    public function bulkRowSave(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateCsrfToken('sales_bulk_create', $token)) {
+            Responses::json(['ok' => false, 'errors' => ['不正な操作です。画面を開き直してください。']], 400);
+        }
+
+        $input = $this->collectInput();
+
+        // 月次一括入力では画面上の精算月を既定として使う。個別行で明示指定があればそちらを優先。
+        $settlementMonth = trim((string) ($_POST['settlement_month'] ?? ''));
+        if (preg_match('/^\d{4}-\d{2}$/', $settlementMonth) && ($input['settlement_month'] ?? null) === null) {
+            $input['settlement_month'] = $settlementMonth;
+        }
+
+        // 生保は申込日＝計上日としてミラーする（既存モーダルと同じ扱い）
+        if (($input['form_type'] ?? '') === 'life') {
+            $app = (string) ($input['application_date'] ?? '');
+            if ($app !== '' && ($input['performance_date'] ?? '') === '') {
+                $input['performance_date'] = $app;
+            }
+        }
+
+        $errors = $this->validateInput($input);
+        if ($errors !== []) {
+            Responses::json(['ok' => false, 'errors' => array_values($errors)], 422);
+        }
+
+        try {
+            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $repository = new SalesPerformanceRepository($pdo);
+            $repository->create($input, (int) ($auth['user_id'] ?? 0));
+        } catch (Throwable) {
+            Responses::json(['ok' => false, 'errors' => ['成績の登録に失敗しました。']], 500);
+        }
+
+        Responses::json(['ok' => true]);
     }
 
     /**
@@ -472,6 +559,7 @@ final class SalesPerformanceController
     private function collectInput(): array
     {
         $customerId = (int) ($_POST['customer_id'] ?? 0);
+        $prospectName = $customerId <= 0 ? trim((string) ($_POST['customer_name'] ?? '')) : null;
         $contractId = (int) ($_POST['contract_id'] ?? 0);
         $renewalCaseId = (int) ($_POST['renewal_case_id'] ?? 0);
         $staffUserId = (int) ($_POST['staff_id'] ?? 0);
@@ -484,6 +572,7 @@ final class SalesPerformanceController
         return [
             'form_type' => $formType,
             'customer_id' => $customerId,
+            'prospect_name' => $prospectName !== '' ? $prospectName : null,
             'contract_id' => $contractId > 0 ? $contractId : null,
             'renewal_case_id' => $renewalCaseId > 0 ? $renewalCaseId : null,
             'performance_date' => trim((string) ($_POST['performance_date'] ?? '')),
@@ -543,8 +632,8 @@ final class SalesPerformanceController
             $errors[] = '業務区分が不正です。';
         }
 
-        if ((int) ($input['customer_id'] ?? 0) <= 0) {
-            $errors[] = '顧客は必須です。';
+        if ((int) ($input['customer_id'] ?? 0) <= 0 && ($input['prospect_name'] ?? '') === '') {
+            $errors[] = '契約者名は必須です。';
         }
 
         $date = (string) ($input['performance_date'] ?? '');
@@ -592,9 +681,8 @@ final class SalesPerformanceController
             }
         }
 
-        // 生保は精算月・分割回数・領収証番号を強制的に NULL
+        // 生保は分割回数・領収証番号を強制的に NULL（精算月は一括入力の月次フィルタ用に保持）
         if ($formType === 'life') {
-            $input['settlement_month']  = null;
             $input['installment_count'] = null;
             $input['receipt_no']        = null;
         }

@@ -4,11 +4,13 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\AppConfig;
+use App\Domain\Renewal\ContractRepository;
 use App\Domain\Renewal\RenewalCaseRepository;
 use App\Domain\Renewal\SjnetCsvImportService;
 use App\Domain\Renewal\SjnetImportRepository;
 use App\Domain\Tenant\CaseStatusRepository;
 use App\Domain\Tenant\ProcedureMethodRepository;
+use App\Domain\Tenant\RenewalMethodRepository;
 use App\Domain\Tenant\StaffRepository;
 use App\Http\Responses;
 use App\Infra\CommonConnectionFactory;
@@ -81,7 +83,7 @@ final class RenewalCaseController
                 }
             }
         } catch (Throwable) {
-            $error = '満期一覧の取得に失敗しました。接続設定を確認してください。';
+            $error = '満期一覧の取得に失敗しました。時間をおいて再度お試しください。解消しない場合は管理者へご連絡ください。';
         }
 
         $flashError   = $this->guard->session()->consumeFlash('error');
@@ -102,8 +104,6 @@ final class RenewalCaseController
             $this->config->routeUrl('renewal/detail'),
             $this->config->routeUrl('renewal/import'),
             $this->guard->session()->issueCsrfToken('renewal_import'),
-            $this->config->routeUrl('renewal/delete'),
-            $this->guard->session()->issueCsrfToken('renewal_delete'),
             $importFlashError,
             $importFlashSuccess,
             $importBatch,
@@ -114,7 +114,8 @@ final class RenewalCaseController
             $allUsers,
             ControllerLayoutHelper::build($this->guard, $this->config, 'renewal'),
             $flashSuccess,
-            $renewalStatuses
+            $renewalStatuses,
+            $this->config->routeUrl('customer/detail')
         ));
     }
 
@@ -130,16 +131,7 @@ final class RenewalCaseController
             Responses::redirect($listUrl);
         }
 
-        // 戻り先解決（from=customer の場合は顧客詳細）
-        $from = (string) ($_GET['from'] ?? '');
-        $fromCustomerId = (int) ($_GET['customer_id'] ?? 0);
-        if ($from === 'customer' && $fromCustomerId > 0) {
-            $backUrl   = $this->config->routeUrl('customer/detail') . '&id=' . $fromCustomerId;
-            $backLabel = '顧客詳細へ戻る';
-        } else {
-            $backUrl   = $listUrl;
-            $backLabel = '一覧へ戻る';
-        }
+        $renewalMethods = [];
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
@@ -171,8 +163,18 @@ final class RenewalCaseController
             $detail['assigned_user_name'] = $assignedStaffId > 0 ? ($staffMap[$assignedStaffId] ?? '') : '';
             $detail['office_user_name']   = $officeStaffId   > 0 ? ($staffMap[$officeStaffId]   ?? '') : '';
             $officeStaffList = $staffRepo->findForOffice();
+            $salesStaffList  = $staffRepo->findForSales();
+            $staffNameMap = [];
+            foreach ($staffRepo->findActive() as $s) {
+                $sid = (string) ($s['id'] ?? '');
+                $sname = (string) ($s['staff_name'] ?? '');
+                if ($sid !== '' && $sname !== '') {
+                    $staffNameMap[$sid] = $sname;
+                }
+            }
             $renewalStatuses = (new CaseStatusRepository($pdo))->findByType('renewal');
             $procedureMethods = (new ProcedureMethodRepository($pdo))->findAll();
+            $renewalMethods = (new RenewalMethodRepository($pdo))->findAll();
 
             $updateInput = $this->consumeUpdateInput($renewalCaseId);
             $fieldErrors = $this->consumeUpdateErrors($renewalCaseId);
@@ -189,14 +191,13 @@ final class RenewalCaseController
             $commentCsrfToken = $this->guard->session()->issueCsrfToken('renewal_comment_' . $renewalCaseId);
             $detailUrl = $this->detailUrl($renewalCaseId, $criteria, $listState);
 
+            $contractId = (int) ($detail['contract_id'] ?? 0);
             Responses::html(RenewalCaseDetailView::render(
                 $detail,
                 $comments,
                 $audits,
                 $this->config->routeUrl('renewal/update'),
                 $this->config->routeUrl('renewal/comment'),
-                $backUrl,
-                $backLabel,
                 $detailUrl,
                 $this->buildListQuery($criteria, $listState),
                 $this->config->routeUrl('customer/detail'),
@@ -217,7 +218,16 @@ final class RenewalCaseController
                 ),
                 $officeStaffList,
                 $renewalStatuses,
-                $procedureMethods
+                $procedureMethods,
+                $renewalMethods,
+                $this->config->routeUrl('renewal/link-customer'),
+                $contractId > 0
+                    ? $this->guard->session()->issueCsrfToken('renewal_link_customer_' . $contractId)
+                    : '',
+                $this->config->routeUrl('renewal/update-assigned-staff'),
+                $this->guard->session()->issueCsrfToken('renewal_update_assigned_staff_' . $renewalCaseId),
+                $salesStaffList,
+                $staffNameMap
             ));
         } catch (Throwable) {
             $this->guard->session()->setFlash('error', '満期詳細の取得に失敗しました。');
@@ -245,14 +255,16 @@ final class RenewalCaseController
         $input = $this->collectUpdateInput($_POST);
         $allowedStatuses = [];
         $allowedProcedureMethods = [];
+        $allowedRenewalMethods = [];
         try {
             $pdoForValidation = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $allowedStatuses = (new CaseStatusRepository($pdoForValidation))->validCodes('renewal');
-            $allowedProcedureMethods = (new ProcedureMethodRepository($pdoForValidation))->findActiveLabels();
+            $allowedStatuses = (new CaseStatusRepository($pdoForValidation))->activeNames('renewal');
+            $allowedProcedureMethods = (new ProcedureMethodRepository($pdoForValidation))->findActiveNames();
+            $allowedRenewalMethods = (new RenewalMethodRepository($pdoForValidation))->findActiveNames();
         } catch (\Throwable) {
             // fallback: no restriction
         }
-        $fieldErrors = $this->validateUpdateInput($input, $allowedStatuses, $allowedProcedureMethods);
+        $fieldErrors = $this->validateUpdateInput($input, $allowedStatuses, $allowedProcedureMethods, $allowedRenewalMethods);
         if ($fieldErrors !== []) {
             $this->guard->session()->setFlash('error', '入力内容を確認してください。');
             $this->storeUpdateInput($renewalCaseId, $input);
@@ -299,6 +311,10 @@ final class RenewalCaseController
             $this->guard->session()->setFlash('error', 'コメント本文を入力してください。');
             Responses::redirect($returnTo);
         }
+        if (mb_strlen($commentBody) > 500) {
+            $this->guard->session()->setFlash('error', 'コメントは500文字以内で入力してください。');
+            Responses::redirect($returnTo);
+        }
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
@@ -310,39 +326,6 @@ final class RenewalCaseController
         }
 
         Responses::redirect($returnTo);
-    }
-
-    public function delete(): void
-    {
-        $auth = $this->guard->requireAuthenticated();
-        $criteria  = $this->extractCriteria($_POST);
-        $listState = $this->extractListState($_POST);
-
-        $renewalCaseId = (int) ($_POST['id'] ?? 0);
-        $token = (string) ($_POST['_csrf_token'] ?? '');
-        if (!$this->guard->session()->validateAndConsumeCsrfToken('renewal_delete', $token)) {
-            $this->guard->session()->setFlash('error', '不正な削除要求を検出しました。');
-            Responses::redirect($this->listUrl($criteria, $listState));
-        }
-
-        if ($renewalCaseId <= 0) {
-            $this->guard->session()->setFlash('error', '案件IDが不正です。');
-            Responses::redirect($this->listUrl($criteria, $listState));
-        }
-
-        try {
-            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $deleted = (new RenewalCaseRepository($pdo))->softDelete($renewalCaseId, (int) ($auth['user_id'] ?? 0));
-            if ($deleted) {
-                $this->guard->session()->setFlash('success', '満期案件を削除しました。');
-            } else {
-                $this->guard->session()->setFlash('error', '対象案件が見つからないか既に削除されています。');
-            }
-        } catch (Throwable) {
-            $this->guard->session()->setFlash('error', '削除に失敗しました。');
-        }
-
-        Responses::redirect($this->listUrl($criteria, $listState));
     }
 
     public function import(): void
@@ -376,20 +359,148 @@ final class RenewalCaseController
 
         $result = [];
         try {
-            $pdo       = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $userId    = (int) ($auth['user_id'] ?? 0);
-            $service   = new SjnetCsvImportService($pdo, $userId, new DateTimeImmutable('today'));
+            $pdo     = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $userId  = (int) ($auth['user_id'] ?? 0);
+            $service = new SjnetCsvImportService($pdo, $userId, new DateTimeImmutable('today'));
             $result  = $service->import($tmpPath, $origName);
         } catch (Throwable $e) {
             $this->guard->session()->setFlash('import_error', 'CSV取込に失敗しました: ' . $e->getMessage());
             Responses::redirect($returnTo);
         }
 
-        $batchId = (int) ($result['batch_id'] ?? 0);
-        $this->guard->session()->setFlash('import_success', 'CSV取込が完了しました。');
+        $batchId    = (int) ($result['batch_id'] ?? 0);
+        $errorCount = (int) ($result['error'] ?? 0);
+
+        if ($errorCount > 0) {
+            // エラー行の証券番号を取得してメッセージに含める
+            $importRepo   = new SjnetImportRepository($pdo);
+            $errorRows    = array_filter(
+                $importRepo->findRowsByBatchId($batchId, 200),
+                static fn(array $r): bool => ($r['row_status'] ?? '') === 'error'
+            );
+            $policyLabels = array_map(
+                static fn(array $r): string => (string) ($r['policy_no'] ?? '（証券番号なし）'),
+                array_values($errorRows)
+            );
+            $displayMax = 20;
+            $overCount  = max(0, count($policyLabels) - $displayMax);
+            $policyStr  = implode('、', array_slice($policyLabels, 0, $displayMax));
+            if ($overCount > 0) {
+                $policyStr .= '…他' . $overCount . '件';
+            }
+
+            $successCount = (int) ($result['insert'] ?? 0) + (int) ($result['update'] ?? 0);
+            if ($successCount === 0) {
+                // 全件失敗
+                $flashMsg = "CSV取込に失敗しました。全{$errorCount}件でエラーが発生しました。\n失敗した証券番号: {$policyStr}";
+            } else {
+                // 一部失敗
+                $flashMsg = "CSV取込は完了しましたが、{$errorCount}件のエラーがありました。\n失敗した証券番号: {$policyStr}";
+            }
+            $this->guard->session()->setFlash('import_error', $flashMsg);
+        } else {
+            $this->guard->session()->setFlash('import_success', 'CSV取込が完了しました。');
+        }
 
         $listUrl = $this->config->routeUrl('renewal/list');
         Responses::redirect($listUrl . '&import_batch_id=' . $batchId . '&import_dialog=1');
+    }
+
+    /**
+     * 顧客紐づけ操作（設定・変更）
+     * POST renewal/link-customer
+     * fields: contract_id, customer_id（必須・正の整数）, renewal_case_id（戻り先用）, _csrf_token
+     */
+    public function linkCustomer(): void
+    {
+        $auth           = $this->guard->requireAuthenticated();
+        $criteria       = $this->extractCriteria($_POST);
+        $listState      = $this->extractListState($_POST);
+        $contractId     = (int) ($_POST['contract_id'] ?? 0);
+        $renewalCaseId  = (int) ($_POST['renewal_case_id'] ?? 0);
+
+        if ($contractId <= 0 || $renewalCaseId <= 0) {
+            $this->guard->session()->setFlash('error', '不正なリクエストです。');
+            Responses::redirect($this->listUrl($criteria, $listState));
+        }
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('renewal_link_customer_' . $contractId, $token)) {
+            $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
+            Responses::redirect($this->detailUrl($renewalCaseId, $criteria, $listState));
+        }
+
+        $customerIdRaw = trim((string) ($_POST['customer_id'] ?? ''));
+        if ($customerIdRaw === '' || !ctype_digit($customerIdRaw) || (int) $customerIdRaw <= 0) {
+            $this->guard->session()->setFlash('error', '顧客が選択されていません。');
+            Responses::redirect($this->detailUrl($renewalCaseId, $criteria, $listState));
+        }
+        $newCustomerId = (int) $customerIdRaw;
+
+        try {
+            $pdo    = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $repo   = new ContractRepository($pdo);
+            $userId = (int) ($auth['user_id'] ?? 0);
+            $repo->linkCustomer($contractId, $newCustomerId, $userId, $renewalCaseId);
+
+            $this->guard->session()->setFlash('success', '顧客を紐づけました。');
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '顧客の紐づけ操作に失敗しました。');
+        }
+
+        Responses::redirect($this->detailUrl($renewalCaseId, $criteria, $listState));
+    }
+
+    /**
+     * 営業担当の変更
+     * POST renewal/update-assigned-staff
+     * fields: renewal_case_id, assigned_staff_id（0 or 空 で未設定）, _csrf_token
+     */
+    public function updateAssignedStaff(): void
+    {
+        $auth          = $this->guard->requireAuthenticated();
+        $criteria      = $this->extractCriteria($_POST);
+        $listState     = $this->extractListState($_POST);
+        $renewalCaseId = (int) ($_POST['renewal_case_id'] ?? 0);
+
+        if ($renewalCaseId <= 0) {
+            $this->guard->session()->setFlash('error', '不正なリクエストです。');
+            Responses::redirect($this->listUrl($criteria, $listState));
+        }
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('renewal_update_assigned_staff_' . $renewalCaseId, $token)) {
+            $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
+            Responses::redirect($this->detailUrl($renewalCaseId, $criteria, $listState));
+        }
+
+        $raw = trim((string) ($_POST['assigned_staff_id'] ?? ''));
+        $assignedStaffId = null;
+        if ($raw !== '') {
+            if (!ctype_digit($raw)) {
+                $this->guard->session()->setFlash('error', '営業担当の指定が不正です。');
+                Responses::redirect($this->detailUrl($renewalCaseId, $criteria, $listState));
+            }
+            $assignedStaffId = (int) $raw;
+            if ($assignedStaffId < 0) {
+                $assignedStaffId = null;
+            }
+        }
+
+        try {
+            $pdo        = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $repository = new RenewalCaseRepository($pdo);
+            $updated    = $repository->updateAssignedStaff($renewalCaseId, $assignedStaffId, (int) ($auth['user_id'] ?? 0));
+            if ($updated) {
+                $this->guard->session()->setFlash('success', '営業担当を更新しました。');
+            } else {
+                $this->guard->session()->setFlash('error', '更新対象が見つかりません。');
+            }
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '営業担当の更新に失敗しました。');
+        }
+
+        Responses::redirect($this->detailUrl($renewalCaseId, $criteria, $listState));
     }
 
     /**
@@ -414,13 +525,14 @@ final class RenewalCaseController
      * @param list<string> $allowedProcedureMethods
      * @return array<string, string>
      */
-    private function validateUpdateInput(array $input, array $allowedStatuses = [], array $allowedProcedureMethods = []): array
+    private function validateUpdateInput(array $input, array $allowedStatuses = [], array $allowedProcedureMethods = [], array $allowedRenewalMethods = []): array
     {
-        if ($allowedStatuses === []) {
-            $allowedStatuses = ['not_started', 'sj_requested', 'doc_prepared', 'waiting_return', 'quote_sent', 'waiting_payment', 'completed'];
-        }
+        // マスタ取得失敗時は検証をスキップ（データベース異常）
         $allowedResults = ['', 'pending', 'renewed', 'cancelled', 'lost'];
-        $allowedRenewalMethods = ['', '対面', '郵送', '電話募集'];
+        // allowedRenewalMethods が空のとき（DB 取得失敗）は検証をスキップする
+        if ($allowedRenewalMethods !== []) {
+            $allowedRenewalMethods = array_merge([''], $allowedRenewalMethods);
+        }
         if ($allowedProcedureMethods === []) {
             $allowedProcedureMethods = ['対面', '対面ナビ', '電話ナビ', '電話募集', '署名・捺印', 'ケータイOR', 'マイページ'];
         }
@@ -434,7 +546,7 @@ final class RenewalCaseController
 
         $errors = [];
 
-        if (!in_array($caseStatus, $allowedStatuses, true)) {
+        if ($allowedStatuses !== [] && !in_array($caseStatus, $allowedStatuses, true)) {
             $errors['case_status'] = '対応ステータスを選択してください。';
         }
 
@@ -442,7 +554,7 @@ final class RenewalCaseController
             $errors['renewal_result'] = '更改結果が不正です。';
         }
 
-        if (!in_array($renewalMethod, $allowedRenewalMethods, true)) {
+        if ($allowedRenewalMethods !== [] && !in_array($renewalMethod, $allowedRenewalMethods, true)) {
             $errors['renewal_method'] = '更改方法が不正です。';
         }
 

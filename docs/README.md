@@ -18,6 +18,7 @@
 - `docs/policies/`: 運用方針・UI規約
 - `docs/migrations/`: 移行方針
 - `docs/reconciliation/`: 差分照合・整合確認
+- `docs/deployment/`: 本番環境へのデプロイ手順
 - `docs/patches/`: パッチ指示書・統合手順（一時置き場。統合後は削除する）
 - `docs/screens/`: 画面別仕様
 

@@ -77,9 +77,8 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
      */
     public function testImport_HeaderOnly_BatchSucceedsWithZeroRows(): void
     {
-        // Arrange: ヘッダ行のみの CSV（44 列、データ行なし）
-        $headerLine = implode(',', array_fill(0, 44, 'col'));
-        $path       = $this->writeTempCsv($headerLine . "\n");
+        // Arrange: ヘッダ行のみの CSV（データ行なし）
+        $path = $this->writeTempCsv(SjnetCsvBuilder::sheet([])->toCsvString());
         $service    = $this->makeService();
 
         // Act
@@ -322,6 +321,43 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
         $this->assertNull($rows[0]['staff_mapping_status']);
     }
 
+    /**
+     * R4: sjnet_code が存在するが is_active=0 のスタッフ → staff_mapping_status='inactive'、
+     *     assigned_staff_id=NULL、契約は正常 INSERT される
+     */
+    public function testResolveStaff_InactiveStaff_MappingStatusIsInactive(): void
+    {
+        // Arrange: is_active=0 のスタッフを登録
+        $this->createStaff(['sjnet_code' => 'INACTIVE001', 'is_active' => 0]);
+
+        $path    = $this->writeTempCsv(
+            SjnetCsvBuilder::row()
+                ->withPolicyNo('R4-P001')
+                ->withCustomerName('非アクティブスタッフ顧客')
+                ->withEndDate(self::MATURITY_DATE)
+                ->withAgencyCode('INACTIVE001')
+                ->toCsvString()
+        );
+        $service = $this->makeService();
+
+        // Act
+        $result = $service->import($path, 'staff_inactive.csv');
+
+        // Assert: エラーにならず INSERT される
+        $this->assertSame(0, $result['error'],  'エラーにならない');
+        $this->assertSame(1, $result['insert'], 'INSERT される');
+
+        // Assert: import_row の staff_mapping_status が 'inactive'
+        $rows = $this->getRowsByBatch((int) $result['batch_id']);
+        $this->assertSame('inactive', $rows[0]['staff_mapping_status']);
+
+        // Assert: assigned_staff_id は NULL
+        $renewalCase = $this->pdo->query('SELECT assigned_staff_id FROM t_renewal_case LIMIT 1')->fetch();
+        $this->assertIsArray($renewalCase);
+        $this->assertNull($renewalCase['assigned_staff_id'],
+            '非アクティブスタッフの assigned_staff_id は NULL');
+    }
+
     // =========================================================
     // Step 5: 顧客解決 (A1, A2, A5-1, A5-2)
     // =========================================================
@@ -400,9 +436,13 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
     }
 
     /**
-     * A5-1: 同名顧客が 2 件以上存在 → row_status='error'、契約・満期案件は INSERT されない
+     * A5-1: 同名顧客が 2 件以上存在 → row_status='unlinked'、契約・満期案件は customer_id=NULL で INSERT される
+     *
+     * 仕様 §9 廃止後の現行挙動: ambiguous_customer はエラーではなく未リンク取込に変更された。
+     * - customer_id=NULL のまま契約・満期案件を INSERT する
+     * - unlinked カウンタが増加する（error カウンタは増加しない）
      */
-    public function testResolveCustomer_AmbiguousCustomer_ReturnsError(): void
+    public function testResolveCustomer_AmbiguousCustomer_UnlinkedNotError(): void
     {
         // Arrange: 同名顧客を 2 件登録
         $duplicateName = '重複田一郎';
@@ -421,18 +461,21 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
         // Act
         $result = $service->import($path, 'ambiguous.csv');
 
-        // Assert: error カウンタ
-        $this->assertSame(1, $result['error']);
-        $this->assertSame(0, $result['insert']);
+        // Assert: unlinked カウンタが増え、error カウンタは増えない
+        $this->assertSame(1, $result['unlinked'], 'unlinked カウンタが 1 増える');
+        $this->assertSame(0, $result['error'],    'error カウンタは増えない');
 
-        // Assert: 契約・満期案件は INSERT されていないこと
-        $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM t_contract')->fetchColumn());
-        $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM t_renewal_case')->fetchColumn());
+        // Assert: 契約・満期案件は customer_id=NULL で INSERT されること
+        $this->assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM t_contract')->fetchColumn(),
+            '契約は INSERT される');
+        $this->assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM t_renewal_case')->fetchColumn(),
+            '満期案件は INSERT される');
+        $contract = $this->pdo->query('SELECT customer_id FROM t_contract LIMIT 1')->fetch();
+        $this->assertNull($contract['customer_id'], 'customer_id は NULL（未リンク）');
 
-        // Assert: import_row に error_message が記録されていること
+        // Assert: import_row の row_status が 'unlinked'
         $rows = $this->getRowsByBatch((int) $result['batch_id']);
-        $this->assertSame('error', $rows[0]['row_status']);
-        $this->assertStringContainsString('ambiguous_customer', (string) $rows[0]['error_message']);
+        $this->assertSame('unlinked', $rows[0]['row_status']);
     }
 
     /**
@@ -467,6 +510,74 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
         $contracts = $this->pdo->query('SELECT customer_id FROM t_contract ORDER BY id')->fetchAll();
         $this->assertCount(2, $contracts);
         $this->assertSame($contracts[0]['customer_id'], $contracts[1]['customer_id']);
+    }
+
+    /**
+     * A6: CSV 生年月日なし ＋ DB に同名・birth_date NULL 顧客 → 1件一致（新規 INSERT されない）
+     *
+     * 顧客照合は「顧客名 + birth_date IS NULL」で行われる。
+     * CSV に生年月日が入っていない場合でも、DB 側が birth_date=NULL の顧客に正しく一致する。
+     */
+    public function testResolveCustomer_EmptyBirthDateInCsv_MatchesNullBirthDateCustomer(): void
+    {
+        // Arrange: birth_date=NULL の既存顧客を登録
+        $existingId = $this->createCustomer(['customer_name' => 'A6テスト顧客']);
+
+        $path    = $this->writeTempCsv(
+            SjnetCsvBuilder::row()
+                ->withPolicyNo('A6-P001')
+                ->withCustomerName('A6テスト顧客')
+                ->withEndDate(self::MATURITY_DATE)
+                ->toCsvString() // birth_date 列は空のまま
+        );
+        $service = $this->makeService();
+
+        // Act
+        $result = $service->import($path, 'a6_null_birth.csv');
+
+        // Assert: 新規 INSERT されない
+        $this->assertSame(0, $result['customer_insert'], '既存顧客（birth_date=NULL）に一致するため INSERT されない');
+        $this->assertSame(1, $result['insert']);
+
+        // Assert: 契約が既存顧客に紐づいている
+        $contract = $this->pdo->query('SELECT customer_id FROM t_contract LIMIT 1')->fetch();
+        $this->assertSame($existingId, (int) $contract['customer_id']);
+    }
+
+    /**
+     * A7: CSV 生年月日なし ＋ DB に同名・birth_date 有り顧客 → 0件一致（新規 INSERT される）
+     *
+     * CSV の生年月日が空 = birth_date IS NULL で照合するため、
+     * DB 側に birth_date が設定されている同名顧客は一致しない → 新規 INSERT。
+     */
+    public function testResolveCustomer_EmptyBirthDateInCsv_DoesNotMatchNonNullBirthDateCustomer(): void
+    {
+        // Arrange: birth_date=1990-01-01 の既存顧客を登録
+        $this->createCustomer(['customer_name' => 'A7テスト顧客', 'birth_date' => '1990-01-01']);
+
+        $path    = $this->writeTempCsv(
+            SjnetCsvBuilder::row()
+                ->withPolicyNo('A7-P001')
+                ->withCustomerName('A7テスト顧客')
+                ->withEndDate(self::MATURITY_DATE)
+                ->toCsvString() // birth_date 列は空のまま
+        );
+        $service = $this->makeService();
+
+        // Act
+        $result = $service->import($path, 'a7_birth_mismatch.csv');
+
+        // Assert: 新規 INSERT される（DB の birth_date=1990-01-01 とは一致しない）
+        $this->assertSame(1, $result['customer_insert'], '既存顧客の birth_date が非 NULL なため一致せず、新規 INSERT される');
+
+        // Assert: m_customer が 2 件（既存 + 新規）
+        $this->assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM m_customer')->fetchColumn());
+
+        // Assert: 新規顧客の birth_date は NULL
+        $newCustomer = $this->pdo->query(
+            "SELECT birth_date FROM m_customer ORDER BY id DESC LIMIT 1"
+        )->fetch();
+        $this->assertNull($newCustomer['birth_date'], '生年月日なし CSV で新規登録された顧客の birth_date は NULL');
     }
 
     // =========================================================
@@ -606,79 +717,6 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
     }
 
     /**
-     * B3-2: UPDATE 時、sales_staff_id が設定済みなら上書きしない
-     */
-    public function testUpsertContract_Update_DoesNotOverwriteSalesStaffIdIfAlreadySet(): void
-    {
-        // Arrange: sales_staff_id が設定済みの契約
-        $existingStaffId = $this->createStaff(['sjnet_code' => null]);
-        $customerId      = $this->createCustomer(['customer_name' => 'スタッフ保護顧客']);
-        $this->createContract([
-            'customer_id'     => $customerId,
-            'policy_no'       => 'B32-P001',
-            'policy_end_date' => '2026-04-30',
-            'sales_staff_id'  => $existingStaffId,
-        ]);
-
-        // 新しい担当者コードを持つスタッフ
-        $newStaffId = $this->createStaff(['sjnet_code' => 'NEW001']);
-
-        $path    = $this->writeTempCsv(
-            SjnetCsvBuilder::row()
-                ->withPolicyNo('B32-P001')
-                ->withCustomerName('スタッフ保護顧客')
-                ->withEndDate('2026-04-30')
-                ->withAgencyCode('NEW001')
-                ->toCsvString()
-        );
-        $service = $this->makeService();
-
-        // Act
-        $service->import($path, 'protect_staff.csv');
-
-        // Assert: sales_staff_id が元のまま（上書きされていない）
-        $contract = $this->pdo->query('SELECT sales_staff_id FROM t_contract LIMIT 1')->fetch();
-        $this->assertSame($existingStaffId, (int) $contract['sales_staff_id'],
-            '設定済みの sales_staff_id は上書きされない');
-        $this->assertNotSame($newStaffId, (int) $contract['sales_staff_id']);
-    }
-
-    /**
-     * B3-3: UPDATE 時、sales_staff_id が NULL なら resolved_user_id で上書きする
-     */
-    public function testUpsertContract_Update_SetsSalesStaffIdIfNull(): void
-    {
-        // Arrange: sales_staff_id が NULL の契約
-        $customerId = $this->createCustomer(['customer_name' => 'NULL担当顧客']);
-        $this->createContract([
-            'customer_id'     => $customerId,
-            'policy_no'       => 'B33-P001',
-            'policy_end_date' => '2026-04-30',
-            'sales_staff_id'  => null,
-        ]);
-
-        $newStaffId = $this->createStaff(['sjnet_code' => 'B33STAFF']);
-
-        $path    = $this->writeTempCsv(
-            SjnetCsvBuilder::row()
-                ->withPolicyNo('B33-P001')
-                ->withCustomerName('NULL担当顧客')
-                ->withEndDate('2026-04-30')
-                ->withAgencyCode('B33STAFF')
-                ->toCsvString()
-        );
-        $service = $this->makeService();
-
-        // Act
-        $service->import($path, 'set_staff.csv');
-
-        // Assert: sales_staff_id が新しいスタッフ id に更新されていること
-        $contract = $this->pdo->query('SELECT sales_staff_id FROM t_contract LIMIT 1')->fetch();
-        $this->assertSame($newStaffId, (int) $contract['sales_staff_id'],
-            'NULL の sales_staff_id は resolved_user_id で上書きされる');
-    }
-
-    /**
      * B5: parsePremium が負値で null を返した場合 → premium_amount に 0 が入る（エラーにならない）
      *
      * 仕様上の意図: parsePremium コメントに「呼び出し側で 0 へフォールバックさせる」と明記。
@@ -797,14 +835,15 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
     }
 
     /**
-     * C3-2: 既存案件に assigned_staff_id が設定済み → 上書きしない
+     * C3-2: 既存案件に assigned_staff_id が設定済みでも、resolvedUserId があれば常に上書きする
+     *       （1年ごとの再取込で担当者が変わりうるため）
      */
-    public function testUpsertRenewalCase_ExistingCase_DoesNotOverwriteAssignedStaffIfSet(): void
+    public function testUpsertRenewalCase_ExistingCase_OverwritesAssignedStaffIfResolved(): void
     {
         // Arrange
         $existingStaffId = $this->createStaff(['sjnet_code' => null]);
         $newStaffId      = $this->createStaff(['sjnet_code' => 'C32STAFF']);
-        $customerId      = $this->createCustomer(['customer_name' => '担当保護顧客']);
+        $customerId      = $this->createCustomer(['customer_name' => '担当上書き顧客']);
         $contractId      = $this->createContract([
             'customer_id'     => $customerId,
             'policy_no'       => 'C32-P001',
@@ -813,26 +852,27 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
         $this->createRenewalCase([
             'contract_id'       => $contractId,
             'maturity_date'     => '2026-04-30',
-            'assigned_staff_id' => $existingStaffId, // 設定済み
+            'assigned_staff_id' => $existingStaffId, // 既存担当者
         ]);
 
         $path    = $this->writeTempCsv(
             SjnetCsvBuilder::row()
                 ->withPolicyNo('C32-P001')
-                ->withCustomerName('担当保護顧客')
+                ->withCustomerName('担当上書き顧客')
                 ->withEndDate('2026/04/30')
-                ->withAgencyCode('C32STAFF')
+                ->withAgencyCode('C32STAFF') // 新しい担当者コード
                 ->toCsvString()
         );
         $service = $this->makeService();
 
         // Act
-        $service->import($path, 'protect_assigned_staff.csv');
+        $service->import($path, 'overwrite_assigned_staff.csv');
 
-        // Assert: assigned_staff_id が元のまま
+        // Assert: assigned_staff_id が新しいスタッフ id に更新されていること
         $renewalCase = $this->pdo->query('SELECT assigned_staff_id FROM t_renewal_case LIMIT 1')->fetch();
-        $this->assertSame($existingStaffId, (int) $renewalCase['assigned_staff_id'],
-            '設定済みの assigned_staff_id は上書きされない');
+        $this->assertSame($newStaffId, (int) $renewalCase['assigned_staff_id'],
+            'resolvedUserId がある場合は既存 assigned_staff_id を上書きする');
+        $this->assertNotSame($existingStaffId, (int) $renewalCase['assigned_staff_id']);
     }
 
     /**
@@ -874,32 +914,18 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
     }
 
     // =========================================================
-    // Phase 2-Y: 現状実装の固定テスト
+    // =========================================================
+    // Step 9: 既存顧客の不更新（仕様確認済み）
     // =========================================================
 
     /**
-     * Y-A3: 既存顧客に対して CSV の住所・連絡先が一切更新されない（現状動作の固定）
+     * A3: 既存顧客に対して CSV の住所・連絡先は更新されない（確定仕様）
      *
-     * 【これは現状動作の固定テスト】
-     * 関連質問: Q1（既存顧客の住所を CSV で上書きすべきか？）
-     *
-     * 現状の挙動:
-     *   resolveCustomer は既存顧客（customer_name で 1 件ヒット）を見つけた場合、
-     *   UPDATE SQL を一切発行せずに既存 id を返すだけ。
-     *   CSV に含まれる F列(postal_code)/G列(address1)/H列(phone) は
-     *   既存顧客には反映されない。
-     *
-     * 保護される列（CSV に値があっても更新されない列）:
-     *   - postal_code: CSV F列（新規登録時のみ反映）
-     *   - address1:    CSV G列（新規登録時のみ反映）
-     *   - phone:       CSV H列（新規登録時のみ反映）
-     *   - customer_type, status, customer_name_kana, email, address2, note:
-     *     CSV に列自体が存在しないか、resolveCustomer が読まないため常に保護される
-     *
-     * Q1 回答後に「上書きすべき」となった場合:
-     *   このテストの Assert を「変更されていること」に書き換えること。
+     * 仕様: 既存顧客の住所変更は画面から営業が対応する。
+     *       CSV 取込で既存顧客情報を上書きしない。
+     *       新規登録時のみ CSV の値（郵便番号・住所・電話番号）が反映される。
      */
-    public function testResolveCustomer_ExistingCustomer_DoesNotUpdateAddress_CurrentSpec_PendingQ1(): void
+    public function testResolveCustomer_ExistingCustomer_DoesNotUpdateAddress(): void
     {
         // Arrange: 既存顧客を登録（CSV とは異なる住所・電話番号を設定）
         $customerName       = '住所保護テスト顧客';
@@ -949,136 +975,34 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
         $this->assertSame(
             $originalPostal,
             $customer['postal_code'],
-            '[現状固定] postal_code は CSV の値で上書きされない（Q1 回答次第で変わる）'
+            'postal_code は CSV の値で上書きされない（住所変更は画面から対応）'
         );
         $this->assertSame(
             $originalAddress1,
             $customer['address1'],
-            '[現状固定] address1 は CSV の値で上書きされない（Q1 回答次第で変わる）'
+            'address1 は CSV の値で上書きされない（住所変更は画面から対応）'
         );
         $this->assertSame(
             $originalPhone,
             $customer['phone'],
-            '[現状固定] phone は CSV の値で上書きされない（Q1 回答次第で変わる）'
+            'phone は CSV の値で上書きされない（住所変更は画面から対応）'
         );
     }
 
     /**
-     * Y-C2: closeOldRenewalCases は wrong column フィルタにより永久にヒットしない（dead code）
-     *
-     * 【これは既知バグの固定テスト】
-     * 発見経緯: I-2 調査で t_renewal_case に 'renewed'/'lost' の case_status が存在しないことを確認。
-     *
-     * バグの内容:
-     *   closeOldRenewalCases の WHERE 条件:
-     *     AND rc.case_status IN ('renewed', 'lost')
-     *   しかし 'renewed'/'lost' は t_renewal_case.renewal_result カラムの値であり、
-     *   case_status の有効値は not_started/sj_requested/doc_prepared/... であって
-     *   'renewed'/'lost' は含まれない。
-     *   結果: この UPDATE は永久に 0 件更新する（dead code）。
-     *
-     * テストの構成（実装者の本来の意図を再現）:
-     *   - 旧契約に紐づく満期案件を用意する。renewal_result='renewed'（実装者が意図した条件値）
-     *   - case_status は実際の有効値 'not_started' を設定
-     *   - 新年度契約を CSV 取込で INSERT → closeOldRenewalCases が呼ばれる
-     *   - 実装者の意図では「renewal_result='renewed' の旧案件はクローズされるべき」だが、
-     *     wrong column フィルタ（case_status を見ている）のため何もクローズされない
-     *
-     * 修正時の対応:
-     *   このテストの Assert を「case_status = 'closed' であること」に書き換えること。
-     *   修正後のテストは「このテストを削除して置き換える」こと。
-     */
-    public function testCloseOldRenewalCases_CurrentlyDoesNothing_KnownIssue_DeadCode(): void
-    {
-        // Arrange: 旧年度の契約 + 満期案件（renewal_result='renewed'、case_status は有効値）
-        $policyNo      = 'YC2-P001';
-        $oldMaturity   = '2025-04-30';  // 旧年度の満期日
-        $newMaturity   = '2026-04-30';  // 新年度の満期日（CSV で取込む）
-
-        $customerId    = $this->createCustomer(['customer_name' => 'クローズテスト顧客']);
-        $oldContractId = $this->createContract([
-            'customer_id'     => $customerId,
-            'policy_no'       => $policyNo,
-            'policy_end_date' => $oldMaturity,
-        ]);
-
-        // 旧年度の満期案件: renewal_result='renewed'（実装者が「クローズ対象」と意図した行）
-        // case_status は実際の有効値から選ぶ（'renewed' は case_status に存在しない）
-        $this->createRenewalCase([
-            'contract_id'    => $oldContractId,
-            'maturity_date'  => $oldMaturity,
-            'case_status'    => 'not_started',  // 実際の case_status の有効値
-        ]);
-        // renewal_result を 'renewed' に直接セット（実装者の意図する「クローズ対象」条件）
-        $this->pdo->prepare(
-            'UPDATE t_renewal_case SET renewal_result = :rr WHERE contract_id = :cid'
-        )->execute(['rr' => 'renewed', 'cid' => $oldContractId]);
-
-        // 新年度 CSV: 同一 policy_no で新しい policy_end_date → 新規 contract INSERT → closeOldRenewalCases 呼び出し
-        $path    = $this->writeTempCsv(
-            SjnetCsvBuilder::row()
-                ->withPolicyNo($policyNo)
-                ->withCustomerName('クローズテスト顧客')
-                ->withStartDate('2025-05-01')
-                ->withEndDate($newMaturity)  // 新年度終期
-                ->toCsvString()
-        );
-        $service = $this->makeService();
-
-        // Act: 新年度契約を INSERT → closeOldRenewalCases が呼ばれる
-        $result = $service->import($path, 'yc2_close_old.csv');
-
-        // Assert: import は成功している（新年度契約の INSERT 自体は正常）
-        $this->assertSame(0, $result['error']);
-
-        // Assert: 旧年度の満期案件の case_status が変わっていないこと（dead code の証明）
-        $stmt = $this->pdo->prepare(
-            'SELECT case_status, renewal_result FROM t_renewal_case WHERE contract_id = :cid'
-        );
-        $stmt->execute(['cid' => $oldContractId]);
-        $oldCase = $stmt->fetch();
-
-        $this->assertIsArray($oldCase);
-        $this->assertSame(
-            'not_started',
-            $oldCase['case_status'],
-            '[dead code バグの固定] renewal_result=renewed の旧案件は case_status でヒットしないためクローズされない。' .
-            '修正時は case_status=\'closed\' を期待するテストに書き換えること'
-        );
-        $this->assertSame('renewed', $oldCase['renewal_result'], '前提確認: renewal_result は renewed のまま');
-    }
-
-    /**
-     * Y-D2: 顧客 INSERT 成功後に契約 INSERT が失敗すると orphan customer が残る（既知の不具合）
-     *
-     * 【これは既知の不具合を固定するテスト。Q6 の業務確認後、削除または書き換え予定】
-     *
-     * 以下 3 つの既知問題を 1 シナリオで同時に固定する（Arrange が共通のため分離しない）:
-     *
-     *   1. processRow にトランザクション境界がなく、顧客 INSERT 後に契約 INSERT が失敗すると
-     *      orphan customer が DB に残る（Phase 5 指摘 #1）
-     *
-     *   2. 例外発生行は t_sjnet_import_row に記録されない
-     *      （insertRow が processRow 成功後にのみ呼ばれる構造のため）（Phase 5 指摘 #2）
-     *
-     *   3. 1 行の PDOException でバッチ全体が failBatch + 中断される
-     *      （ambiguous_customer 等の業務エラーが継続するのと非対称）（Phase 5 指摘 #3）
-     *
-     * 修正は 3 件独立して行われる可能性があるため、修正時はこのテストを
-     * 分割または書き換えること。特に #1 修正（トランザクション導入）後は
-     * 「orphan customer が残らないこと」を確認するテストに置き換えること。
+     * Y-D2（修正後）: 契約 INSERT が UNIQUE 違反で失敗しても orphan customer は残らず、
+     *                  エラー行として記録してバッチは継続する
      *
      * 失敗の引き起こし方:
      *   soft-deleted 契約（is_deleted=1）を同一 (policy_no, policy_end_date) で事前作成。
      *   CSV 取込時に upsertContract の SELECT は is_deleted=0 でフィルタするためミス判定し、
      *   INSERT を試みる → UNIQUE KEY uq_t_contract_02(policy_no, policy_end_date) で
-     *   PDOException 発生。この時点で顧客 INSERT はコミット済み（autocommit ON）。
+     *   PDOException 発生 → 行単位ロールバック → 顧客 INSERT も取り消される。
      */
-    public function testImport_OrphanCustomer_WhenContractInsertFails_KnownIssue_PendingQ6(): void
+    public function testImport_ContractInsertFails_RollsBackCustomer_ContinuesBatch(): void
     {
-        // Arrange: 同一 (policy_no, policy_end_date) で soft-deleted 契約を事前作成
-        // ※ customer_id=1 はダミー（外部キー制約なし）
-        $policyNo    = 'YD2-P001';
+        // Arrange: soft-deleted 契約（同一 policy_no + policy_end_date）を事前作成
+        $policyNo     = 'YD2-P001';
         $maturityDate = '2026-04-30';
 
         $dummyCustomerId = $this->createCustomer(['customer_name' => 'ダミー既存顧客']);
@@ -1086,82 +1010,48 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
             'customer_id'     => $dummyCustomerId,
             'policy_no'       => $policyNo,
             'policy_end_date' => $maturityDate,
-            'is_deleted'      => 1,  // soft-deleted: SELECT で is_deleted=0 フィルタをすり抜ける
+            'is_deleted'      => 1, // soft-deleted: is_deleted=0 フィルタをすり抜けて UNIQUE 違反を起こす
         ]);
 
-        // CSV には新規顧客 + 同一 policy_no + 同一 policy_end_date
+        // CSV: 失敗行（UNIQUE 違反） + 正常行
         $newCustomerName = '孤立顧客テスト太郎';
         $path = $this->writeTempCsv(
-            SjnetCsvBuilder::row()
-                ->withPolicyNo($policyNo)
-                ->withCustomerName($newCustomerName)
-                ->withEndDate($maturityDate)
-                ->toCsvString()
+            SjnetCsvBuilder::sheet([
+                SjnetCsvBuilder::row()
+                    ->withPolicyNo($policyNo)
+                    ->withCustomerName($newCustomerName)
+                    ->withEndDate($maturityDate),  // UNIQUE 違反 → error
+                SjnetCsvBuilder::row()
+                    ->withPolicyNo('YD2-P002')
+                    ->withCustomerName('正常顧客')
+                    ->withEndDate($maturityDate),  // 正常 → insert
+            ])->toCsvString()
         );
         $service = $this->makeService();
 
-        // Act: import 実行。processRow 内で顧客 INSERT 成功後、契約 INSERT が UNIQUE 違反で失敗する
-        // import() の catch Throwable → failBatch → RuntimeException 再スロー
-        $threwException = false;
-        try {
-            $service->import($path, 'yd2_orphan.csv');
-        } catch (\RuntimeException $e) {
-            $threwException = true;
-        }
+        // Act
+        $result = $service->import($path, 'yd2_rollback.csv');
 
-        // Assert 1: RuntimeException がスローされること（バッチ全体が中断）
-        $this->assertTrue($threwException, 'PDOException が RuntimeException として再スローされること');
+        // Assert: 例外はスローされずに返ること
+        $this->assertSame(2, $result['total'],  'total = 2');
+        $this->assertSame(1, $result['error'],  'エラー行 = 1');
+        $this->assertSame(1, $result['insert'], '正常行 = 1');
 
-        // Assert 2: orphan customer が DB に残っていること（既知不具合 #1 の固定）
-        // [現状固定] Q6 でトランザクション導入後は「残らないこと」を確認するテストに置き換えること
+        // Assert: orphan customer が残っていないこと（ロールバックで取り消し）
         $stmt = $this->pdo->prepare('SELECT id FROM m_customer WHERE customer_name = :name');
         $stmt->execute(['name' => $newCustomerName]);
-        $orphanCustomer = $stmt->fetch();
-        $this->assertIsArray(
-            $orphanCustomer,
-            '[既知不具合 #1] orphan customer が残っている。' .
-            'Q6 回答後にトランザクションが導入されたら、このアサートを「残らないこと」に書き換えること'
-        );
+        $this->assertFalse($stmt->fetch(), 'orphan customer は残らない（行単位ロールバック）');
 
-        // Assert 3: t_contract に新規行がないこと（失敗した INSERT は反映されていない）
-        $stmt = $this->pdo->prepare(
-            'SELECT COUNT(*) FROM t_contract WHERE policy_no = :pno AND is_deleted = 0'
-        );
-        $stmt->execute(['pno' => $policyNo]);
-        $this->assertSame(
-            0,
-            (int) $stmt->fetchColumn(),
-            't_contract に is_deleted=0 の新規行はない（UNIQUE 違反で INSERT 失敗）'
-        );
-
-        // Assert 4: t_renewal_case に該当行なし
-        $this->assertSame(
-            0,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM t_renewal_case')->fetchColumn(),
-            't_renewal_case に行がないこと'
-        );
-
-        // Assert 5: t_sjnet_import_row に失敗行が記録されていないこと（既知不具合 #2 の固定）
-        // [現状固定] 修正後は「error として記録されること」に書き換えること
+        // Assert: エラー行が t_sjnet_import_row に記録されていること
         $batch = $this->getLatestBatch();
-        $this->assertNotNull($batch, 'バッチ行は作成されていること');
+        $this->assertNotNull($batch);
         $rows = $this->getRowsByBatch((int) $batch['id']);
-        $this->assertCount(
-            0,
-            $rows,
-            '[既知不具合 #2] 例外発生行は t_sjnet_import_row に記録されない。' .
-            '修正後は「error として記録されること」に書き換えること'
-        );
+        $this->assertCount(2, $rows, '2行ともログに記録されること');
+        $this->assertSame('error',  $rows[0]['row_status'], '1行目は error');
+        $this->assertSame('insert', $rows[1]['row_status'], '2行目は insert');
 
-        // Assert 6: t_sjnet_import_batch が failed 状態で終わること（既知不具合 #3 の固定）
-        // [現状固定] 1 行エラーでバッチ全体が中断・failed になる。
-        // 修正後（行単位でキャッチ）は 'partial' を期待するテストに書き換えること
-        $this->assertSame(
-            'failed',
-            $batch['import_status'],
-            '[既知不具合 #3] 1 行の PDOException でバッチ全体が failed になる。' .
-            '修正後は partial を期待するテストに書き換えること'
-        );
+        // Assert: バッチは partial（エラーあり・成功あり）
+        $this->assertSame('partial', $batch['import_status'], 'バッチは partial で完了');
     }
 
     // =========================================================
@@ -1169,21 +1059,19 @@ final class SjnetCsvImportServiceIntegrationTest extends DatabaseTestCase
     // =========================================================
 
     /**
-     * D1: 100 行中 1 行が ambiguous_customer エラー → 残り 99 行が処理される
+     * D1: 100 行中 1 行が不正日付エラー → 残り 99 行が処理される
+     *
+     * ambiguous_customer は仕様 §9 廃止後に unlinked に変更されたため、
+     * エラー行の生成には SK4 相当の不正日付を使用する。
      */
     public function testImport_OneErrorRow_OtherRowsContinue(): void
     {
-        // Arrange: ambiguous_customer を 1 件作る（同名 2 件）
-        $duplicateName = '重複エラー顧客';
-        $this->createCustomer(['customer_name' => $duplicateName]);
-        $this->createCustomer(['customer_name' => $duplicateName]);
-
-        // 1 行目がエラー、残り 99 行は正常
+        // 1 行目がエラー（不正日付）、残り 99 行は正常
         $rows = [
             SjnetCsvBuilder::row()
                 ->withPolicyNo('D1-ERR')
-                ->withCustomerName($duplicateName)
-                ->withEndDate('2026/04/30'),
+                ->withCustomerName('エラー顧客')
+                ->withEndDate('2026/13/01'), // 月=13 は不正 → error
         ];
         for ($i = 1; $i <= 99; $i++) {
             $rows[] = SjnetCsvBuilder::row()

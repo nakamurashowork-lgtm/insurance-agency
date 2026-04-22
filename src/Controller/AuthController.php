@@ -35,7 +35,7 @@ final class AuthController
     public function startGoogle(): void
     {
         if ($this->session->isAuthenticated()) {
-            Responses::redirect($this->config->routeUrl('dashboard'));
+            Responses::redirect($this->postLoginRedirectUrl());
         }
 
         $pendingUserId = $this->session->getTotpPendingUserId();
@@ -63,7 +63,7 @@ final class AuthController
     public function handleGoogleCallback(): void
     {
         if ($this->session->isAuthenticated()) {
-            Responses::redirect($this->config->routeUrl('dashboard'));
+            Responses::redirect($this->postLoginRedirectUrl());
         }
 
         $state = isset($_GET['state']) ? (string) $_GET['state'] : '';
@@ -88,7 +88,7 @@ final class AuthController
             $result   = $this->authService->loginWithGoogleIdentity($identity['sub'], $identity['email'] ?? '');
 
             match ($result['status']) {
-                'authenticated'       => Responses::redirect($this->config->routeUrl('dashboard')),
+                'authenticated'       => Responses::redirect($this->postLoginRedirectUrl()),
                 'totp_verify_required' => Responses::redirect($this->config->routeUrl('auth/totp')),
                 'totp_setup_required'  => Responses::redirect($this->config->routeUrl('auth/totp-setup')),
                 default               => Responses::redirect($this->config->routeUrl('login')),
@@ -112,7 +112,7 @@ final class AuthController
     public function totpSetupShow(): void
     {
         if ($this->session->isAuthenticated()) {
-            Responses::redirect($this->config->routeUrl('dashboard'));
+            Responses::redirect($this->postLoginRedirectUrl());
         }
 
         $pendingUserId = $this->authGuard->requireTotpPending();
@@ -148,7 +148,7 @@ final class AuthController
     public function totpSetupVerify(): void
     {
         if ($this->session->isAuthenticated()) {
-            Responses::redirect($this->config->routeUrl('dashboard'));
+            Responses::redirect($this->postLoginRedirectUrl());
         }
 
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
@@ -187,7 +187,7 @@ final class AuthController
         $tenant = $this->tenantResolver->resolvePrimaryTenantForUser($pendingUserId);
         $this->authService->completeLogin($user, $tenant);
 
-        Responses::redirect($this->config->routeUrl('dashboard'));
+        Responses::redirect($this->postLoginRedirectUrl());
     }
 
     // -------------------------------------------------------------------------
@@ -197,7 +197,7 @@ final class AuthController
     public function totpShow(): void
     {
         if ($this->session->isAuthenticated()) {
-            Responses::redirect($this->config->routeUrl('dashboard'));
+            Responses::redirect($this->postLoginRedirectUrl());
         }
 
         $this->authGuard->requireTotpPending();
@@ -213,7 +213,7 @@ final class AuthController
     public function totpVerify(): void
     {
         if ($this->session->isAuthenticated()) {
-            Responses::redirect($this->config->routeUrl('dashboard'));
+            Responses::redirect($this->postLoginRedirectUrl());
         }
 
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
@@ -250,10 +250,20 @@ final class AuthController
         $tenant = $this->tenantResolver->resolvePrimaryTenantForUser($pendingUserId);
         $this->authService->completeLogin($user, $tenant);
 
-        Responses::redirect($this->config->routeUrl('dashboard'));
+        Responses::redirect($this->postLoginRedirectUrl());
     }
 
     // -------------------------------------------------------------------------
+
+    /**
+     * ログイン成功時のリダイレクト先 URL を返す。
+     * セッションに return_to が保存されていればその route、無ければ dashboard。
+     */
+    private function postLoginRedirectUrl(): string
+    {
+        $returnTo = $this->session->takeReturnTo();
+        return $this->config->routeUrl($returnTo ?? 'dashboard');
+    }
 
     public function logout(): void
     {

@@ -5,6 +5,7 @@ namespace App\Controller;
 
 use App\AppConfig;
 use App\Domain\Dashboard\DashboardRepository;
+use App\Domain\Tenant\SalesTargetRepository;
 use App\Http\Responses;
 use App\Infra\CommonConnectionFactory;
 use App\Infra\TenantConnectionFactory;
@@ -137,12 +138,18 @@ final class DashboardApiController
             $perfCurrent  = $repo->getPerformanceMonthlySummary($fiscalYear, $staffFilter);
             $perfPrev     = $repo->getPerformanceMonthlySummary($fiscalYear - 1, $staffFilter);
             $targets      = $repo->getTargetMonthlySummary($fiscalYear, $staffFilter);
+            // 年度目標の分母は「損保+生保合算」を使う（docs/policies/12_sales-target-spec.md §4-1）。
+            // 廃止された target_type='premium_total' は参照しない。
+            $targetRepo    = new SalesTargetRepository($tenantPdo, $commonPdo, $tenantCode);
+            $targetTotals  = $targetRepo->findYearlyTargetTotals($fiscalYear, $staffFilter);
         } catch (Throwable $e) {
             Responses::json(['error' => $e->getMessage()], 500);
         }
 
         $targetMonthly = is_array($targets['monthly'] ?? null) ? (array) $targets['monthly'] : [];
-        $targetAnnual  = isset($targets['annual']) ? (int) $targets['annual'] : null;
+        $targetNonLife = is_array($targetTotals) ? (int) ($targetTotals['non_life'] ?? 0) : 0;
+        $targetLife    = is_array($targetTotals) ? (int) ($targetTotals['life']     ?? 0) : 0;
+        $targetAnnual  = ($targetNonLife + $targetLife) > 0 ? ($targetNonLife + $targetLife) : null;
 
         // 年度累計
         // 現在年度: 4月〜今月。過去年度: 4月〜3月（全12ヶ月）
@@ -164,8 +171,8 @@ final class DashboardApiController
         // 月次推移
         $monthlyTrend    = [];
         $apiCumCurrent   = 0;
-        $apiTargetThou   = ($targets['annual'] ?? null) !== null && (int) ($targets['annual'] ?? 0) > 0
-            ? (int) floor((int) $targets['annual'] / 1000) : null;
+        $apiTargetThou   = ($targetAnnual !== null && $targetAnnual > 0)
+            ? (int) floor($targetAnnual / 1000) : null;
         foreach ($fiscalMonths as $m) {
             // 未来月（当年度で今月より後）は current を null にする
             $isFuture = ($fiscalYear === $currentFiscalYear) && self::isAfterCurrentMonth($m, $currentMonth);

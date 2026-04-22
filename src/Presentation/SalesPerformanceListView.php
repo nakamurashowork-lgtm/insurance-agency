@@ -20,8 +20,6 @@ final class SalesPerformanceListView
      * @param array<int, string> $performanceMonths
      * @param array<string, mixed>|null $createDraft
      * @param array<int, string> $allowedTypes
-     * @param array<string, mixed>|null $importBatch
-     * @param array<int, array<string, mixed>> $importRows
      * @param array<string, mixed> $layoutOptions
      */
     public static function render(
@@ -38,18 +36,16 @@ final class SalesPerformanceListView
         string $openModal,
         string $listUrl,
         string $detailBaseUrl,
+        string $customerDetailBaseUrl,
         string $createUrl,
-        string $importUrl,
         string $deleteUrl,
+        string $bulkUrl,
         string $createCsrf,
-        string $importCsrf,
         string $deleteCsrf,
         ?string $flashError,
         ?string $flashSuccess,
         ?string $fatalError,
         array $allowedTypes,
-        ?array $importBatch,
-        array $importRows,
         bool $forceFilterOpen,
         array $layoutOptions
     ): string {
@@ -72,14 +68,13 @@ final class SalesPerformanceListView
         $pager      = ListViewHelper::buildPager((int) ($listState['page'] ?? '1'), $perPage, $totalCount);
         $listState['page'] = (string) ($pager['currentPage'] ?? 1);
 
-        $activeModal = in_array($openModal, ['create_nonlife', 'create_life', 'import'], true) ? $openModal : '';
+        $activeModal = in_array($openModal, ['create_nonlife', 'create_life'], true) ? $openModal : '';
         if ($activeModal === '' && $createDraft !== null) {
             $activeModal = ($createDraft['form_type'] ?? '') === 'life' ? 'create_life' : 'create_nonlife';
         }
         $activeDialogId = match ($activeModal) {
             'create_nonlife' => 'sales-create-nonlife-dialog',
             'create_life'    => 'sales-create-life-dialog',
-            'import'         => 'sales-import-dialog',
             default          => '',
         };
 
@@ -96,26 +91,23 @@ final class SalesPerformanceListView
             $listUrl
         );
 
-        $rowsHtml    = self::renderRows($rows, $criteria, $listState, $detailBaseUrl, $deleteUrl, $deleteCsrf, $listUrl);
-        $sortSummary = self::renderSortSummary($sort, $direction);
-        $topToolbar  = LP::toolbar($listUrl, $criteria, $listState, $pager, $totalCount, $perPage, $sortSummary);
+        $rowsHtml    = self::renderRows($rows, $criteria, $listState, $detailBaseUrl, $customerDetailBaseUrl, $deleteUrl, $deleteCsrf, $listUrl);
+        $topToolbar  = LP::toolbar($listUrl, $criteria, $listState, $pager, $totalCount, $perPage);
         $bottomPager = LP::bottomPager($listUrl, $criteria, $listState, $pager);
-
-        $importReturnTo = ListViewHelper::buildUrl($listUrl, ['open_modal' => 'import']);
 
         $filterFormHtml = self::renderSearchForm($criteria, $listState, $staffUsers, $performanceMonths, $listUrl);
 
         $tableHtml =
             '<div class="table-wrap">'
-            . '<table class="table-fixed table-card list-table">'
+            . '<table class="table-fixed table-card list-table list-table-sales">'
             . '<colgroup>'
-            . '<col style="width:96px;">'
-            . '<col style="width:auto;">'
-            . '<col style="width:120px;">'
-            . '<col style="width:80px;">'
-            . '<col style="width:140px;">'
-            . '<col style="width:100px;">'
-            . '<col style="width:40px;">'
+            . '<col class="list-col-date">'
+            . '<col>'
+            . '<col class="list-col-staff">'
+            . '<col class="list-col-source">'
+            . '<col class="list-col-product">'
+            . '<col class="list-col-premium">'
+            . '<col class="list-col-action">'
             . '</colgroup>'
             . '<thead><tr>'
             . '<th>' . LP::sortLink('計上日', 'performance_date', $listUrl, $criteria, $listState) . '</th>'
@@ -133,8 +125,7 @@ final class SalesPerformanceListView
         $content =
             '<div class="list-page-frame">'
             . LP::pageHeader('成績管理一覧',
-                '<button class="btn btn-secondary" type="button" data-open-dialog="sales-create-nonlife-dialog">成績（損保）を追加</button>'
-                . '<button class="btn" type="button" data-open-dialog="sales-create-life-dialog">成績（生保）を追加</button>'
+                '<a class="btn btn-primary" href="' . Layout::escape($bulkUrl) . '">+ 一括入力</a>'
             )
             . $noticeHtml
             . $filterFormHtml
@@ -150,17 +141,9 @@ final class SalesPerformanceListView
             . '<div class="modal-head"><h2>成績を登録（生保）</h2></div>'
             . $lifeForm
             . '</dialog>'
-            . '<dialog id="sales-import-dialog" class="modal-dialog">'
-            . '<form method="dialog" class="modal-close-form"><button type="submit" class="modal-close" aria-label="閉じる">×</button></form>'
-            . '<div class="modal-head"><h2>CSV取込</h2></div>'
-            . '<p class="muted">成績CSVを取り込みます。取込結果とエラー内容もここで確認できます。</p>'
-            . self::renderImportResult($importBatch, $importRows)
-            . self::renderImportForm($importUrl, $importCsrf, $importReturnTo)
-            . '</dialog>'
             . '<script>'
-            . '(function(){const dialogs=document.querySelectorAll("dialog[id]");dialogs.forEach((dlg)=>{const id=dlg.id;const openBtns=document.querySelectorAll("[data-open-dialog=\""+id+"\"]");openBtns.forEach((btn)=>{btn.addEventListener("click",()=>{if(typeof dlg.showModal==="function"&&!dlg.open){dlg.showModal();}});});const closeBtns=dlg.querySelectorAll("[data-close-dialog=\""+id+"\"]");closeBtns.forEach((btn)=>{btn.addEventListener("click",()=>{if(dlg.open){dlg.close();}});});dlg.addEventListener("click",(e)=>{const r=dlg.getBoundingClientRect();const inside=r.left<=e.clientX&&e.clientX<=r.right&&r.top<=e.clientY&&e.clientY<=r.bottom;if(!inside&&dlg.open){dlg.close();}});});const initial=' . ($activeDialogId === '' ? '""' : '"' . Layout::escape($activeDialogId) . '"') . ';if(initial!==""){const dlg=document.getElementById(initial);if(dlg&&typeof dlg.showModal==="function"&&!dlg.open){dlg.showModal();}}})();'
-            . '(function(){var dlg=document.getElementById("sales-create-nonlife-dialog");if(!dlg){return;}var renewalText=dlg.querySelector("input[data-role=\"renewal-case-text\"]");var renewalId=dlg.querySelector("input[name=\"renewal_case_id\"]");var renewalDlId=renewalText?renewalText.getAttribute("list"):null;var renewalDl=renewalDlId?document.getElementById(renewalDlId):null;var ptSec=dlg.querySelector("[data-section=\"perf-type-section\"]");var custText=dlg.querySelector("input[data-role=\"customer-text\"]");var custId=dlg.querySelector("input[name=\"customer_id\"]");var contrId=dlg.querySelector("input[name=\"contract_id\"]");var fillNodes={policy_no:dlg.querySelector("input[name=\"policy_no\"]"),product_type:dlg.querySelector("input[name=\"product_type\"]"),insurance_category:dlg.querySelector("input[name=\"insurance_category\"]"),policy_start_date:dlg.querySelector("input[name=\"policy_start_date\"]"),staff_id:dlg.querySelector("select[name=\"staff_id\"]"),premium_amount:dlg.querySelector("input[name=\"premium_amount\"]")};var applyRenewal=function(){if(!renewalText||!renewalDl){return;}var val=renewalText.value;var opts=renewalDl.querySelectorAll("option");var matchedOpt=null;for(var i=0;i<opts.length;i++){if(opts[i].value===val){matchedOpt=opts[i];break;}}if(renewalId){renewalId.value=matchedOpt?matchedOpt.getAttribute("data-id")||"":"";}
-var hasVal=matchedOpt!==null;if(ptSec){ptSec.style.display=hasVal?"none":"";}if(!hasVal){return;}var f=function(t,a){var v=matchedOpt.getAttribute(a)||"";if(t&&v!==""){t.value=v;}};f(fillNodes.policy_no,"data-policy-no");f(fillNodes.product_type,"data-product-type");f(fillNodes.insurance_category,"data-insurance-category");f(fillNodes.policy_start_date,"data-policy-start-date");f(fillNodes.staff_id,"data-assigned-staff-id");var pp=matchedOpt.getAttribute("data-prev-premium-amount")||"";if(fillNodes.premium_amount&&pp!==""&&pp!=="0"){fillNodes.premium_amount.value=pp;}var cid=matchedOpt.getAttribute("data-customer-id")||"";var cname=matchedOpt.getAttribute("data-customer-name")||"";if(custId&&cid!==""){custId.value=cid;}if(custText&&cname!==""){custText.value=cname;}if(contrId){contrId.value=matchedOpt.getAttribute("data-contract-id")||"";}};var syncCust=function(){if(!custText||!custId){return;}var listId=custText.getAttribute("list");var dl=listId?document.getElementById(listId):null;if(!dl){return;}var val=custText.value;var opts=dl.querySelectorAll("option");var found=false;for(var i=0;i<opts.length;i++){if(opts[i].value===val){custId.value=opts[i].getAttribute("data-id")||"";found=true;break;}}if(!found){custId.value="";}};if(renewalText){renewalText.addEventListener("change",applyRenewal);renewalText.addEventListener("input",applyRenewal);}if(custText){custText.addEventListener("change",syncCust);custText.addEventListener("input",syncCust);}})();'
+            . '(function(){const dialogs=document.querySelectorAll("dialog[id]");dialogs.forEach((dlg)=>{const id=dlg.id;const openBtns=document.querySelectorAll("[data-open-dialog=\""+id+"\"]");openBtns.forEach((btn)=>{btn.addEventListener("click",()=>{if(typeof dlg.showModal==="function"&&!dlg.open){dlg.showModal();}});});const closeBtns=dlg.querySelectorAll("[data-close-dialog=\""+id+"\"]");closeBtns.forEach((btn)=>{btn.addEventListener("click",()=>{if(dlg.open){dlg.close();}});});});const initial=' . ($activeDialogId === '' ? '""' : '"' . Layout::escape($activeDialogId) . '"') . ';if(initial!==""){const dlg=document.getElementById(initial);if(dlg&&typeof dlg.showModal==="function"&&!dlg.open){dlg.showModal();}}})();'
+            . '(function(){var dlg=document.getElementById("sales-create-nonlife-dialog");if(!dlg){return;}var custText=dlg.querySelector("input[data-role=\"customer-text\"]");var custId=dlg.querySelector("input[name=\"customer_id\"]");var syncCust=function(){if(!custText||!custId){return;}var listId=custText.getAttribute("list");var dl=listId?document.getElementById(listId):null;if(!dl){return;}var val=custText.value;var opts=dl.querySelectorAll("option");var found=false;for(var i=0;i<opts.length;i++){if(opts[i].value===val){custId.value=opts[i].getAttribute("data-id")||"";found=true;break;}}if(!found){custId.value="";}};if(custText){custText.addEventListener("change",syncCust);custText.addEventListener("input",syncCust);}})();'
             . '(function(){var dlg=document.getElementById("sales-create-life-dialog");if(!dlg){return;}var custText=dlg.querySelector("input[data-role=\"customer-text\"]");var custId=dlg.querySelector("input[name=\"customer_id\"]");var syncCust=function(){if(!custText||!custId){return;}var listId=custText.getAttribute("list");var dl=listId?document.getElementById(listId):null;if(!dl){return;}var val=custText.value;var opts=dl.querySelectorAll("option");var found=false;for(var i=0;i<opts.length;i++){if(opts[i].value===val){custId.value=opts[i].getAttribute("data-id")||"";found=true;break;}}if(!found){custId.value="";}};var appDate=dlg.querySelector("input[name=\"application_date\"]");var perfDate=dlg.querySelector("input[data-role=\"perf-date-mirror\"]");var mirror=function(){if(appDate&&perfDate){perfDate.value=appDate.value;}};if(appDate){appDate.addEventListener("change",mirror);appDate.addEventListener("input",mirror);mirror();}if(custText){custText.addEventListener("change",syncCust);custText.addEventListener("input",syncCust);}})();'
             . '</script>'
             . '<dialog id="dlg-delete-sales-confirm" class="modal-dialog">'
@@ -190,6 +173,7 @@ var hasVal=matchedOpt!==null;if(ptSec){ptSec.style.display=hasVal?"none":"";}if(
         $selectedMonthNum = (string) ($criteria['performance_month_num'] ?? '');
         $customerName     = Layout::escape((string) ($criteria['customer_name'] ?? ''));
         $staffUserId      = (string) ($criteria['staff_id'] ?? '');
+        $selectedSourceType = (string) ($criteria['source_type'] ?? '');
         $productType      = Layout::escape((string) ($criteria['product_type'] ?? ''));
 
         // 年度セレクト: DB成績月から年度を逆算（月>=4: その年、月<=3: 前年）
@@ -244,6 +228,7 @@ var hasVal=matchedOpt!==null;if(ptSec){ptSec.style.display=hasVal?"none":"";}if(
             . '<div class="search-row">'
             . '<div class="search-field"><span class="search-label">年度</span><select name="performance_fiscal_year" class="compact-input w-sm">' . $fyOptions . '</select></div>'
             . '<div class="search-field"><span class="search-label">月</span><select name="performance_month_num" class="compact-input w-sm">' . $monthOptions . '</select></div>'
+            . '<div class="search-field"><span class="search-label">業務区分</span><select name="source_type" class="compact-input w-sm"><option value="">すべて</option><option value="non_life"' . ($selectedSourceType === 'non_life' ? ' selected' : '') . '>損保</option><option value="life"' . ($selectedSourceType === 'life' ? ' selected' : '') . '>生保</option></select></div>'
             . '<div class="search-field"><span class="search-label">契約者名</span><input type="text" name="customer_name" class="compact-input w-md" value="' . $customerName . '"></div>'
             . '<div class="search-field"><span class="search-label">担当者</span><select name="staff_id" class="compact-input w-md">' . $staffOptions . '</select></div>'
             . '</div>'
@@ -276,7 +261,6 @@ var hasVal=matchedOpt!==null;if(ptSec){ptSec.style.display=hasVal?"none":"";}if(
     ): string {
         $customerId       = (int) ($record['customer_id'] ?? 0);
         $contractId       = (int) ($record['contract_id'] ?? 0);
-        $renewalCaseId    = (int) ($record['renewal_case_id'] ?? 0);
         $performanceDate  = Layout::escape((string) ($record['performance_date'] ?? date('Y-m-d')));
         $performanceType  = (string) ($record['performance_type'] ?? '');
         $policyNo         = Layout::escape((string) ($record['policy_no'] ?? ''));
@@ -290,8 +274,7 @@ var hasVal=matchedOpt!==null;if(ptSec){ptSec.style.display=hasVal?"none":"";}if(
         $staffUserId      = (int) ($record['staff_id'] ?? 0);
         $remark           = Layout::escape((string) ($record['remark'] ?? ''));
 
-        // 成績区分ラジオ（損保新規時のみ表示）
-        $ptSecAttr = $renewalCaseId > 0 ? ' style="display:none;"' : '';
+        // 成績区分ラジオ
         $ptRadios  = '';
         foreach (['new' => '新規契約', 'addition' => '追加引受', 'change' => '変更', 'cancel_deduction' => '解約・等級訂正'] as $v => $l) {
             $checked   = $v === $performanceType || ($performanceType === '' && $v === 'new') ? ' checked' : '';
@@ -325,33 +308,6 @@ var hasVal=matchedOpt!==null;if(ptSec){ptSec.style.display=hasVal?"none":"";}if(
             $staffOptions .= '<option value="' . $id . '"' . $selected . '>' . Layout::escape($name) . '</option>';
         }
 
-        // 満期案件 datalist（コンボボックス用）
-        $renewalDlId = 'renewal-cases-nonlife-dl';
-        $renewalCaseText = '';
-        $renewalDatalist = '';
-        foreach ($renewalCases as $row) {
-            $id             = (int) ($row['id'] ?? 0);
-            $policyNoText   = (string) ($row['policy_no'] ?? '');
-            $maturityDate   = (string) ($row['maturity_date'] ?? '');
-            $customerNameRc = (string) ($row['customer_name'] ?? '');
-            $displayText    = $customerNameRc . ' / ' . $maturityDate . ' / ' . $policyNoText;
-            if ($id === $renewalCaseId && $renewalCaseId > 0) {
-                $renewalCaseText = $displayText;
-            }
-            $renewalDatalist .= '<option value="' . Layout::escape($displayText) . '"'
-                . ' data-id="' . $id . '"'
-                . ' data-contract-id="' . (int) ($row['contract_id'] ?? 0) . '"'
-                . ' data-customer-id="' . (int) ($row['customer_id'] ?? 0) . '"'
-                . ' data-customer-name="' . Layout::escape($customerNameRc) . '"'
-                . ' data-assigned-staff-id="' . (int) ($row['assigned_staff_id'] ?? 0) . '"'
-                . ' data-policy-no="' . Layout::escape($policyNoText) . '"'
-                . ' data-product-type="' . Layout::escape((string) ($row['product_type'] ?? '')) . '"'
-                . ' data-insurance-category="' . Layout::escape((string) ($row['insurance_category'] ?? '')) . '"'
-                . ' data-policy-start-date="' . Layout::escape((string) ($row['policy_start_date'] ?? '')) . '"'
-                . ' data-prev-premium-amount="' . (int) ($row['prev_premium_amount'] ?? 0) . '"'
-                . '>';
-        }
-
         return ''
             . '<form method="post" action="' . Layout::escape($actionUrl) . '">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($csrfToken) . '">'
@@ -360,17 +316,6 @@ var hasVal=matchedOpt!==null;if(ptSec){ptSec.style.display=hasVal?"none":"";}if(
             . '<input type="hidden" name="contract_id" value="' . $contractId . '">'
             . '<input type="hidden" name="customer_id" value="' . $customerId . '">'
             . $customerDl
-            . '<section class="modal-form-section">'
-            . '<h3 class="modal-form-title">満期案件</h3>'
-            . '<p class="muted" style="margin:0 0 .5em;">満期案件を選択すると<strong>損保継続</strong>として登録されます。選択しない場合は<strong>損保新規</strong>として扱います。</p>'
-            . '<div class="list-filter-grid modal-form-grid">'
-            . '<label class="list-filter-field modal-form-wide"><span>満期案件</span>'
-            . '<datalist id="' . $renewalDlId . '">' . $renewalDatalist . '</datalist>'
-            . '<input type="text" list="' . $renewalDlId . '" data-role="renewal-case-text" autocomplete="off" value="' . Layout::escape($renewalCaseText) . '" placeholder="未設定（損保新規）">'
-            . '<input type="hidden" name="renewal_case_id" value="' . ($renewalCaseId > 0 ? $renewalCaseId : '') . '">'
-            . '</label>'
-            . '</div>'
-            . '</section>'
             . '<section class="modal-form-section">'
             . '<h3 class="modal-form-title">基本情報</h3>'
             . '<div class="list-filter-grid modal-form-grid">'
@@ -383,7 +328,7 @@ var hasVal=matchedOpt!==null;if(ptSec){ptSec.style.display=hasVal?"none":"";}if(
             . '<label class="list-filter-field"><span>始期日</span><input type="date" name="policy_start_date" value="' . $policyStartDate . '"></label>'
             . '</div>'
             . '</section>'
-            . '<section class="modal-form-section"' . $ptSecAttr . ' data-section="perf-type-section">'
+            . '<section class="modal-form-section" data-section="perf-type-section">'
             . '<h3 class="modal-form-title">成績区分 <strong class="required-mark">*</strong></h3>'
             . '<div class="radio-group" style="margin-top:6px;">' . $ptRadios . '</div>'
             . '</section>'
@@ -488,65 +433,6 @@ var hasVal=matchedOpt!==null;if(ptSec){ptSec.style.display=hasVal?"none":"";}if(
             . '</form>';
     }
 
-    private static function renderImportForm(string $importUrl, string $importCsrf, string $returnTo): string
-    {
-        return ''
-            . '<form method="post" action="' . Layout::escape($importUrl) . '" enctype="multipart/form-data">'
-            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($importCsrf) . '">'
-            . '<input type="hidden" name="return_to" value="' . Layout::escape($returnTo) . '">'
-            . '<label class="list-filter-field"><span>CSVファイル</span><input type="file" name="csv_file" accept=".csv,text/csv" required></label>'
-            . '<details class="details-panel modal-help"><summary>必須ヘッダを確認</summary><p class="muted">receipt_no, policy_no, customer_name, maturity_date, performance_date, performance_type, insurance_category, product_type, premium_amount, settlement_month, remark</p></details>'
-            . '<div class="actions">'
-            . '<button class="btn" type="submit">CSV取込を実行</button>'
-            . '<button class="btn btn-secondary" type="button" data-close-dialog="sales-import-dialog">閉じる</button>'
-            . '</div>'
-            . '</form>';
-    }
-
-    /**
-     * @param array<string, mixed>|null $importBatch
-     * @param array<int, array<string, mixed>> $importRows
-     */
-    private static function renderImportResult(?array $importBatch, array $importRows): string
-    {
-        if ($importBatch === null) {
-            return '';
-        }
-
-        $rowsHtml = '';
-        foreach ($importRows as $row) {
-            $rowsHtml .= '<tr>'
-                . '<td>' . Layout::escape((string) ($row['row_no'] ?? '')) . '</td>'
-                . '<td>' . Layout::escape((string) ($row['row_status'] ?? '')) . '</td>'
-                . '<td><span class="truncate" title="' . Layout::escape((string) ($row['policy_no'] ?? '')) . '">' . Layout::escape((string) ($row['policy_no'] ?? '')) . '</span></td>'
-                . '<td><span class="truncate" title="' . Layout::escape((string) ($row['customer_name'] ?? '')) . '">' . Layout::escape((string) ($row['customer_name'] ?? '')) . '</span></td>'
-                . '<td><span class="truncate" title="' . Layout::escape((string) ($row['error_message'] ?? '')) . '">' . Layout::escape((string) ($row['error_message'] ?? '')) . '</span></td>'
-                . '</tr>';
-        }
-
-        if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="5">取込結果はありません。</td></tr>';
-        }
-
-        return ''
-            . '<div class="modal-result">'
-            . '<p>ファイル名: ' . Layout::escape((string) ($importBatch['file_name'] ?? '')) . '</p>'
-            . '<p>状態: ' . Layout::escape((string) ($importBatch['import_status'] ?? ''))
-            . ' / 総行数: ' . Layout::escape((string) ($importBatch['total_row_count'] ?? '0'))
-            . ' / 有効: ' . Layout::escape((string) ($importBatch['valid_row_count'] ?? '0'))
-            . ' / 新規: ' . Layout::escape((string) ($importBatch['insert_count'] ?? '0'))
-            . ' / 更新: ' . Layout::escape((string) ($importBatch['update_count'] ?? '0'))
-            . ' / エラー: ' . Layout::escape((string) ($importBatch['error_count'] ?? '0'))
-            . '</p>'
-            . '</div>'
-            . '<div class="table-wrap">'
-            . '<table class="table-fixed table-card">'
-            . '<thead><tr><th>行</th><th>判定</th><th>証券番号</th><th>契約者名</th><th>エラー</th></tr></thead>'
-            . '<tbody>' . $rowsHtml . '</tbody>'
-            . '</table>'
-            . '</div>';
-    }
-
     /**
      * @param array<int, array<string, mixed>> $rows
      * @param array<string, string> $criteria
@@ -557,6 +443,7 @@ var hasVal=matchedOpt!==null;if(ptSec){ptSec.style.display=hasVal?"none":"";}if(
         array $criteria,
         array $listState,
         string $detailBaseUrl,
+        string $customerDetailBaseUrl,
         string $deleteUrl,
         string $deleteCsrf,
         string $listUrl
@@ -567,7 +454,11 @@ var hasVal=matchedOpt!==null;if(ptSec){ptSec.style.display=hasVal?"none":"";}if(
             $id           = (int) ($row['id'] ?? 0);
             $params       = LP::queryParams($criteria, $listState);
             $detailUrl    = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, array_merge(['id' => (string) $id], $params)));
-            $customerName = (string) ($row['customer_name'] ?? '');
+            $customerName = (string) ($row['display_customer'] ?? $row['customer_name'] ?? '');
+            $customerId   = (int) ($row['customer_id'] ?? 0);
+            $customerHtml = $customerId > 0
+                ? '<a class="text-link" href="' . Layout::escape($customerDetailBaseUrl . '&id=' . $customerId) . '" title="' . Layout::escape($customerName) . '">' . Layout::escape($customerName) . '</a>'
+                : Layout::escape($customerName);
             $premium      = (int) ($row['premium_amount'] ?? 0);
             $premiumFormatted = number_format($premium) . '円';
             $premiumHtml  = $premium < 0
@@ -591,7 +482,7 @@ var hasVal=matchedOpt!==null;if(ptSec){ptSec.style.display=hasVal?"none":"";}if(
 
             $rowsHtml .= '<tr>'
                 . '<td data-label="計上日" style="white-space:nowrap;"><a class="text-link" href="' . $detailUrl . '">' . Layout::escape((string) ($row['performance_date'] ?? '')) . '</a></td>'
-                . '<td class="cell-ellipsis" data-label="契約者名" title="' . Layout::escape($customerName) . '">' . Layout::escape($customerName) . '</td>'
+                . '<td class="cell-ellipsis" data-label="契約者名" title="' . Layout::escape($customerName) . '">' . $customerHtml . '</td>'
                 . '<td class="cell-ellipsis" data-label="担当者名" title="' . Layout::escape((string) ($row['staff_user_name'] ?? '')) . '">' . Layout::escape((string) ($row['staff_user_name'] ?? '')) . '</td>'
                 . '<td data-label="業務区分">' . Layout::escape(self::businessLabel((string) ($row['source_type'] ?? ''), (string) ($row['performance_type'] ?? ''))) . '</td>'
                 . '<td class="cell-ellipsis" data-label="種目" title="' . Layout::escape((string) ($row['product_type'] ?? '')) . '">' . Layout::escape((string) ($row['product_type'] ?? '')) . '</td>'
@@ -605,25 +496,6 @@ var hasVal=matchedOpt!==null;if(ptSec){ptSec.style.display=hasVal?"none":"";}if(
         }
 
         return $rowsHtml;
-    }
-
-    private static function renderSortSummary(string $sort, string $direction): string
-    {
-        if ($sort === '') {
-            return '並び順: 計上日';
-        }
-
-        $label = match ($sort) {
-            'performance_date' => '計上日',
-            'customer_name'    => '契約者名',
-            'staff_id'         => '担当者名',
-            'source_type'      => '業務区分',
-            'product_type'     => '種目',
-            'premium_amount'   => '保険料',
-            default            => '計上日',
-        };
-
-        return '並び順: ' . $label . ' ' . ($direction === 'desc' ? '降順' : '昇順');
     }
 
     private static function performanceTypeLabel(string $type): string

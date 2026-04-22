@@ -107,7 +107,7 @@ final class RenewalNotificationBatchRepository
                     DATEDIFF(rc.maturity_date, :run_date) AS days_before
              FROM t_renewal_case rc
              WHERE rc.is_deleted = 0
-               AND rc.case_status NOT IN ("completed")
+               AND rc.case_status NOT IN (SELECT name FROM m_case_status WHERE case_type = "renewal" AND is_completed = 1)
                AND DATEDIFF(rc.maturity_date, :run_date) BETWEEN :to_days_before AND :from_days_before
              ORDER BY rc.maturity_date ASC, rc.id ASC'
         );
@@ -141,7 +141,7 @@ final class RenewalNotificationBatchRepository
                      ON c.id = ct.customer_id
                     AND c.is_deleted = 0
              WHERE rc.is_deleted = 0
-               AND rc.case_status NOT IN ("completed")
+               AND rc.case_status NOT IN (SELECT name FROM m_case_status WHERE case_type = "renewal" AND is_completed = 1)
                AND DATEDIFF(rc.maturity_date, :run_date) = :days_before
              ORDER BY rc.maturity_date ASC, c.customer_name ASC, rc.id ASC'
         );

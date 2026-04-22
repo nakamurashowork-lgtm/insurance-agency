@@ -6,8 +6,9 @@ namespace Tests\Helpers;
 /**
  * SjnetCsvBuilder — SJNET 取込テスト用 CSV 文字列ビルダー
  *
- * SJNET 満期一覧 CSV は 44 列固定（0-indexed）。
- * デフォルト値を持ち、必要な列だけ上書きして行データを組み立てる。
+ * ヘッダ名をキーとする辞書型で列を管理する。
+ * toCsvString() は実際の日本語ヘッダ名を1行目に出力するため、
+ * SjnetCsvImportService のヘッダ名ベース解析と整合する。
  *
  * 使用例:
  *   // 1行だけの CSV 文字列（ヘッダ込み）
@@ -25,24 +26,23 @@ namespace Tests\Helpers;
  */
 final class SjnetCsvBuilder
 {
-    // 列インデックス（SjnetCsvImportService の定数と同期）
-    private const COL_CUSTOMER_NAME    = 3;
-    private const COL_POSTAL_CODE      = 5;
-    private const COL_ADDRESS1         = 6;
-    private const COL_PHONE            = 7;
-    private const COL_START_DATE       = 15;
-    private const COL_END_DATE         = 16;
-    private const COL_PRODUCT_TYPE     = 17;
-    private const COL_POLICY_NO        = 18;
-    private const COL_PAYMENT_CYCLE    = 19;
-    private const COL_PREMIUM_AMOUNT   = 22;
-    private const COL_SJNET_STAFF_NAME = 42;
-    private const COL_SJNET_AGENCY_CODE = 43;
+    // ヘッダ名定数（SjnetCsvImportService の HDR_* と同期）
+    private const HDR_CUSTOMER_NAME    = '顧客名';
+    private const HDR_BIRTH_DATE       = '生年月日';
+    private const HDR_POSTAL_CODE      = '郵便番号';
+    private const HDR_ADDRESS1         = '住所';
+    private const HDR_PHONE            = 'ＴＥＬ';
+    private const HDR_START_DATE       = '保険始期';
+    private const HDR_END_DATE         = '保険終期';
+    private const HDR_PRODUCT_TYPE     = '種目種類';
+    private const HDR_POLICY_NO        = '証券番号';
+    private const HDR_PAYMENT_CYCLE    = '払込方法';
+    private const HDR_PREMIUM_AMOUNT   = '合計保険料';
+    private const HDR_STAFF_NAME       = '担当者';
+    private const HDR_AGENCY_CODE      = '代理店ｺｰﾄﾞ'; // 半角カタカナ
 
-    private const TOTAL_COLUMNS = 44;
-
-    /** @var array<int, string> */
-    private array $cols;
+    /** @var array<string, string> ヘッダ名 → 値 */
+    private array $data;
 
     /** @var list<self> */
     private array $rows = [];
@@ -53,19 +53,22 @@ final class SjnetCsvBuilder
 
     private function __construct()
     {
-        // デフォルト値で 44 列を埋める
-        $this->cols = array_fill(0, self::TOTAL_COLUMNS, '');
-
-        // よく使う列にデフォルト値を設定
-        $this->cols[self::COL_CUSTOMER_NAME]     = '山田太郎';
-        $this->cols[self::COL_POLICY_NO]         = 'DEFAULT-POLICY';
-        $this->cols[self::COL_END_DATE]          = '2026/04/30';
-        $this->cols[self::COL_START_DATE]        = '2025/05/01';
-        $this->cols[self::COL_PRODUCT_TYPE]      = '自動車';
-        $this->cols[self::COL_PAYMENT_CYCLE]     = '一時払';
-        $this->cols[self::COL_PREMIUM_AMOUNT]    = '120,000';
-        $this->cols[self::COL_SJNET_AGENCY_CODE] = '';
-        $this->cols[self::COL_SJNET_STAFF_NAME]  = '';
+        // デフォルト値（必須列 + よく使う任意列）
+        $this->data = [
+            self::HDR_CUSTOMER_NAME  => '山田太郎',
+            self::HDR_BIRTH_DATE     => '',
+            self::HDR_POSTAL_CODE    => '',
+            self::HDR_ADDRESS1       => '',
+            self::HDR_PHONE          => '',
+            self::HDR_START_DATE     => '2025/05/01',
+            self::HDR_END_DATE       => '2026/04/30',
+            self::HDR_PRODUCT_TYPE   => '自動車',
+            self::HDR_POLICY_NO      => 'DEFAULT-POLICY',
+            self::HDR_PAYMENT_CYCLE  => '一時払',
+            self::HDR_PREMIUM_AMOUNT => '120,000',
+            self::HDR_STAFF_NAME     => '',
+            self::HDR_AGENCY_CODE    => '',
+        ];
     }
 
     // =========================================================
@@ -97,103 +100,110 @@ final class SjnetCsvBuilder
 
     public function withCustomerName(string $name): self
     {
-        $this->cols[self::COL_CUSTOMER_NAME] = $name;
+        $this->data[self::HDR_CUSTOMER_NAME] = $name;
+        return $this;
+    }
+
+    /** YYYY-MM-DD 形式、または空文字（生年月日なし） */
+    public function withBirthDate(string $date): self
+    {
+        $this->data[self::HDR_BIRTH_DATE] = $date;
         return $this;
     }
 
     public function withPolicyNo(string $policyNo): self
     {
-        $this->cols[self::COL_POLICY_NO] = $policyNo;
+        $this->data[self::HDR_POLICY_NO] = $policyNo;
         return $this;
     }
 
     /** YYYY/MM/DD または YYYY-MM-DD 形式 */
     public function withEndDate(string $date): self
     {
-        $this->cols[self::COL_END_DATE] = $date;
+        $this->data[self::HDR_END_DATE] = $date;
         return $this;
     }
 
     /** YYYY/MM/DD または YYYY-MM-DD 形式 */
     public function withStartDate(string $date): self
     {
-        $this->cols[self::COL_START_DATE] = $date;
+        $this->data[self::HDR_START_DATE] = $date;
         return $this;
     }
 
     public function withProductType(string $type): self
     {
-        $this->cols[self::COL_PRODUCT_TYPE] = $type;
+        $this->data[self::HDR_PRODUCT_TYPE] = $type;
         return $this;
     }
 
     public function withPaymentCycle(string $cycle): self
     {
-        $this->cols[self::COL_PAYMENT_CYCLE] = $cycle;
+        $this->data[self::HDR_PAYMENT_CYCLE] = $cycle;
         return $this;
     }
 
     public function withPremiumAmount(string $amount): self
     {
-        $this->cols[self::COL_PREMIUM_AMOUNT] = $amount;
+        $this->data[self::HDR_PREMIUM_AMOUNT] = $amount;
         return $this;
     }
 
     public function withPostalCode(string $postalCode): self
     {
-        $this->cols[self::COL_POSTAL_CODE] = $postalCode;
+        $this->data[self::HDR_POSTAL_CODE] = $postalCode;
         return $this;
     }
 
     public function withAddress1(string $address): self
     {
-        $this->cols[self::COL_ADDRESS1] = $address;
+        $this->data[self::HDR_ADDRESS1] = $address;
         return $this;
     }
 
     public function withPhone(string $phone): self
     {
-        $this->cols[self::COL_PHONE] = $phone;
+        $this->data[self::HDR_PHONE] = $phone;
         return $this;
     }
 
     public function withAgencyCode(string $code): self
     {
-        $this->cols[self::COL_SJNET_AGENCY_CODE] = $code;
+        $this->data[self::HDR_AGENCY_CODE] = $code;
         return $this;
     }
 
     public function withStaffName(string $name): self
     {
-        $this->cols[self::COL_SJNET_STAFF_NAME] = $name;
+        $this->data[self::HDR_STAFF_NAME] = $name;
         return $this;
     }
 
-    /** 任意の列を直接セットする（テスト用） */
-    public function withColumn(int $index, string $value): self
+    /** 任意のヘッダ名で列を直接セットする */
+    public function withRawHeader(string $header, string $value): self
     {
-        $this->cols[$index] = $value;
+        $this->data[$header] = $value;
         return $this;
     }
 
     /** 証券番号を空にしてスキップ対象行を生成する */
     public function asSkipRowNoPolicyNo(): self
     {
-        $this->cols[self::COL_POLICY_NO] = '';
+        $this->data[self::HDR_POLICY_NO] = '';
         return $this;
     }
 
     /** 顧客名を空にしてスキップ対象行を生成する */
     public function asSkipRowNoCustomerName(): self
     {
-        $this->cols[self::COL_CUSTOMER_NAME] = '';
+        $this->data[self::HDR_CUSTOMER_NAME] = '';
         return $this;
     }
 
     /** 保険終期を空にしてスキップ対象行を生成する */
     public function asSkipRowNoEndDate(): self
     {
-        $this->cols[self::COL_END_DATE] = '';
+        $this->data[self::HDR_END_DATE] = '';
         return $this;
     }
 
@@ -212,13 +222,13 @@ final class SjnetCsvBuilder
     // =========================================================
 
     /**
-     * この行の列配列を返す（processRow に直接渡す用）
+     * この行のデータ辞書を返す（processRow に直接渡す用途など）
      *
-     * @return array<int, string>
+     * @return array<string, string>
      */
     public function build(): array
     {
-        return $this->cols;
+        return $this->data;
     }
 
     /**
@@ -227,35 +237,33 @@ final class SjnetCsvBuilder
      */
     public function toCsvString(): string
     {
-        $lines = [$this->buildHeaderLine()];
+        // ヘッダキーは最初の行（シートなら rows[0]、単行なら self）から取得
+        $headerKeys = $this->isSheet && count($this->rows) > 0
+            ? array_keys($this->rows[0]->data)
+            : array_keys($this->data);
+
+        $lines = [$this->buildCsvLine($headerKeys)];
 
         if ($this->isSheet) {
             foreach ($this->rows as $row) {
-                $lines[] = $this->buildCsvLine($row->cols);
+                $lines[] = $this->buildCsvLine(array_values($row->data));
             }
         } else {
-            $lines[] = $this->buildCsvLine($this->cols);
+            $lines[] = $this->buildCsvLine(array_values($this->data));
         }
 
         $csv = implode("\n", $lines) . "\n";
         return $this->applyEncoding($csv);
     }
 
-    private function buildHeaderLine(): string
-    {
-        // SJNET CSV のヘッダは実際の列名だが、テストでは空ヘッダで十分
-        $headers = array_fill(0, self::TOTAL_COLUMNS, 'col');
-        return implode(',', $headers);
-    }
-
     /**
-     * @param array<int, string> $cols
+     * @param array<int, string> $values
      */
-    private function buildCsvLine(array $cols): string
+    private function buildCsvLine(array $values): string
     {
         return implode(',', array_map(
             static fn(string $v): string => str_contains($v, ',') ? '"' . str_replace('"', '""', $v) . '"' : $v,
-            $cols
+            $values
         ));
     }
 

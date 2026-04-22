@@ -25,11 +25,35 @@ final class AuthGuard
     {
         $auth = $this->session->getAuth();
         if ($auth === null || !isset($auth['user_id'])) {
+            $this->rememberReturnTo();
             $this->session->setFlash('error', 'ログインが必要です。');
             Responses::redirect($this->config->routeUrl('login'));
         }
 
         return $auth;
+    }
+
+    /**
+     * 未認証で保護ルートにアクセスされた場合に、元の route をセッションに保存する。
+     * GET リクエスト かつ 認証/API 系以外のみ対象とする（ログイン後に戻す意味があるもの）。
+     */
+    private function rememberReturnTo(): void
+    {
+        $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+        if ($method !== 'GET') {
+            return;
+        }
+
+        $route = isset($_GET['route']) ? trim((string) $_GET['route'], '/') : '';
+        if ($route === '') {
+            return;
+        }
+
+        if ($route === 'login' || str_starts_with($route, 'auth/') || str_starts_with($route, 'api/')) {
+            return;
+        }
+
+        $this->session->setReturnTo($route);
     }
 
     /**

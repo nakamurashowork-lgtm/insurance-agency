@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS t_renewal_case (
   contract_id             BIGINT UNSIGNED NOT NULL COMMENT '契約ID(t_contract.id)',
   maturity_date           DATE            NOT NULL COMMENT '満期日',
   early_renewal_deadline  DATE            NULL     COMMENT '早期更改締切日',
-  case_status             VARCHAR(20)     NOT NULL DEFAULT 'not_started' COMMENT '案件状態(not_started/sj_requested/doc_prepared/waiting_return/quote_sent/waiting_payment/completed)',
+  case_status             VARCHAR(50)     NOT NULL DEFAULT '未対応' COMMENT '案件状態（m_case_status.name）',
   last_contact_at         DATETIME        NULL     COMMENT '最終接触日時',
   next_action_date        DATE            NULL     COMMENT '次回対応日',
   renewal_result          VARCHAR(20)     NULL     COMMENT '更改結果(renewed/cancelled/lost/pending)',

@@ -49,7 +49,9 @@ final class RenewalCaseRepository
         $sql =
             'SELECT rc.id AS renewal_case_id,
                     c.id AS contract_id,
+                    c.customer_id,
                     mc.customer_name,
+                    c.sjnet_customer_name,
                     c.policy_no,
                     c.product_type,
                     rc.maturity_date,
@@ -97,6 +99,8 @@ final class RenewalCaseRepository
                     rc.remark,
                     rc.office_staff_id,
                     rc.completed_date,
+                    c.customer_id,
+                    c.sjnet_customer_name,
                     c.policy_no,
                     c.product_type,
                     c.policy_start_date,
@@ -105,17 +109,12 @@ final class RenewalCaseRepository
                     c.payment_cycle,
                     c.status AS contract_status,
                     c.remark AS contract_remark,
-                    mc.id AS customer_id,
                     mc.customer_name,
                     rc.assigned_staff_id,
-                    mc.phone,
-                    mc.email,
-                    mc.address1,
-                    mc.address2,
                     rc.updated_at
              FROM t_renewal_case rc
              INNER JOIN t_contract c ON c.id = rc.contract_id AND c.is_deleted = 0
-             INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.is_deleted = 0
+             LEFT JOIN m_customer mc ON mc.id = c.customer_id AND mc.is_deleted = 0
              WHERE rc.id = :renewal_case_id
                AND rc.is_deleted = 0
              LIMIT 1'
@@ -249,6 +248,70 @@ final class RenewalCaseRepository
             $eventId = $this->insertAuditEvent($renewalCaseId, $updatedBy, '満期対応情報を更新');
             if ($details !== []) {
                 $this->insertAuditEventDetails($eventId, $details);
+            }
+
+            $this->pdo->commit();
+            return true;
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * 営業担当（assigned_staff_id）のみを更新し、変更履歴を記録する。
+     * $assignedStaffId が null または 0 以下なら NULL を設定する。
+     */
+    public function updateAssignedStaff(int $renewalCaseId, ?int $assignedStaffId, int $updatedBy): bool
+    {
+        $stmtBefore = $this->pdo->prepare(
+            'SELECT assigned_staff_id FROM t_renewal_case WHERE id = :id AND is_deleted = 0 LIMIT 1'
+        );
+        $stmtBefore->execute(['id' => $renewalCaseId]);
+        $beforeRow = $stmtBefore->fetch();
+        if (!is_array($beforeRow)) {
+            return false;
+        }
+        $beforeValue = $this->normalizeAuditValue($beforeRow['assigned_staff_id'] ?? null);
+
+        $newValue = ($assignedStaffId !== null && $assignedStaffId > 0) ? $assignedStaffId : null;
+
+        $this->pdo->beginTransaction();
+
+        try {
+            $stmt = $this->pdo->prepare(
+                'UPDATE t_renewal_case
+                 SET assigned_staff_id = :assigned_staff_id,
+                     updated_by = :updated_by
+                 WHERE id = :renewal_case_id
+                   AND is_deleted = 0'
+            );
+            if ($newValue === null) {
+                $stmt->bindValue(':assigned_staff_id', null, PDO::PARAM_NULL);
+            } else {
+                $stmt->bindValue(':assigned_staff_id', $newValue, PDO::PARAM_INT);
+            }
+            $stmt->bindValue(':updated_by', $updatedBy, PDO::PARAM_INT);
+            $stmt->bindValue(':renewal_case_id', $renewalCaseId, PDO::PARAM_INT);
+            $stmt->execute();
+
+            if ($stmt->rowCount() !== 1) {
+                $this->pdo->rollBack();
+                return false;
+            }
+
+            $afterValue = $newValue === null ? null : (string) $newValue;
+            if ($beforeValue !== $afterValue) {
+                $eventId = $this->insertAuditEvent($renewalCaseId, $updatedBy, '営業担当を変更');
+                $this->insertAuditEventDetails($eventId, [[
+                    'field_key' => 'assigned_staff_id',
+                    'field_label' => '営業担当',
+                    'value_type' => 'STRING',
+                    'before_value_text' => $beforeValue,
+                    'after_value_text' => $afterValue,
+                ]]);
             }
 
             $this->pdo->commit();
@@ -484,14 +547,15 @@ final class RenewalCaseRepository
         $sql =
             ' FROM t_renewal_case rc
              INNER JOIN t_contract c ON c.id = rc.contract_id AND c.is_deleted = 0
-             INNER JOIN m_customer mc ON mc.id = c.customer_id AND mc.is_deleted = 0
+             LEFT JOIN m_customer mc ON mc.id = c.customer_id AND mc.is_deleted = 0
              WHERE rc.is_deleted = 0';
 
         $params = [];
 
         $customerName = trim((string) ($criteria['customer_name'] ?? ''));
         if ($customerName !== '') {
-            $sql .= ' AND mc.customer_name LIKE :customer_name';
+            // 紐づけ済み（mc.customer_name）と未リンク（c.sjnet_customer_name）の両方を検索対象にする
+            $sql .= ' AND (mc.customer_name LIKE :customer_name OR c.sjnet_customer_name LIKE :customer_name)';
             $params['customer_name'] = '%' . $customerName . '%';
         }
 
@@ -553,7 +617,7 @@ final class RenewalCaseRepository
         $nextActionNulls = 'CASE WHEN rc.next_action_date IS NULL THEN 1 ELSE 0 END';
 
         return match ($sort) {
-            'customer_name'         => 'mc.customer_name ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
+            'customer_name'         => 'COALESCE(mc.customer_name, c.sjnet_customer_name) ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
             'policy_no'             => 'c.policy_no ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
             'maturity_date'         => 'rc.maturity_date ' . $directionSql . ', rc.id ASC',
             'case_status'           => $statusPriority . ' ' . $directionSql . ', rc.maturity_date ASC, rc.id ASC',
@@ -571,7 +635,7 @@ final class RenewalCaseRepository
 
         return $overduePriority . ' ASC, '
             . $this->statusPriorityExpression() . ' ASC, '
-            . 'rc.maturity_date ASC, '
+            . 'rc.maturity_date DESC, '
             . $nextActionNulls . ' ASC, '
             . 'rc.next_action_date ASC, '
             . 'rc.id ASC';
@@ -601,20 +665,6 @@ final class RenewalCaseRepository
             }
         }
         return $counts;
-    }
-
-    public function softDelete(int $renewalCaseId, int $updatedBy): bool
-    {
-        $stmt = $this->pdo->prepare(
-            'UPDATE t_renewal_case
-             SET is_deleted = 1, updated_by = :updated_by
-             WHERE id = :id
-               AND is_deleted = 0'
-        );
-        $stmt->bindValue(':updated_by', $updatedBy, PDO::PARAM_INT);
-        $stmt->bindValue(':id', $renewalCaseId, PDO::PARAM_INT);
-        $stmt->execute();
-        return $stmt->rowCount() > 0;
     }
 
     private function statusPriorityExpression(): string

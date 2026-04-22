@@ -19,7 +19,7 @@ use Throwable;
 
 final class AccidentCaseController
 {
-    private const ALLOWED_PRIORITY = ['low', 'normal', 'high', 'urgent'];
+    private const ALLOWED_PRIORITY = ['low', 'normal', 'high'];
 
     public function __construct(
         private AuthGuard $guard,
@@ -32,7 +32,6 @@ final class AccidentCaseController
     public function list(): void
     {
         $auth = $this->guard->requireAuthenticated();
-        $this->assertAdmin($auth);
 
         $criteria = $this->extractCriteria($_GET);
         $listState = $this->extractListState($_GET);
@@ -70,7 +69,7 @@ final class AccidentCaseController
                 }
             }
         } catch (Throwable) {
-            $error = '事故案件一覧の取得に失敗しました。接続設定を確認してください。';
+            $error = '事故案件一覧の取得に失敗しました。時間をおいて再度お試しください。解消しない場合は管理者へご連絡ください。';
         }
 
         try {
@@ -123,7 +122,6 @@ final class AccidentCaseController
     public function detail(): void
     {
         $auth = $this->guard->requireAuthenticated();
-        $this->assertAdmin($auth);
         $criteria = $this->extractCriteria($_GET);
         $listState = $this->extractListState($_GET);
         $listUrl = $this->listUrl($criteria, $listState);
@@ -132,17 +130,6 @@ final class AccidentCaseController
         if ($id <= 0) {
             $this->guard->session()->setFlash('error', '案件IDが不正です。');
             Responses::redirect($listUrl);
-        }
-
-        // 戻り先解決（from=customer の場合は顧客詳細）
-        $from = (string) ($_GET['from'] ?? '');
-        $fromCustomerId = (int) ($_GET['customer_id'] ?? 0);
-        if ($from === 'customer' && $fromCustomerId > 0) {
-            $backUrl   = $this->config->routeUrl('customer/detail') . '&id=' . $fromCustomerId;
-            $backLabel = '顧客詳細へ戻る';
-        } else {
-            $backUrl   = $listUrl;
-            $backLabel = '一覧へ戻る';
         }
 
         try {
@@ -168,6 +155,7 @@ final class AccidentCaseController
             $assignedUsers = (new StaffRepository($pdo))->findActive();
             $accidentStatuses = (new CaseStatusRepository($pdo))->findByType('accident');
             $reminderRule = $repository->findReminderRuleByAccidentCaseId($id);
+            $customers = $repository->fetchCustomers(500);
             $flashError = $this->guard->session()->consumeFlash('error');
             $flashSuccess = $this->guard->session()->consumeFlash('success');
 
@@ -176,8 +164,6 @@ final class AccidentCaseController
                 $comments,
                 $audits,
                 $assignedUsers,
-                $backUrl,
-                $backLabel,
                 $this->config->routeUrl('accident/update'),
                 $this->config->routeUrl('accident/comment'),
                 $this->config->routeUrl('accident/reminder'),
@@ -200,7 +186,10 @@ final class AccidentCaseController
                     ]
                 ),
                 $accidentStatuses,
-                $reminderRule
+                $reminderRule,
+                $customers,
+                $this->config->routeUrl('accident/update_basic'),
+                $this->guard->session()->issueCsrfToken('accident_update_basic_' . $id)
             ));
         } catch (Throwable) {
             $this->guard->session()->setFlash('error', '事故案件詳細の取得に失敗しました。');
@@ -211,7 +200,6 @@ final class AccidentCaseController
     public function update(): void
     {
         $auth = $this->guard->requireAuthenticated();
-        $this->assertAdmin($auth);
 
         $id = (int) ($_POST['id'] ?? 0);
         $returnTo = $this->validateReturnTo($_POST['return_to'] ?? null, $id);
@@ -231,13 +219,13 @@ final class AccidentCaseController
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $allowedStatuses = (new CaseStatusRepository($pdo))->validCodes('accident');
+            $allowedStatuses = (new CaseStatusRepository($pdo))->activeNames('accident');
         } catch (\Throwable) {
-            $allowedStatuses = ['accepted', 'linked', 'in_progress', 'waiting_docs', 'resolved', 'closed'];
+            $allowedStatuses = [];
             $pdo = null;
         }
 
-        if (!in_array($status, $allowedStatuses, true) || !in_array($priority, self::ALLOWED_PRIORITY, true)) {
+        if ($allowedStatuses === [] || !in_array($status, $allowedStatuses, true) || !in_array($priority, self::ALLOWED_PRIORITY, true)) {
             $this->guard->session()->setFlash('error', '状態または優先度が不正です。');
             Responses::redirect($returnTo);
         }
@@ -267,10 +255,64 @@ final class AccidentCaseController
         Responses::redirect($returnTo);
     }
 
+    public function updateBasic(): void
+    {
+        $auth = $this->guard->requireAuthenticated();
+
+        $id = (int) ($_POST['id'] ?? 0);
+        $returnTo = $this->validateReturnTo($_POST['return_to'] ?? null, $id);
+        if ($id <= 0) {
+            $this->guard->session()->setFlash('error', '案件IDが不正です。');
+            Responses::redirect($this->config->routeUrl('accident/list'));
+        }
+
+        $token = (string) ($_POST['_csrf_token'] ?? '');
+        if (!$this->guard->session()->validateAndConsumeCsrfToken('accident_update_basic_' . $id, $token)) {
+            $this->guard->session()->setFlash('error', '不正な更新要求を検出しました。');
+            Responses::redirect($returnTo);
+        }
+
+        $acceptedDate = trim((string) ($_POST['accepted_date'] ?? ''));
+        $customerId   = $this->nullableInt($_POST['customer_id'] ?? null);
+        $prospectName = $this->nullableText($_POST['prospect_name'] ?? null);
+        if ($acceptedDate === '') {
+            $this->guard->session()->setFlash('error', '受付日は必須です。');
+            Responses::redirect($returnTo);
+        }
+        if ($customerId === null && $prospectName === null) {
+            $this->guard->session()->setFlash('error', 'お客さま（既存顧客または依頼者名）を入力してください。');
+            Responses::redirect($returnTo);
+        }
+        // 既存顧客が選択されている場合は prospect_name を消す（customer_id 優先）
+        if ($customerId !== null) {
+            $prospectName = null;
+        }
+
+        $input = [
+            'customer_id'        => $customerId,
+            'prospect_name'      => $prospectName,
+            'accepted_date'      => $acceptedDate,
+            'accident_date'      => $this->nullableDate($_POST['accident_date'] ?? null),
+            'insurance_category' => $this->nullableText($_POST['insurance_category'] ?? null),
+            'accident_location'  => $this->nullableText($_POST['accident_location'] ?? null),
+            'sc_staff_name'      => $this->nullableText($_POST['sc_staff_name'] ?? null),
+        ];
+
+        try {
+            $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
+            $repository = new AccidentCaseRepository($pdo);
+            $repository->updateBasicInfo($id, $input, (int) ($auth['user_id'] ?? 0));
+            $this->guard->session()->setFlash('success', '基本情報を更新しました。');
+        } catch (Throwable) {
+            $this->guard->session()->setFlash('error', '基本情報の更新に失敗しました。');
+        }
+
+        Responses::redirect($returnTo);
+    }
+
     public function comment(): void
     {
         $auth = $this->guard->requireAuthenticated();
-        $this->assertAdmin($auth);
 
         $id = (int) ($_POST['id'] ?? 0);
         $returnTo = $this->validateReturnTo($_POST['return_to'] ?? null, $id);
@@ -290,6 +332,10 @@ final class AccidentCaseController
             $this->guard->session()->setFlash('error', 'コメント本文を入力してください。');
             Responses::redirect($returnTo);
         }
+        if (mb_strlen($commentBody) > 500) {
+            $this->guard->session()->setFlash('error', 'コメントは500文字以内で入力してください。');
+            Responses::redirect($returnTo);
+        }
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
@@ -306,7 +352,6 @@ final class AccidentCaseController
     public function reminder(): void
     {
         $auth = $this->guard->requireAuthenticated();
-        $this->assertAdmin($auth);
 
         $id = (int) ($_POST['id'] ?? 0);
         $returnTo = $this->validateReturnTo($_POST['return_to'] ?? null, $id);
@@ -361,7 +406,6 @@ final class AccidentCaseController
     public function delete(): void
     {
         $auth = $this->guard->requireAuthenticated();
-        $this->assertAdmin($auth);
 
         $criteria  = $this->extractCriteria($_POST);
         $listState = $this->extractListState($_POST);
@@ -396,7 +440,6 @@ final class AccidentCaseController
     public function store(): void
     {
         $auth = $this->guard->requireAuthenticated();
-        $this->assertAdmin($auth);
         $returnTo = $this->validateStoreReturnTo($_POST['return_to'] ?? null);
 
         $token = (string) ($_POST['_csrf_token'] ?? '');
@@ -407,7 +450,8 @@ final class AccidentCaseController
 
         $accidentDate = $this->requiredDate($_POST['accident_date'] ?? null);
         $insuranceCategory = $this->requiredText($_POST['insurance_category'] ?? null);
-        $customerId = $this->requiredInt($_POST['customer_id'] ?? null);
+        $customerId = $this->nullableInt($_POST['customer_id'] ?? null);
+        $prospectName = $this->nullableText($_POST['prospect_name'] ?? null);
         $intakeBranch = $this->requiredText($_POST['intake_branch'] ?? null);
         $assignedUserId = $this->requiredInt($_POST['assigned_staff_id'] ?? null);
         $scStaffName = $this->nullableText($_POST['sc_staff_name'] ?? null);
@@ -415,14 +459,20 @@ final class AccidentCaseController
 
         try {
             $pdoForStore = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
-            $allowedStatuses = (new CaseStatusRepository($pdoForStore))->validCodes('accident');
+            $allowedStatuses = (new CaseStatusRepository($pdoForStore))->activeNames('accident');
         } catch (\Throwable) {
-            $allowedStatuses = ['accepted', 'linked', 'in_progress', 'waiting_docs', 'resolved', 'closed'];
+            $allowedStatuses = [];
             $pdoForStore = null;
+        }
+
+        // 既存顧客が選択されている場合は prospect_name を消す（customer_id 優先）
+        if ($customerId !== null) {
+            $prospectName = null;
         }
 
         $input = [
             'customer_id' => $customerId,
+            'prospect_name' => $prospectName,
             'accepted_date' => $accidentDate,
             'accident_date' => $accidentDate,
             'insurance_category' => $insuranceCategory,
@@ -437,12 +487,12 @@ final class AccidentCaseController
         if (
             $accidentDate === null
             || $insuranceCategory === null
-            || $customerId === null
+            || ($customerId === null && $prospectName === null)
             || $intakeBranch === null
             || $assignedUserId === null
             || !in_array($status, $allowedStatuses, true)
         ) {
-            $this->guard->session()->setFlash('error', '事故日・保険種類・お客さま・担当拠点・担当者・ステータスを入力してください。');
+            $this->guard->session()->setFlash('error', '事故日・保険種類・お客さま（既存顧客または依頼者名）・担当拠点・担当者・ステータスを入力してください。');
             $this->storeCreateDraft($input);
             Responses::redirect(ListViewHelper::buildUrl($returnTo, ['open_modal' => 'create']));
         }
@@ -453,8 +503,7 @@ final class AccidentCaseController
             $newId = $repository->createAccidentCase($input, (int) ($auth['user_id'] ?? 0));
             if ($newId > 0) {
                 $this->guard->session()->setFlash('success', '事故案件を登録しました。');
-                $detailUrl = ListViewHelper::buildUrl($this->config->routeUrl('accident/detail'), ['id' => (string) $newId]);
-                Responses::redirect($detailUrl);
+                Responses::redirect($returnTo);
             } else {
                 $this->guard->session()->setFlash('error', '事故案件の登録に失敗しました。');
                 $this->storeCreateDraft($input);
@@ -481,7 +530,8 @@ final class AccidentCaseController
             'policy_no'          => trim((string) ($source['policy_no'] ?? '')),
             'product_type'       => trim((string) ($source['product_type'] ?? '')),
             'status'             => trim((string) ($source['status'] ?? '')),
-            'assigned_staff_id'   => $assignedUserId > 0 ? (string) $assignedUserId : '',
+            'priority'           => trim((string) ($source['priority'] ?? '')),
+            'assigned_staff_id'  => $assignedUserId > 0 ? (string) $assignedUserId : '',
         ];
     }
 

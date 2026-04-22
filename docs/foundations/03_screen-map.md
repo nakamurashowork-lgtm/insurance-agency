@@ -110,7 +110,7 @@
 ### 3-6. 営業活動の導線
 
 ```text
-main nav「営業活動」→ activity/daily（当日の日報ビュー）【主要入口】
+main nav「営業日報」→ activity/daily（当日の日報ビュー）【主要入口】
 
 日報ビュー
   ├─ 「過去の活動を検索」→ activity/list（横断検索・集計用）
@@ -254,7 +254,7 @@ main nav「営業活動」→ activity/daily（当日の日報ビュー）【主
 - 顧客一覧は正式画面として持つ
 - 顧客詳細は正式画面として持つ
 - 事故案件一覧は main nav とホームの日常業務に含める
-- main nav「営業活動」は `activity/daily`（日報ビュー）を主要入口とする
+- main nav「営業日報」は `activity/daily`（日報ビュー）を主要入口とする
 - 活動一覧（activity/list）は検索・集計用。日報ビューの「過去の活動を検索」から到達する
 - 活動登録（activity/new）は新規登録専用画面とし、既存データ編集に使わない
 - 活動詳細（activity/detail）は既存活動の確認・編集専用画面とし、新規登録の起点に使わない

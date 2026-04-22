@@ -21,6 +21,9 @@ final class LoginController
         }
 
         $error = $this->session->consumeFlash('error');
-        Responses::html(LoginView::render($error, $this->config->routeUrl('auth/google/start')));
+        $devLoginUrl = $this->config->appEnv === 'local'
+            ? $this->config->routeUrl('dev/login')
+            : null;
+        Responses::html(LoginView::render($error, $this->config->routeUrl('auth/google/start'), $devLoginUrl));
     }
 }

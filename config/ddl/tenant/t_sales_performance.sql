@@ -1,7 +1,8 @@
 CREATE TABLE IF NOT EXISTS t_sales_performance (
   id                  BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT COMMENT '成績ID',
 
-  customer_id         BIGINT UNSIGNED  NOT NULL COMMENT '顧客ID(m_customer.id)',
+  customer_id         BIGINT UNSIGNED  NULL     COMMENT '顧客ID(m_customer.id)。未登録の場合は NULL。',
+  prospect_name       VARCHAR(100)     NULL     COMMENT '未登録顧客名。customer_id が NULL のときに使用。',
   contract_id         BIGINT UNSIGNED  NULL     COMMENT '契約ID(t_contract.id)',
   renewal_case_id     BIGINT UNSIGNED  NULL     COMMENT '満期案件ID(t_renewal_case.id)',
 

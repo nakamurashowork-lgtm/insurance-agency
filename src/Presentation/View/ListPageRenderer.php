@@ -100,11 +100,12 @@ final class ListPageRenderer
         array $listState,
         array $pager,
         int $totalCount,
-        int $perPage,
-        string $sortSummary = ''
+        int $perPage
     ): string {
         return '<div class="list-toolbar">'
-            . '<div class="list-summary"><p class="summary-count">' . Layout::escape(self::summaryText($totalCount, $pager)) . '</p></div>'
+            . '<div class="list-summary">'
+            . '<p class="summary-count">' . Layout::escape(self::summaryText($totalCount, $pager)) . '</p>'
+            . '</div>'
             . '<div class="list-toolbar-actions">'
             . self::perPageForm($url, $criteria, $listState, $perPage)
             . self::pager($url, $criteria, $listState, $pager)

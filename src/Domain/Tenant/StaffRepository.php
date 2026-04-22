@@ -49,6 +49,90 @@ final class StaffRepository
         return is_array($rows) ? $rows : [];
     }
 
+    /**
+     * 指定ユーザー ID 群に紐づく m_staff を user_id キーで返す。
+     * （統合ユーザー管理画面の一覧生成用: is_active は問わない）
+     *
+     * @param array<int, int> $userIds
+     * @return array<int, array<string, mixed>>  key: user_id, value: staff row
+     */
+    public function findByUserIds(array $userIds): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $userIds), static fn ($v) => $v > 0)));
+        if ($ids === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->pdo->prepare(
+            'SELECT id, staff_name, is_sales, is_office, user_id, sjnet_code, is_active, sort_order
+             FROM m_staff
+             WHERE user_id IN (' . $placeholders . ')'
+        );
+        foreach ($ids as $i => $uid) {
+            $stmt->bindValue($i + 1, $uid, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $map = [];
+        foreach ($rows as $row) {
+            $uid = (int) ($row['user_id'] ?? 0);
+            if ($uid > 0) {
+                $map[$uid] = $row;
+            }
+        }
+        return $map;
+    }
+
+    /**
+     * ユーザー単位で担当者行を UPSERT する。
+     * - 既存行があれば sjnet_code / is_sales / is_office のみ更新（他項目は維持）
+     * - 無ければ新規作成。staff_name は $fallbackStaffName、is_active=1, sort_order=0 で作成
+     */
+    public function upsertForUser(
+        int $userId,
+        ?string $sjnetCode,
+        int $isSales,
+        int $isOffice,
+        string $fallbackStaffName,
+        int $actorUserId
+    ): int {
+        $stmt = $this->pdo->prepare('SELECT id, staff_name, is_active, sort_order FROM m_staff WHERE user_id = :user_id LIMIT 1');
+        $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->execute();
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (is_array($existing)) {
+            $id = (int) $existing['id'];
+            $upd = $this->pdo->prepare(
+                'UPDATE m_staff
+                   SET is_sales   = :is_sales,
+                       is_office  = :is_office,
+                       sjnet_code = :sjnet_code,
+                       updated_by = :updated_by
+                 WHERE id = :id'
+            );
+            $upd->bindValue(':is_sales', $isSales, PDO::PARAM_INT);
+            $upd->bindValue(':is_office', $isOffice, PDO::PARAM_INT);
+            $code = ($sjnetCode !== null && $sjnetCode !== '') ? $sjnetCode : null;
+            $upd->bindValue(':sjnet_code', $code, $code !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            $upd->bindValue(':updated_by', $actorUserId, PDO::PARAM_INT);
+            $upd->bindValue(':id', $id, PDO::PARAM_INT);
+            $upd->execute();
+            return $id;
+        }
+
+        return $this->create(
+            $fallbackStaffName !== '' ? $fallbackStaffName : 'ユーザー#' . $userId,
+            $isSales,
+            $isOffice,
+            $userId,
+            ($sjnetCode !== null && $sjnetCode !== '') ? $sjnetCode : null,
+            1,
+            0,
+            $actorUserId
+        );
+    }
+
     /** ログインユーザー（common.users.id）に紐づく m_staff.id を返す。紐づきがなければ null */
     public function findIdByUserId(int $userId): ?int
     {

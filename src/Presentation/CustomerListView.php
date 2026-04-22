@@ -48,6 +48,7 @@ final class CustomerListView
         }
 
         $customerName = Layout::escape((string) ($criteria['customer_name'] ?? ''));
+        $customerType = (string) ($criteria['customer_type'] ?? '');
         $perPage      = (int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE);
         $sort         = (string) ($listState['sort'] ?? '');
         $direction    = (string) ($listState['direction'] ?? 'asc');
@@ -67,10 +68,17 @@ final class CustomerListView
             $detailUrl    = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, array_merge(['id' => (string) $id], $listQuery)));
             $updatedRaw   = (string) ($row['updated_at'] ?? '');
             $updatedTs    = $updatedRaw !== '' ? strtotime($updatedRaw) : false;
-            $updatedDisplay = $updatedTs !== false ? date('Y/m/d', $updatedTs) : '';
+            $updatedDisplay = $updatedTs !== false ? date('Y-m-d', $updatedTs) : '';
 
+            $typeLabel = match ((string) ($row['customer_type'] ?? '')) {
+                'individual' => '個人',
+                'corporate'  => '法人',
+                default      => '',
+            };
             $rowsHtml .= '<tr>'
                 . '<td class="cell-ellipsis" data-label="顧客名" title="' . Layout::escape((string) ($row['customer_name'] ?? '')) . '"><a class="text-link" href="' . $detailUrl . '">' . Layout::escape((string) ($row['customer_name'] ?? '')) . '</a></td>'
+                . '<td data-label="顧客種別">' . Layout::escape($typeLabel) . '</td>'
+                . '<td data-label="生年月日" style="white-space:nowrap;">' . Layout::escape((string) ($row['birth_date'] ?? '')) . '</td>'
                 . '<td data-label="満期件数" style="text-align:right;">' . (int) ($row['renewal_case_count'] ?? 0) . '</td>'
                 . '<td data-label="事故件数" style="text-align:right;">' . (int) ($row['accident_case_count'] ?? 0) . '</td>'
                 . '<td data-label="活動件数" style="text-align:right;">' . (int) ($row['activity_count'] ?? 0) . '</td>'
@@ -79,11 +87,10 @@ final class CustomerListView
         }
 
         if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="5">該当データはありません。</td></tr>';
+            $rowsHtml = '<tr><td colspan="7">該当データはありません。</td></tr>';
         }
 
-        $sortSummary = self::renderSortSummary($sort, $direction);
-        $topToolbar  = LP::toolbar($searchUrl, $criteria, $listState, $pager, $totalCount, $perPage, $sortSummary);
+        $topToolbar  = LP::toolbar($searchUrl, $criteria, $listState, $pager, $totalCount, $perPage);
         $bottomPager = LP::bottomPager($searchUrl, $criteria, $listState, $pager);
         $createForm  = self::renderCreateForm($createDraft, $createUrl, $createCsrf, $searchUrl);
 
@@ -98,7 +105,13 @@ final class CustomerListView
             . LP::routeInput($searchUrl)
             . LP::hiddenInputs(LP::queryParams([], $listState, false, true))
             . '<div class="search-row">'
-            . '<div class="search-field"><span class="search-label">顧客名・よみがな</span><input type="text" name="customer_name" class="compact-input w-lg" value="' . $customerName . '"></div>'
+            . '<div class="search-field"><span class="search-label">顧客名</span><input type="text" name="customer_name" class="compact-input w-lg" value="' . $customerName . '"></div>'
+            . '<div class="search-field"><span class="search-label">顧客種別</span>'
+            . '<select name="customer_type" class="compact-input">'
+            . '<option value="">すべて</option>'
+            . '<option value="individual"' . ($customerType === 'individual' ? ' selected' : '') . '>個人</option>'
+            . '<option value="corporate"' . ($customerType === 'corporate' ? ' selected' : '') . '>法人</option>'
+            . '</select></div>'
             . '<div class="search-actions">'
             . '<button class="btn btn-small" type="submit">検索</button>'
             . '<a class="btn btn-small btn-secondary" href="' . Layout::escape($searchUrl) . '">クリア</a>'
@@ -114,12 +127,16 @@ final class CustomerListView
             . '<colgroup>'
             . '<col style="width:auto;">'
             . '<col style="width:80px;">'
+            . '<col style="width:110px;">'
+            . '<col style="width:80px;">'
             . '<col style="width:80px;">'
             . '<col style="width:80px;">'
             . '<col style="width:110px;">'
             . '</colgroup>'
             . '<thead><tr>'
             . '<th>' . LP::sortLink('顧客名', 'customer_name', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>顧客種別</th>'
+            . '<th>生年月日</th>'
             . '<th style="text-align:right;">満期件数</th>'
             . '<th style="text-align:right;">事故件数</th>'
             . '<th style="text-align:right;">活動件数</th>'
@@ -147,7 +164,6 @@ final class CustomerListView
             . 'if(!dlg)return;'
             . 'const openBtn=document.querySelector("[data-open-dialog=\"customer-create-dialog\"]");'
             . 'if(openBtn){openBtn.addEventListener("click",function(){if(typeof dlg.showModal==="function"&&!dlg.open){dlg.showModal();}});}'
-            . 'dlg.addEventListener("click",function(e){const r=dlg.getBoundingClientRect();const inside=r.left<=e.clientX&&e.clientX<=r.right&&r.top<=e.clientY&&e.clientY<=r.bottom;if(!inside&&dlg.open){dlg.close();}});'
             . 'const initial=' . ($activeModal === 'create' ? '"customer-create-dialog"' : '""') . ';'
             . 'if(initial!==""){if(typeof dlg.showModal==="function"&&!dlg.open){dlg.showModal();}}'
             . '})();'
@@ -164,9 +180,7 @@ final class CustomerListView
     ): string {
         $draftType   = Layout::escape((string) ($draft['customer_type'] ?? ''));
         $draftName   = Layout::escape((string) ($draft['customer_name'] ?? ''));
-        $draftKana   = Layout::escape((string) ($draft['customer_name_kana'] ?? ''));
         $draftPhone  = Layout::escape((string) ($draft['phone'] ?? ''));
-        $draftEmail  = Layout::escape((string) ($draft['email'] ?? ''));
         $draftPostal = Layout::escape((string) ($draft['postal_code'] ?? ''));
         $draftAddr1  = Layout::escape((string) ($draft['address1'] ?? ''));
         $draftAddr2  = Layout::escape((string) ($draft['address2'] ?? ''));
@@ -194,12 +208,8 @@ final class CustomerListView
             . '</select></label>'
             . '<label class="form-field form-field--required"><span class="form-field-label">顧客名</span>'
             . '<input type="text" name="customer_name" value="' . $draftName . '" required maxlength="200" placeholder="例：山田太郎"></label>'
-            . '<label class="form-field"><span class="form-field-label">顧客名カナ</span>'
-            . '<input type="text" name="customer_name_kana" value="' . $draftKana . '" maxlength="200" placeholder="例：ヤマダタロウ"></label>'
             . '<label class="form-field"><span class="form-field-label">電話番号</span>'
             . '<input type="text" name="phone" value="' . $draftPhone . '" maxlength="30" placeholder="例：03-1234-5678"></label>'
-            . '<label class="form-field"><span class="form-field-label">メールアドレス</span>'
-            . '<input type="email" name="email" value="' . $draftEmail . '" maxlength="255" placeholder="例：example@example.com"></label>'
             . '<label class="form-field"><span class="form-field-label">郵便番号</span>'
             . '<input type="text" name="postal_code" value="' . $draftPostal . '" maxlength="20" placeholder="例：100-0001"></label>'
             . '<label class="form-field"><span class="form-field-label">住所1</span>'
@@ -216,18 +226,4 @@ final class CustomerListView
             . '</form>';
     }
 
-    private static function renderSortSummary(string $sort, string $direction): string
-    {
-        if ($sort === '') {
-            return '並び順: 更新順';
-        }
-
-        $label = match ($sort) {
-            'customer_name' => '顧客名',
-            'updated_at'    => '最終更新',
-            default         => '更新順',
-        };
-
-        return '並び順: ' . $label . ' ' . ($direction === 'desc' ? '降順' : '昇順');
-    }
 }

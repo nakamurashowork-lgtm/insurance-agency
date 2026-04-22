@@ -130,9 +130,8 @@ abstract class DatabaseTestCase extends TestCase
         $defaults = [
             'customer_type'      => 'individual',
             'customer_name'      => 'テスト顧客',
-            'customer_name_kana' => null,
+            'birth_date'         => null,
             'phone'              => null,
-            'email'              => null,
             'postal_code'        => null,
             'address1'           => null,
             'address2'           => null,
@@ -146,11 +145,11 @@ abstract class DatabaseTestCase extends TestCase
 
         $stmt = $this->pdo->prepare(
             'INSERT INTO m_customer
-               (customer_type, customer_name, customer_name_kana, phone, email,
+               (customer_type, customer_name, birth_date, phone,
                 postal_code, address1, address2, status, note,
                 is_deleted, created_by, updated_by)
              VALUES
-               (:customer_type, :customer_name, :customer_name_kana, :phone, :email,
+               (:customer_type, :customer_name, :birth_date, :phone,
                 :postal_code, :address1, :address2, :status, :note,
                 :is_deleted, :created_by, :updated_by)'
         );

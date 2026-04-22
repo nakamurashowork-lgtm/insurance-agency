@@ -10,6 +10,7 @@ final class SessionManager
     private const OAUTH_STATE_KEY   = '_oauth_state';
     private const CSRF_TOKENS_KEY   = '_csrf_tokens';
     private const TOTP_PENDING_KEY  = '_totp_pending_user_id';
+    private const RETURN_TO_KEY     = '_return_to';
 
     public function __construct(private AppConfig $config)
     {
@@ -151,6 +152,22 @@ final class SessionManager
     }
 
     // -------------------------------------------------------------------------
+    // ログイン後のリダイレクト先 (return_to)
+    // -------------------------------------------------------------------------
+
+    public function setReturnTo(string $route): void
+    {
+        $_SESSION[self::RETURN_TO_KEY] = $route;
+    }
+
+    public function takeReturnTo(): ?string
+    {
+        $value = $_SESSION[self::RETURN_TO_KEY] ?? null;
+        unset($_SESSION[self::RETURN_TO_KEY]);
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    // -------------------------------------------------------------------------
 
     public function issueCsrfToken(string $purpose): string
     {
@@ -168,6 +185,20 @@ final class SessionManager
         $stored = $_SESSION[self::CSRF_TOKENS_KEY][$purpose] ?? null;
         unset($_SESSION[self::CSRF_TOKENS_KEY][$purpose]);
 
+        if (!is_string($stored) || $stored === '') {
+            return false;
+        }
+
+        return hash_equals($stored, $token);
+    }
+
+    /**
+     * 複数回の検証を許可する CSRF トークン検証。consume しないため、同一トークンで N 件の
+     * 行保存リクエストを続けて検証できる（月次一括入力画面など）。
+     */
+    public function validateCsrfToken(string $purpose, string $token): bool
+    {
+        $stored = $_SESSION[self::CSRF_TOKENS_KEY][$purpose] ?? null;
         if (!is_string($stored) || $stored === '') {
             return false;
         }

@@ -25,17 +25,17 @@ UNIQUE KEY: `(fiscal_year, target_month, staff_user_id, target_type)`
 
 ## 4. 目標種別（target_type）の使い分け
 
-| target_type | 用途 | 集計対象 |
-|---|---|---|
-| `premium_non_life` | 損保保険料目標 | `t_sales_performance.source_type = 'non_life'` の premium_amount 合計 |
-| `premium_life` | 生保保険料目標 | `t_sales_performance.source_type = 'life'` の premium_amount 合計 |
-| `premium_total` | 保険料合計目標 | 全件の premium_amount 合計（source_type 問わず） |
-| `case_count` | 件数目標 | 全件の件数（COUNT） |
+| target_type | 用途 | 集計対象 | 運用状況 |
+|---|---|---|---|
+| `premium_non_life` | 損保保険料目標 | `t_sales_performance.source_type = 'non_life'` の premium_amount 合計 | 運用中 |
+| `premium_life` | 生保保険料目標 | `t_sales_performance.source_type = 'life'` の premium_amount 合計 | 運用中 |
+| `premium_total` | 保険料合計目標 | 全件の premium_amount 合計（source_type 問わず） | **廃止**（将来拡張用として DDL には残置。新規レコードは作成しない） |
+| `case_count` | 件数目標 | 全件の件数（COUNT） | 未使用（将来拡張） |
 
-### 4-1. ホーム画面のデフォルト表示
+### 4-1. ホーム画面の年度目標
 
-ホーム画面の「年度目標」表示は `premium_total` をデフォルトとする。
-将来的に `target_type` を切り替えるUIを設けるかは別途検討する。
+ホーム画面の「年度目標」は損保・生保の 2 種別を別タイルで表示し、全体タイルでは `premium_non_life + premium_life` の合計を使用する。  
+`premium_total` は参照しない。
 
 ## 5. 目標と成績の突合ロジック
 
@@ -223,17 +223,17 @@ UNIQUE KEY: `(fiscal_year, target_month, staff_user_id, target_type)`
 
 ### 11-1. ホーム画面 成績サマリ
 
-年度累計カードに以下を表示する:
+年度累計カードには「全体 / 損保 / 生保」の 3 タイルを横並びで表示する。各タイルに以下を表示する:
 
-| 表示項目 | 計算方法 |
-|---|---|
-| 年度累計 | 選択年度の成績合計（target_type = premium_total 相当） |
-| 前年同期累計 | 9-1 のルール |
-| 前年比 | 9-2 のルール |
-| 年度目標 | fiscal_year + staff_user_id で t_sales_target を検索（target_type = premium_total） |
-| 達成率 | （年度累計 / 年度目標）× 100。目標未設定時は「目標未設定」 |
+| 表示項目 | 全体タイル | 損保タイル | 生保タイル |
+|---|---|---|---|
+| 金額 | `source_type IN ('non_life','life')` の premium_amount 合計 | `source_type = 'non_life'` の合計 | `source_type = 'life'` の合計 |
+| 件数 | 同上の件数 | 同上の件数 | 同上の件数 |
+| 前年比 | 9-2 のルール。分母 0 は `—` | 同左 | 同左 |
+| 年度目標 | `premium_non_life + premium_life` の合計 | `premium_non_life` | `premium_life` |
+| 達成率 | （金額 / 目標）× 100。目標未設定時は「目標未設定」 | 同左 | 同左 |
 
-月次推移テーブルには以下を表示する:
+月次推移テーブルには以下を表示する（業務区分別の内訳は出さず、全体のみを従来通り表示）:
 
 | 行 | 計算方法 |
 |---|---|
@@ -263,21 +263,24 @@ UNIQUE KEY: `(fiscal_year, target_month, staff_user_id, target_type)`
 - 担当者変更時の目標の引継ぎルール
 - 複数年度の比較表示
 
-## 14. 実装範囲（2026-04-07 時点）
+## 14. 実装範囲（2026-04-17 時点）
 
 ### 14-1. 実装済み
 
 - テナント設定画面（目標管理タブ）での年度目標登録・編集・削除
-- `target_type = 'premium_total'` のみ
+- `target_type = 'premium_non_life'` および `'premium_life'` の 2 種別を同一フォームで UPSERT
+- 合計は UI 上で JS により自動算出表示（DB には保存しない）
 - チーム全体目標（`staff_user_id IS NULL`）と担当者別目標の両方
-- ホーム画面の年度目標カードおよびAJAX更新時の反映
+- ホーム画面 成績サマリ 3 タイル化（全体 / 損保 / 生保）と業務区分別達成率の表示
+- 対象年度プルダウンは 当年 −2 〜 +2 の 5 年分
 
 ### 14-2. 未実装（将来拡張）
 
 - 月次目標の登録・編集（`target_month` 1-12）
-- `target_type = 'premium_non_life'` / `'premium_life'` / `'case_count'` の登録・編集
+- `target_type = 'case_count'` の登録・編集
 - 目標の一括インポート
 - 目標の履歴管理
+- 業務区分別の月次推移テーブル（現状は全体のみ）
 
 ## 15. 参照
 

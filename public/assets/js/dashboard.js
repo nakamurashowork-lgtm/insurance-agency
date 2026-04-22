@@ -1,14 +1,17 @@
 /**
  * dashboard.js
- * ホーム画面 担当者選択ドロップダウン / 年度切り替えの部分更新処理。
+ * ホーム画面 担当者選択ドロップダウン / 年度切り替えの更新処理。
  *
  * 依存: window.DASHBOARD_CONFIG = { apiBase: '...', fiscalYear: YYYY, loginUserId: N }
  * window.DASHBOARD_CONFIG は DashboardView.php がインライン <script> で設定する。
  *
  * ポリシー:
- * - ドロップダウン変更時に fetch でカードの JSON だけ取得し DOM を書き換える
- * - location.href / form.submit() / location.reload() は一切使わない
- * - history.replaceState で URL クエリを更新する（pushState は使わない）
+ * - 要確認エリア系 3 ドロップダウン（renewal/accident/sales-case）は fetch で
+ *   JSON を取得し DOM テキストのみ書き換える（部分更新）
+ * - 成績サマリ（sales-user）と年度プルダウン（fiscal-year）は、
+ *   3 タイル + 3 タブ + 月次表の整合を保つため URL 再読込でフル遷移する。
+ *   再読込時に画面上部へ戻らないよう、URL に `#perf-summary` アンカーを付与し、
+ *   ブラウザネイティブのアンカージャンプで成績サマリまで自動スクロールさせる。
  * - innerHTML は使わない。textContent / className のみ書き換える
  */
 
@@ -17,15 +20,18 @@
 
   var cfg = window.DASHBOARD_CONFIG || {};
   var API_BASE    = (cfg.apiBase    || '').replace(/\/$/, '');
-  var FISCAL_YEAR = cfg.fiscalYear  || 0;
 
   // ─── 初期化 ──────────────────────────────────────────────────────
 
-  initDropdown('renewal-user',   'renewal-summary',          renderRenewalCard);
-  initDropdown('accident-user',  'accident-summary',         renderAccidentCard);
-  initDropdown('sales-case-user','sales-case-summary',       renderSalesCaseCard);
-  initDropdown('sales-user',     'sales-performance-summary',renderSalesPerformanceCard);
-  initFiscalYearDropdown();
+  // 成績サマリ系ドロップダウン操作後の再読込は URL に `#perf-summary` を付けて
+  // ブラウザネイティブのアンカージャンプで成績サマリまで自動スクロールさせる方式。
+  // （sessionStorage + scrollTo 方式は race condition が多く廃止）
+
+  initDropdown('renewal-user',   'renewal-summary',    renderRenewalCard);
+  initDropdown('accident-user',  'accident-summary',   renderAccidentCard);
+  initDropdown('sales-case-user','sales-case-summary', renderSalesCaseCard);
+  initReloadDropdown('sales-user',   'sales_user');
+  initReloadDropdown('fiscal-year',  'fiscal_year');
 
   // ─── ドロップダウン初期化 ─────────────────────────────────────────
 
@@ -48,13 +54,37 @@
     });
   }
 
+  /**
+   * URL 再読込で同期するドロップダウン。
+   * 3 タイル + 3 タブ + 月次表の整合が必要な箇所（sales-user / fiscal-year）で使う。
+   * 再読込時に画面上部へ飛ばないよう、URL に `#perf-summary` アンカーを付けて
+   * ブラウザネイティブのアンカージャンプで成績サマリまで自動スクロールさせる。
+   */
+  function initReloadDropdown(dropdownId, paramName) {
+    var el = document.getElementById(dropdownId);
+    if (!el) return;
+    el.addEventListener('change', function () {
+      var value = this.value;
+      try {
+        var url = new URL(window.location.href);
+        url.searchParams.set(paramName, value);
+        url.hash = 'perf-summary';
+        window.location.href = url.toString();
+      } catch (e) {
+        // URL API 非対応ブラウザ向けフォールバック
+        var base = window.location.href.split('#')[0];
+        var sep = base.indexOf('?') >= 0 ? '&' : '?';
+        window.location.href = base + sep
+          + encodeURIComponent(paramName) + '=' + encodeURIComponent(value)
+          + '#perf-summary';
+      }
+    });
+  }
+
   // ─── API 呼び出し ─────────────────────────────────────────────────
 
-  function fetchSummary(apiSlug, userValue, fiscalYear) {
+  function fetchSummary(apiSlug, userValue) {
     var url = API_BASE + '/' + apiSlug + '&user=' + encodeURIComponent(userValue);
-    if (fiscalYear) {
-      url += '&fiscal_year=' + encodeURIComponent(fiscalYear);
-    }
     return fetch(url, {
       method: 'GET',
       credentials: 'same-origin',
@@ -109,167 +139,11 @@
     setCardText('card-sales-case', '.expected',   data.expected_this_month + ' 件');
   }
 
-  function renderSalesPerformanceCard(data) {
-    if (data.error) return;
-
-    var yt = data.year_total || {};
-    var tg = data.target     || {};
-
-    // 期間ラベル
-    var labelEl = document.querySelector('#card-sales .year-summary-label');
-    if (labelEl && yt.period_label) {
-      labelEl.textContent = yt.period_label;
-    }
-
-    // 年度累計
-    setCardText('card-sales', '.year-total', formatNum(yt.amount_thousand_yen));
-
-    // サブ行
-    setCardText('card-sales', '.perf-prev-annual',
-      yt.previous_year_same_period != null
-        ? formatNum(yt.previous_year_same_period) + ' 千円'
-        : '—');
-
-    // 前年比
-    var yoyEl = document.querySelector('#card-sales .perf-yoy');
-    if (yoyEl) {
-      yoyEl.textContent = yt.year_over_year_pct != null ? yt.year_over_year_pct + '%' : '—';
-      yoyEl.className = yoyEl.className
-        .replace(/\bup\b|\bdown\b/g, '').trim();
-      if (yt.year_over_year_pct != null) {
-        yoyEl.className += ' ' + (yt.year_over_year_pct >= 100 ? 'up' : 'down');
-      }
-    }
-
-    setCardText('card-sales', '.perf-annual-target',
-      tg.yearly != null ? formatNum(tg.yearly) + ' 千円' : '目標未設定');
-
-    // 達成率
-    var achRateEl = document.querySelector('#card-sales .perf-achievement-rate');
-    if (achRateEl) {
-      var ytAchRate = (yt.achievement_rate_pct != null) ? yt.achievement_rate_pct : null;
-      if (ytAchRate != null) {
-        achRateEl.textContent = Number(ytAchRate).toFixed(1) + '%';
-        achRateEl.className = achRateEl.className.replace(/\bachievement-over\b/g, '').trim();
-        if (ytAchRate >= 100) { achRateEl.className += ' achievement-over'; }
-      } else {
-        achRateEl.textContent = '目標未設定';
-        achRateEl.className = achRateEl.className.replace(/\bachievement-over\b/g, '').trim();
-      }
-    }
-
-    // 月次推移テーブル
-    if (Array.isArray(data.monthly_trend)) {
-      renderMonthlyTrendTable(data.monthly_trend, data.annual_total || null);
-    }
-  }
-
-  function renderMonthlyTrendTable(trend, annualTotal) {
-    var tbl = document.getElementById('monthly-trend');
-    if (!tbl) return;
-
-    trend.forEach(function (m) {
-      var cur  = tbl.querySelector('td[data-month="' + m.month + '"].current');
-      var prev = tbl.querySelector('td[data-month="' + m.month + '"].previous');
-      var diff = tbl.querySelector('td[data-month="' + m.month + '"].diff');
-      var ach  = tbl.querySelector('td[data-month="' + m.month + '"].achievement-rate');
-
-      if (m.is_future) {
-        if (cur)  cur.textContent  = '—';
-        if (prev) prev.textContent = '—';
-        if (diff) {
-          diff.textContent = '—';
-          diff.className   = diff.className.replace(/\bup\b|\bdown\b/g, '').trim();
-        }
-        if (ach) {
-          ach.textContent = '—';
-          ach.className   = ach.className.replace(/\bachievement-over\b/g, '').trim();
-        }
-      } else {
-        if (cur) {
-          cur.textContent = m.current != null ? formatNum(m.current) : '—';
-        }
-        if (prev) {
-          prev.textContent = m.previous != null ? formatNum(m.previous) : '—';
-        }
-        if (diff && m.diff != null) {
-          diff.textContent = (m.diff >= 0 ? '+' : '') + formatNum(m.diff);
-          diff.className   = diff.className.replace(/\bup\b|\bdown\b/g, '').trim();
-          diff.className  += ' ' + (m.diff >= 0 ? 'up' : 'down');
-        } else if (diff) {
-          diff.textContent = '—';
-          diff.className   = diff.className.replace(/\bup\b|\bdown\b/g, '').trim();
-        }
-        if (ach) {
-          var rateVal = m.cumulative_achievement_rate_pct;
-          ach.textContent = rateVal != null ? Number(rateVal).toFixed(1) + '%' : '—';
-          ach.className   = ach.className.replace(/\bachievement-over\b/g, '').trim();
-          if (rateVal != null && rateVal >= 100) { ach.className += ' achievement-over'; }
-        }
-      }
-    });
-
-    // 年間列（YTD 同士の比較）
-    if (annualTotal) {
-      var aCur  = tbl.querySelector('td.annual-current');
-      var aPrev = tbl.querySelector('td.annual-previous');
-      var aDiff = tbl.querySelector('td.annual-diff');
-
-      if (aCur) {
-        aCur.textContent = annualTotal.current != null ? formatNum(annualTotal.current) : '—';
-      }
-      if (aPrev) {
-        aPrev.textContent = annualTotal.previous != null ? formatNum(annualTotal.previous) : '—';
-      }
-      if (aDiff) {
-        if (annualTotal.diff != null) {
-          aDiff.textContent = (annualTotal.diff >= 0 ? '+' : '') + formatNum(annualTotal.diff);
-          aDiff.className   = aDiff.className.replace(/\bup\b|\bdown\b/g, '').trim();
-          aDiff.className  += ' ' + (annualTotal.diff >= 0 ? 'up' : 'down');
-        } else {
-          aDiff.textContent = '—';
-          aDiff.className   = aDiff.className.replace(/\bup\b|\bdown\b/g, '').trim();
-        }
-      }
-    }
-
-    // 年間累積達成率
-    var aAch = tbl.querySelector('td.achievement-annual');
-    if (aAch) {
-      var lastAch = null;
-      trend.forEach(function (m) {
-        if (m.cumulative_achievement_rate_pct != null) { lastAch = m.cumulative_achievement_rate_pct; }
-      });
-      aAch.textContent = lastAch != null ? Number(lastAch).toFixed(1) + '%' : '—';
-      aAch.className   = aAch.className.replace(/\bachievement-over\b/g, '').trim();
-      if (lastAch != null && lastAch >= 100) { aAch.className += ' achievement-over'; }
-    }
-  }
-
-  // ─── 年度プルダウン ───────────────────────────────────────────────
-
-  function initFiscalYearDropdown() {
-    var el = document.getElementById('fiscal-year');
-    if (!el) return;
-
-    el.addEventListener('change', function () {
-      var fiscalYear = parseInt(this.value, 10);
-      if (!fiscalYear) return;
-      FISCAL_YEAR = fiscalYear;
-
-      var userEl = document.getElementById('sales-user');
-      var userValue = userEl ? userEl.value : 'self';
-
-      fetchSummary('sales-performance-summary', userValue, fiscalYear)
-        .then(function (data) {
-          renderSalesPerformanceCard(data);
-          updateUrlQuery('fiscal_year', fiscalYear);
-        })
-        .catch(function (err) {
-          console.error('Fiscal year update failed:', err);
-        });
-    });
-  }
+  // 成績サマリ（sales-user）および年度プルダウン（fiscal-year）は
+  // initReloadDropdown() による URL 再読込に統一した。
+  // 3 タイル・3 タブ（全体/損保/生保）・月次推移表の整合を SSR で保証するため、
+  // 旧 renderSalesPerformanceCard() / renderMonthlyTrendTable() / initFiscalYearDropdown()
+  // は不要となり撤去した。
 
   // ─── ユーティリティ ──────────────────────────────────────────────
 
@@ -292,8 +166,7 @@
     var map = {
       'renewal-user':    'renewal_user',
       'accident-user':   'accident_user',
-      'sales-case-user': 'sales_case_user',
-      'sales-user':      'sales_user'
+      'sales-case-user': 'sales_case_user'
     };
     return map[dropdownId] || dropdownId;
   }
@@ -302,17 +175,11 @@
     var cardId = {
       'renewal-user':    'card-renewal',
       'accident-user':   'card-accident',
-      'sales-case-user': 'card-sales-case',
-      'sales-user':      'card-sales'
+      'sales-case-user': 'card-sales-case'
     }[dropdownId];
     if (!cardId) return;
     var card = document.getElementById(cardId);
     if (card) card.classList.add('card-error');
-  }
-
-  function formatNum(n) {
-    if (n == null) return '—';
-    return Number(n).toLocaleString('ja-JP');
   }
 
 })();

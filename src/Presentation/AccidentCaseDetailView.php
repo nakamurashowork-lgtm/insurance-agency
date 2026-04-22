@@ -15,14 +15,13 @@ final class AccidentCaseDetailView
      * @param array<string, mixed> $layoutOptions
      * @param array<int, array<string, mixed>> $allStatuses
      * @param array<string, mixed>|null $reminderRule
+     * @param array<int, array<string, mixed>> $customers
      */
     public static function render(
         array $detail,
         array $comments,
         array $audits,
         array $assignedUsers,
-        string $backUrl,
-        string $backLabel,
         string $updateUrl,
         string $commentUrl,
         string $reminderUrl,
@@ -36,7 +35,10 @@ final class AccidentCaseDetailView
         ?string $flashSuccess,
         array $layoutOptions,
         array $allStatuses = [],
-        ?array $reminderRule = null
+        ?array $reminderRule = null,
+        array $customers = [],
+        string $updateBasicUrl = '',
+        string $updateBasicCsrf = ''
     ): string {
         $errorHtml = '';
         if (is_string($flashError) && $flashError !== '') {
@@ -48,23 +50,26 @@ final class AccidentCaseDetailView
             $successHtml = '<div class="notice">' . Layout::escape($flashSuccess) . '</div>';
         }
 
-        // Build status labels map from master data
-        $statusLabels = [];
-        foreach ($allStatuses as $sRow) {
-            $statusLabels[(string) ($sRow['code'] ?? '')] = (string) ($sRow['display_name'] ?? '');
-        }
-        $currentStatus = (string) ($detail['status'] ?? 'accepted');
+        // 表示名がそのまま DB 格納値。プルダウンは name のみで構成。
+        $currentStatus = (string) ($detail['status'] ?? '');
         $statusHtml = '';
-        foreach ($statusLabels as $value => $label) {
-            $selected = $value === $currentStatus ? ' selected' : '';
-            $statusHtml .= '<option value="' . Layout::escape($value) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
+        $currentInMaster = false;
+        foreach ($allStatuses as $sRow) {
+            $name = (string) ($sRow['name'] ?? '');
+            if ($name === '') { continue; }
+            if ($name === $currentStatus) { $currentInMaster = true; }
+            $selected = $name === $currentStatus ? ' selected' : '';
+            $statusHtml .= '<option value="' . Layout::escape($name) . '"' . $selected . '>' . Layout::escape($name) . '</option>';
+        }
+        // 既存値がマスタに無い場合でも表示できるよう補完
+        if ($currentStatus !== '' && !$currentInMaster) {
+            $statusHtml = '<option value="' . Layout::escape($currentStatus) . '" selected>' . Layout::escape($currentStatus) . '</option>' . $statusHtml;
         }
 
         $priorityLabels = [
             'low'    => '低',
-            'normal' => '通常',
+            'normal' => '中',
             'high'   => '高',
-            'urgent' => '急',
         ];
         $currentPriority = (string) ($detail['priority'] ?? 'normal');
         $priorityHtml = '';
@@ -108,17 +113,11 @@ final class AccidentCaseDetailView
         $addressParts = array_filter([$postalCode !== '' ? '〒' . $postalCode : '', $address1, $address2]);
         $address = implode(' ', $addressParts);
 
-        // ステータスバッジ
-        $statusBadgeClass = match ($currentStatus) {
-            'resolved', 'closed' => 'badge-success',
-            'linked', 'in_progress' => 'badge-info',
-            'waiting_docs' => 'badge-danger',
-            default => 'badge-danger',
-        };
-        $statusBadge = '<span class="badge ' . $statusBadgeClass . '">' . Layout::escape($statusLabels[$currentStatus] ?? $currentStatus) . '</span>';
+        $statusBadge = '<span class="badge badge-gray">' . Layout::escape($currentStatus !== '' ? $currentStatus : '未設定') . '</span>';
 
-        // タイトル
-        $customerName = (string) ($detail['customer_name'] ?? '');
+        // タイトル（顧客名は表示用 COALESCE: customer_id がない場合は prospect_name を使う）
+        $customerName = (string) ($detail['display_customer'] ?? $detail['customer_name'] ?? '');
+        $prospectName = (string) ($detail['prospect_name'] ?? '');
         $productType = trim((string) ($detail['product_type'] ?? ''));
         $insuranceCategory = trim((string) ($detail['insurance_category'] ?? ''));
         $titleSuffix = $productType !== '' ? $productType : ($insuranceCategory !== '' ? $insuranceCategory : '');
@@ -161,9 +160,9 @@ final class AccidentCaseDetailView
         }
 
         // 変更履歴 — タイムライン形式
-        $statusTranslate = array_merge($statusLabels, [
-            'low' => '低', 'normal' => '通常', 'high' => '高', 'urgent' => '急',
-        ]);
+        $statusTranslate = [
+            'low' => '低', 'normal' => '中', 'high' => '高',
+        ];
 
         $auditItems = [];
         foreach ($audits as $row) {
@@ -225,6 +224,22 @@ final class AccidentCaseDetailView
             ? Layout::escape($customerDetailBaseUrl . '&id=' . $customerId)
             : '';
 
+        // 基本情報編集ダイアログ用 datalist
+        $basicEditDlId = 'dlg-basic-edit-customer-dl';
+        $basicEditDatalist = '';
+        $basicEditCustText = '';
+        foreach ($customers as $cRow) {
+            $cId   = (int) ($cRow['id'] ?? 0);
+            $cName = trim((string) ($cRow['customer_name'] ?? ''));
+            if ($cId <= 0 || $cName === '') { continue; }
+            if ($cId === $customerId) { $basicEditCustText = $cName; }
+            $basicEditDatalist .= '<option value="' . Layout::escape($cName) . '" data-id="' . $cId . '">';
+        }
+        // 既存顧客が紐付いていない場合は prospect_name を初期値として表示
+        if ($basicEditCustText === '' && $prospectName !== '') {
+            $basicEditCustText = $prospectName;
+        }
+
         $content = $errorHtml
             . $successHtml
             // ── ページヘッダー ──
@@ -234,7 +249,7 @@ final class AccidentCaseDetailView
             . '<div style="margin-top:4px;">' . $statusBadge . '</div>'
             . '</div>'
             . '<div class="actions">'
-            . '<a class="btn btn-secondary" href="' . Layout::escape($backUrl) . '">' . Layout::escape($backLabel) . '</a>'
+            . '<button type="button" class="btn btn-secondary" onclick="history.back()">戻る</button>'
             . '<button class="btn btn-primary" type="submit" form="accident-update-form">保存</button>'
             . '</div>'
             . '</div>'
@@ -244,8 +259,11 @@ final class AccidentCaseDetailView
             . '<div>'
             // 事故基本情報
             . '<div class="card">'
-            . '<div class="detail-section-title">事故基本情報</div>'
-            . '<div class="kv"><span class="kv-key">お客さま名</span><span class="kv-val">' . ($customerUrl !== '' ? '<a class="kv-link" href="' . $customerUrl . '">' . Layout::escape($customerName) . '</a>' : Layout::escape($customerName)) . '</span></div>'
+            . '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:5px;border-bottom:0.5px solid var(--border-light);">'
+            . '<div style="font-size:12px;font-weight:500;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.4px;">事故基本情報</div>'
+            . ($updateBasicUrl !== '' ? '<button type="button" class="btn btn-secondary btn-small" onclick="document.getElementById(\'dlg-basic-edit\').showModal()">編集</button>' : '')
+            . '</div>'
+            . '<div class="kv"><span class="kv-key">顧客名</span><span class="kv-val">' . ($customerUrl !== '' ? '<a class="kv-link" href="' . $customerUrl . '">' . Layout::escape($customerName) . '</a>' : Layout::escape($customerName) . ($prospectName !== '' && $customerId === 0 ? ' <span class="muted" style="font-size:11px;">（未登録顧客）</span>' : '')) . '</span></div>'
             . '<div class="kv"><span class="kv-key">受付日</span><span class="kv-val">' . Layout::escape((string) ($detail['accepted_date'] ?? '')) . '</span></div>'
             . '<div class="kv"><span class="kv-key">事故発生日</span><span class="kv-val">' . (trim((string) ($detail['accident_date'] ?? '')) !== '' ? Layout::escape((string) $detail['accident_date']) : '<span class="muted">未設定</span>') . '</span></div>'
             . '<div class="kv"><span class="kv-key">保険種類</span><span class="kv-val">' . (trim((string) ($detail['insurance_category'] ?? '')) !== '' ? Layout::escape((string) $detail['insurance_category']) : '<span class="muted">未設定</span>') . '</span></div>'
@@ -272,28 +290,99 @@ final class AccidentCaseDetailView
             // ── 右カラム ──
             . '<div>'
             // コメント
-            . '<details class="card details-panel details-compact" open>'
+            . '<details class="card details-panel details-compact">'
             . '<summary><span>コメント</span><span class="muted">' . count($comments) . '件</span></summary>'
             . '<div class="details-compact-body">'
             . '<form method="post" action="' . Layout::escape($commentUrl) . '" style="margin:0 0 12px;">'
             . '<input type="hidden" name="id" value="' . (int) ($detail['id'] ?? 0) . '">'
             . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($commentCsrf) . '">'
             . '<input type="hidden" name="return_to" value="' . Layout::escape($returnToUrl) . '">'
-            . '<label style="display:block;">新規コメント<textarea name="comment_body" rows="3" style="width:100%;margin-top:6px;" required></textarea></label>'
+            . '<label style="display:block;">新規コメント<span style="font-size:11px;color:var(--text-secondary);margin-left:6px;">500文字以内</span><textarea name="comment_body" rows="3" style="width:100%;margin-top:6px;" maxlength="500" required></textarea></label>'
             . '<div class="actions" style="margin-top:10px;"><button class="btn btn-small" type="submit">コメント追加</button></div>'
             . '</form>'
             . '<ul class="panel-list">' . $commentsHtml . '</ul>'
             . '</div>'
             . '</details>'
             // 変更履歴
-            . '<details class="card details-panel details-compact" open>'
+            . '<details class="card details-panel details-compact">'
             . '<summary><span>変更履歴</span><span class="muted">' . count($audits) . '件</span></summary>'
             . '<div class="details-compact-body">' . $auditsHtml . '</div>'
             . '</details>'
             . '</div>'
-            . '</div>';
+            . '</div>'
+            . self::renderBasicEditDialog(
+                $accidentCaseId,
+                $detail,
+                $updateBasicUrl,
+                $updateBasicCsrf,
+                $returnToUrl,
+                $basicEditDlId,
+                $basicEditDatalist,
+                $basicEditCustText,
+                $customerId
+            );
 
         return Layout::render('事故案件詳細', $content, $layoutOptions);
+    }
+
+    private static function renderBasicEditDialog(
+        int $accidentCaseId,
+        array $detail,
+        string $updateBasicUrl,
+        string $updateBasicCsrf,
+        string $returnToUrl,
+        string $dlId,
+        string $datalist,
+        string $custText,
+        int $currentCustomerId
+    ): string {
+        if ($updateBasicUrl === '') {
+            return '';
+        }
+
+        $acceptedDate      = Layout::escape((string) ($detail['accepted_date'] ?? ''));
+        $accidentDate      = Layout::escape((string) ($detail['accident_date'] ?? ''));
+        $insuranceCategory = Layout::escape((string) ($detail['insurance_category'] ?? ''));
+        $accidentLocation  = Layout::escape((string) ($detail['accident_location'] ?? ''));
+        $scStaffName       = Layout::escape((string) ($detail['sc_staff_name'] ?? ''));
+        $custIdVal         = $currentCustomerId > 0 ? $currentCustomerId : '';
+
+        return ''
+            . '<dialog id="dlg-basic-edit" class="modal-dialog">'
+            . '<form method="dialog" class="modal-close-form"><button type="submit" class="modal-close" aria-label="閉じる">×</button></form>'
+            . '<div class="modal-head"><h2>基本情報を編集</h2></div>'
+            . '<form method="post" action="' . Layout::escape($updateBasicUrl) . '">'
+            . '<input type="hidden" name="id" value="' . $accidentCaseId . '">'
+            . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($updateBasicCsrf) . '">'
+            . '<input type="hidden" name="return_to" value="' . Layout::escape($returnToUrl) . '">'
+            . '<input type="hidden" name="customer_id" id="dlg-basic-edit-customer-id" value="' . $custIdVal . '">'
+            . '<input type="hidden" name="prospect_name" id="dlg-basic-edit-prospect-name" value="' . Layout::escape($currentCustomerId > 0 ? '' : $custText) . '">'
+            . '<datalist id="' . $dlId . '">' . $datalist . '</datalist>'
+            . '<div class="list-filter-grid modal-form-grid">'
+            . '<label class="list-filter-field"><span>お客さま <strong class="required-mark">*</strong></span><input type="text" list="' . $dlId . '" id="dlg-basic-edit-customer-text" autocomplete="off" value="' . Layout::escape($custText) . '" placeholder="既存顧客から選択 または 依頼者名を入力" required></label>'
+            . '<label class="list-filter-field"><span>受付日 <strong class="required-mark">*</strong></span><input type="date" name="accepted_date" value="' . $acceptedDate . '" required></label>'
+            . '<label class="list-filter-field"><span>事故発生日</span><input type="date" name="accident_date" value="' . $accidentDate . '"></label>'
+            . '<label class="list-filter-field"><span>保険種類</span><input type="text" name="insurance_category" value="' . $insuranceCategory . '" maxlength="50"></label>'
+            . '<label class="list-filter-field"><span>担当拠点</span><input type="text" name="accident_location" value="' . $accidentLocation . '" maxlength="255"></label>'
+            . '<label class="list-filter-field"><span>SC担当者</span><input type="text" name="sc_staff_name" value="' . $scStaffName . '" maxlength="100"></label>'
+            . '</div>'
+            . '<div class="actions modal-form-actions">'
+            . '<button class="btn btn-primary" type="submit">保存する</button>'
+            . '<button class="btn btn-secondary" type="button" onclick="document.getElementById(\'dlg-basic-edit\').close()">キャンセル</button>'
+            . '</div>'
+            . '</form>'
+            . '<script>(function(){'
+            . 'var txt=document.getElementById("dlg-basic-edit-customer-text");'
+            . 'var hid=document.getElementById("dlg-basic-edit-customer-id");'
+            . 'var pros=document.getElementById("dlg-basic-edit-prospect-name");'
+            . 'var dl=document.getElementById("' . $dlId . '");'
+            . 'if(!txt||!hid||!pros||!dl){return;}'
+            . 'function sync(){var v=txt.value;var opts=dl.querySelectorAll("option");var found=false;'
+            . 'for(var i=0;i<opts.length;i++){if(opts[i].value===v){hid.value=opts[i].getAttribute("data-id")||"";found=true;break;}}'
+            . 'if(found){pros.value="";}else{hid.value="";pros.value=v;}}'
+            . 'txt.addEventListener("input",sync);txt.addEventListener("change",sync);'
+            . '})();</script>'
+            . '</dialog>';
     }
 
     /**
@@ -318,7 +407,7 @@ final class AccidentCaseDetailView
             return '<div class="card"><div class="detail-section-title">リマインド設定</div>'
                 . '<p class="muted" style="font-size:13px;margin-bottom:8px;">リマインド未設定</p>'
                 . '<details>'
-                . '<summary style="cursor:pointer;color:var(--color-primary,#2563eb);font-size:13px;padding:4px 0;list-style:none;">設定する ▸</summary>'
+                . '<summary style="cursor:pointer;color:var(--text-info);font-size:13px;padding:4px 0;list-style:none;">設定する ▸</summary>'
                 . '<div style="margin-top:10px;">' . $formHtml . '</div>'
                 . '</details>'
                 . '</div>';
@@ -337,7 +426,7 @@ final class AccidentCaseDetailView
             . '<div class="kv"><span class="kv-key">次回通知予定</span><span class="kv-val">' . Layout::escape($nextDate) . '</span></div>'
             . '<div class="kv"><span class="kv-key">最終通知日</span><span class="kv-val">' . $lastNotifyDisplay . '</span></div>'
             . '<details open>'
-            . '<summary style="cursor:pointer;font-size:13px;padding:4px 0;color:var(--text-muted,#6b7280);">設定を編集</summary>'
+            . '<summary style="cursor:pointer;font-size:13px;padding:4px 0;color:var(--text-secondary);">設定を編集</summary>'
             . '<div style="margin-top:10px;">' . $formHtml . '</div>'
             . '</details>'
             . '</div>';
@@ -497,9 +586,9 @@ final class AccidentCaseDetailView
             }
 
             $borderColor = match ($cat) {
-                'status' => 'var(--color-primary, #2563eb)',
-                'staff'  => 'var(--color-info, #0891b2)',
-                default  => 'var(--border-color, #d1d5db)',
+                'status' => 'var(--border-info)',
+                'staff'  => 'var(--border-info)',
+                default  => 'var(--border-light)',
             };
 
             $diffHtml = '';
@@ -513,28 +602,28 @@ final class AccidentCaseDetailView
                 $isStaff  = $key === 'assigned_staff_id';
 
                 $afterStyle = $isStatus
-                    ? 'font-weight:700;color:var(--color-primary,#2563eb);'
-                    : ($isStaff ? 'font-weight:600;color:var(--color-info,#0891b2);' : 'font-weight:600;');
+                    ? 'font-weight:700;color:var(--text-info);'
+                    : ($isStaff ? 'font-weight:600;color:var(--text-info);' : 'font-weight:600;');
 
-                $diffHtml .= '<div style="display:flex;align-items:baseline;gap:6px;margin:3px 0;font-size:12.5px;">'
-                    . '<span style="min-width:90px;color:var(--text-muted,#6b7280);">' . $label . '</span>'
-                    . '<span style="color:var(--text-muted,#9ca3af);text-decoration:line-through;">' . $before . '</span>'
-                    . '<span style="color:var(--text-muted,#9ca3af);">→</span>'
+                $diffHtml .= '<div style="display:flex;align-items:baseline;gap:6px;margin:3px 0;font-size:13px;">'
+                    . '<span style="min-width:90px;color:var(--text-hint);">' . $label . '</span>'
+                    . '<span style="color:var(--text-muted-cool);text-decoration:line-through;">' . $before . '</span>'
+                    . '<span style="color:var(--text-muted-cool);">→</span>'
                     . '<span style="' . $afterStyle . '">' . $after . '</span>'
                     . '</div>';
             }
 
-            $html .= '<div style="border-left:3px solid ' . $borderColor . ';padding:8px 10px 8px 12px;margin-bottom:10px;background:var(--bg-card,#fff);border-radius:0 4px 4px 0;">'
+            $html .= '<div style="border-left:3px solid ' . $borderColor . ';padding:8px 10px 8px 12px;margin-bottom:10px;background:var(--bg-primary);border-radius:0 4px 4px 0;">'
                 . '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'
-                . '<span style="font-size:12px;color:var(--text-muted,#6b7280);">' . Layout::escape((string) ($item['changed_at'] ?? '')) . '</span>'
-                . '<span style="font-size:12px;color:var(--text-muted,#6b7280);">' . Layout::escape((string) ($item['changed_by'] ?? '')) . '</span>'
+                . '<span style="font-size:12px;color:var(--text-hint);">' . Layout::escape((string) ($item['changed_at'] ?? '')) . '</span>'
+                . '<span style="font-size:12px;color:var(--text-hint);">' . Layout::escape((string) ($item['changed_by'] ?? '')) . '</span>'
                 . '</div>'
                 . $diffHtml
                 . '</div>';
         }
 
         if ($html === '') {
-            $html = '<div class="muted" style="font-size:12.5px;">該当する変更履歴はありません。</div>';
+            $html = '<div class="muted" style="font-size:13px;">該当する変更履歴はありません。</div>';
         }
 
         return $html;
