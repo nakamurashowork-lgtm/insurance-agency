@@ -311,31 +311,38 @@ final class RenewalCaseDetailView
             . self::renderHiddenInputs($listStateParams)
             . '<div class="form-row">'
             . '<div class="form-label">事務担当</div>'
-            . '<select name="office_staff_id" class="form-select">' . $officeStaffOptions . '</select>'
+            . '<select name="office_staff_id" class="form-select"'
+            . Layout::fieldAria($fieldErrors, 'office_staff_id') . '>' . $officeStaffOptions . '</select>'
+            . self::renderFieldError($fieldErrors, 'office_staff_id')
             . '</div>'
             . '<div class="form-row">'
             . '<div class="form-label">対応状況 <strong class="required-mark">*</strong></div>'
-            . '<select id="renewal-case-status" class="form-select' . $statusClass . '" name="case_status" required>' . $statusHtml . '</select>'
+            . '<select id="renewal-case-status" class="form-select' . $statusClass . '" name="case_status" required'
+            . Layout::fieldAria($fieldErrors, 'case_status', true) . '>' . $statusHtml . '</select>'
             . self::renderFieldError($fieldErrors, 'case_status')
             . '</div>'
             . '<div class="form-row">'
             . '<div class="form-label">更改方法</div>'
-            . '<select id="renewal-method-field" class="form-select' . $renewalMethodClass . '" name="renewal_method">' . $renewalMethodHtml . '</select>'
+            . '<select id="renewal-method-field" class="form-select' . $renewalMethodClass . '" name="renewal_method"'
+            . Layout::fieldAria($fieldErrors, 'renewal_method') . '>' . $renewalMethodHtml . '</select>'
             . self::renderFieldError($fieldErrors, 'renewal_method')
             . '</div>'
             . '<div class="form-row">'
             . '<div class="form-label">手続き方法</div>'
-            . '<select id="procedure-method-field" class="form-select' . $procedureMethodClass . '" name="procedure_method">' . $procedureMethodHtml . '</select>'
+            . '<select id="procedure-method-field" class="form-select' . $procedureMethodClass . '" name="procedure_method"'
+            . Layout::fieldAria($fieldErrors, 'procedure_method') . '>' . $procedureMethodHtml . '</select>'
             . self::renderFieldError($fieldErrors, 'procedure_method')
             . '</div>'
             . '<div class="form-row">'
             . '<div class="form-label">完了日</div>'
-            . '<input type="date" id="renewal-completed-date" class="form-input' . $completedDateClass . '" name="completed_date" value="' . Layout::escape((string) ($detail['completed_date'] ?? '')) . '">'
+            . '<input type="date" id="renewal-completed-date" class="form-input' . $completedDateClass . '" name="completed_date" value="' . Layout::escape((string) ($detail['completed_date'] ?? '')) . '"'
+            . Layout::fieldAria($fieldErrors, 'completed_date') . '>'
             . self::renderFieldError($fieldErrors, 'completed_date')
             . '</div>'
             . '<div class="form-row">'
             . '<div class="form-label">次回対応予定日</div>'
-            . '<input type="date" id="renewal-next-action-date" class="form-input' . $nextActionClass . '" name="next_action_date" value="' . Layout::escape((string) ($detail['next_action_date'] ?? '')) . '">'
+            . '<input type="date" id="renewal-next-action-date" class="form-input' . $nextActionClass . '" name="next_action_date" value="' . Layout::escape((string) ($detail['next_action_date'] ?? '')) . '"'
+            . Layout::fieldAria($fieldErrors, 'next_action_date') . '>'
             . self::renderFieldError($fieldErrors, 'next_action_date')
             . '</div>'
             . '<button class="btn btn-primary" type="submit" style="width:100%;">更新を保存</button>'
@@ -709,12 +716,8 @@ final class RenewalCaseDetailView
      */
     private static function renderFieldError(array $fieldErrors, string $field): string
     {
-        $message = trim((string) ($fieldErrors[$field] ?? ''));
-        if ($message === '') {
-            return '';
-        }
-
-        return '<span class="field-error">' . Layout::escape($message) . '</span>';
+        // Layout::fieldError に委譲（id 付き span を生成、aria-describedby 参照先）
+        return Layout::fieldError($fieldErrors, $field);
     }
 
     /**
