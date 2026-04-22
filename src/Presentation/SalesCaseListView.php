@@ -267,8 +267,8 @@ final class SalesCaseListView
                 . '<td class="cell-ellipsis" data-label="見込案件名" title="' . Layout::escape($caseName) . '"><a class="text-link" href="' . $detailUrl . '">' . Layout::escape($caseName) . '</a></td>'
                 . '<td class="cell-ellipsis" data-label="顧客名" title="' . Layout::escape($customerName) . '">' . $custLink . '</td>'
                 . '<td class="cell-ellipsis" data-label="種別" title="' . Layout::escape($caseTypeLabel) . '">' . Layout::escape($caseTypeLabel) . '</td>'
-                . '<td data-label="見込度" style="text-align:center;">' . self::rankBadge($rank) . '</td>'
-                . '<td data-label="対応状況" style="white-space:nowrap;">' . self::statusBadge($status) . '</td>'
+                . '<td class="td-pair" data-label="見込度" style="text-align:center;">' . self::rankBadge($rank) . '</td>'
+                . '<td class="td-pair" data-label="対応状況" style="white-space:nowrap;">' . self::statusBadge($status) . '</td>'
                 . '<td class="cell-ellipsis" data-label="担当者" title="' . Layout::escape($staffName) . '">' . Layout::escape($staffName) . '</td>'
                 . '<td style="text-align:center;">' . $deleteForm . '</td>'
                 . '</tr>';

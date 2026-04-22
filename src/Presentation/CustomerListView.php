@@ -79,9 +79,9 @@ final class CustomerListView
                 . '<td class="cell-ellipsis" data-label="顧客名" title="' . Layout::escape((string) ($row['customer_name'] ?? '')) . '"><a class="text-link" href="' . $detailUrl . '">' . Layout::escape((string) ($row['customer_name'] ?? '')) . '</a></td>'
                 . '<td data-label="顧客種別">' . Layout::escape($typeLabel) . '</td>'
                 . '<td data-label="生年月日" style="white-space:nowrap;">' . Layout::escape((string) ($row['birth_date'] ?? '')) . '</td>'
-                . '<td data-label="満期件数" style="text-align:right;">' . (int) ($row['renewal_case_count'] ?? 0) . '</td>'
-                . '<td data-label="事故件数" style="text-align:right;">' . (int) ($row['accident_case_count'] ?? 0) . '</td>'
-                . '<td data-label="活動件数" style="text-align:right;">' . (int) ($row['activity_count'] ?? 0) . '</td>'
+                . '<td class="td-triple" data-label="満期件数" style="text-align:right;">' . (int) ($row['renewal_case_count'] ?? 0) . '</td>'
+                . '<td class="td-triple" data-label="事故件数" style="text-align:right;">' . (int) ($row['accident_case_count'] ?? 0) . '</td>'
+                . '<td class="td-triple" data-label="活動件数" style="text-align:right;">' . (int) ($row['activity_count'] ?? 0) . '</td>'
                 . '<td data-label="最終更新" style="white-space:nowrap;">' . Layout::escape($updatedDisplay) . '</td>'
                 . '</tr>';
         }
