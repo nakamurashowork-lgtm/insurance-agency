@@ -118,8 +118,8 @@ final class AccidentCaseListView
                 . '<td data-label="事故日" style="white-space:nowrap;">' . Layout::escape((string) ($row['accident_date'] ?? '')) . '</td>'
                 . '<td class="cell-ellipsis" data-label="種目" title="' . Layout::escape((string) ($row['product_type'] ?? '')) . '">' . Layout::escape((string) ($row['product_type'] ?? '')) . '</td>'
                 . '<td class="cell-ellipsis" data-label="担当" title="' . Layout::escape($assignedName) . '">' . Layout::escape($assignedName) . '</td>'
-                . '<td data-label="状態" style="white-space:nowrap;">' . self::renderStatusBadge((string) ($row['status'] ?? '')) . '</td>'
-                . '<td data-label="優先度" style="text-align:center;">' . self::renderPriorityBadge((string) ($row['priority'] ?? '')) . '</td>'
+                . '<td class="td-pair" data-label="状態" style="white-space:nowrap;">' . self::renderStatusBadge((string) ($row['status'] ?? '')) . '</td>'
+                . '<td class="td-pair" data-label="優先度" style="text-align:center;">' . self::renderPriorityBadge((string) ($row['priority'] ?? '')) . '</td>'
                 . '<td data-label="次回リマインド" style="white-space:nowrap;">' . $reminderHtml . '</td>'
                 . '<td>' . $deleteForm . '</td>'
                 . '</tr>';
