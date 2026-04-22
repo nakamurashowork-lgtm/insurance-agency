@@ -5,5 +5,7 @@
 .env.sta
 .env.pro
 *.log
+*.zip
 .DS_Store
 index.php.staging
+.claude/settings.local.json
