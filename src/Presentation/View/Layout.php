@@ -80,6 +80,9 @@ final class Layout
             . '.btn-icon-delete:hover{opacity:1;}'
             . '.btn-ghost{background:var(--bg-primary);color:var(--text-primary);border:0.5px solid var(--border-medium);}'
             . '.btn-small{padding:6px 12px;font-size:12px;}'
+            . 'button:disabled,input:disabled,select:disabled,textarea:disabled,[aria-disabled="true"]{opacity:0.5;cursor:not-allowed !important;}'
+            . ':focus-visible{outline:2px solid var(--border-info);outline-offset:2px;}'
+            . '.btn:focus-visible,a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,details:focus-visible{outline:2px solid var(--border-info);outline-offset:2px;box-shadow:0 0 0 4px rgba(55,138,221,0.25);}'
             . '.text-link{color:var(--text-info);text-decoration:underline;font-weight:500;}'
             . '.text-link:hover{color:var(--text-info);}'
             . '.notice{padding:10px 12px;background:var(--bg-success);border:0.5px solid var(--border-success);color:var(--text-success);border-radius:8px;margin-bottom:12px;}'
@@ -92,7 +95,7 @@ final class Layout
             . '.alert-message{font-size:14px;line-height:1.5;}'
             . '.alert-warn{padding:10px 16px;border-radius:var(--radius-md);font-size:13px;margin-bottom:14px;background:var(--bg-warning);color:var(--text-warning);border:0.5px solid var(--border-warning);display:block;}'
             . '.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:500;line-height:1.5;}'
-            . '.badge-gray{background:var(--bg-secondary);color:var(--text-secondary);}'
+            . '.badge-gray{background:var(--bg-secondary);color:var(--text-primary);}'
             . '.badge-info{background:var(--bg-info);color:var(--text-info);}'
             . '.badge-warn{background:var(--bg-warning);color:var(--text-warning);}'
             . '.badge-success{background:var(--bg-success);color:var(--text-success);}'
@@ -149,7 +152,7 @@ final class Layout
             . '.customer-create-grid .form-field--full{grid-column:1 / -1;}'
             . '.customer-create-grid .form-field--spacer{grid-column:span 1;}'
             . '.customer-create-grid input,.customer-create-grid select,.customer-create-grid textarea{width:100%;min-width:0;padding:10px 12px;border:1px solid var(--border-cool);border-radius:8px;font-size:14px;font-family:inherit;line-height:1.4;background:var(--bg-primary);color:var(--text-heading);}'
-            . '.customer-create-grid input:focus,.customer-create-grid select:focus,.customer-create-grid textarea:focus{outline:none;border-color:var(--border-info);box-shadow:0 0 0 2px rgba(55,138,221,0.12);}'
+            . '.customer-create-grid input:focus,.customer-create-grid select:focus,.customer-create-grid textarea:focus{outline:none;border-color:var(--border-info);box-shadow:0 0 0 2px rgba(55,138,221,0.25);}'
             . '.customer-create-grid textarea{min-height:108px;max-height:220px;resize:vertical;}'
             . '.dialog-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;padding-top:10px;border-top:1px solid var(--border-cool);background:var(--bg-primary);}'
             . '.dialog-actions .btn{min-width:112px;min-height:44px;border-radius:10px;}'
@@ -183,7 +186,7 @@ final class Layout
             . '.list-filter-field{grid-column:span 4;display:grid;gap:6px;font-size:13px;font-weight:700;color:var(--text-label);}'
             . '.list-filter-field.is-date{grid-column:span 6;}'
             . '.list-filter-field input,.list-filter-field select,.list-filter-field textarea{width:100%;min-width:0;padding:6px 10px;border:0.5px solid var(--border-medium);border-radius:var(--radius-md);font-size:12px;font-family:inherit;background:var(--bg-primary);color:var(--text-primary);}'
-            . '.list-filter-field input:focus,.list-filter-field select:focus,.list-filter-field textarea:focus{outline:none;border-color:var(--border-info);box-shadow:0 0 0 2px rgba(55,138,221,0.12);}'
+            . '.list-filter-field input:focus,.list-filter-field select:focus,.list-filter-field textarea:focus{outline:none;border-color:var(--border-info);box-shadow:0 0 0 2px rgba(55,138,221,0.25);}'
             . '.list-filter-field textarea{resize:vertical;line-height:1.5;}'
             . '.list-filter-actions{margin-top:16px;}'
             . '.list-toolbar{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px;}'
@@ -315,7 +318,7 @@ final class Layout
             . '.update-field{display:grid;gap:8px;}'
             . '.update-field label{display:block;font-size:13px;font-weight:700;color:var(--text-label);}'
             . '.update-field input[type="text"],.update-field input[type="date"],.update-field select,.update-field textarea{width:100%;min-width:0;padding:8px 10px;border:1px solid var(--border-cool);border-radius:8px;font-size:14px;font-family:inherit;background:var(--bg-primary);color:var(--text-heading);}'
-            . '.update-field input[type="text"]:focus,.update-field input[type="date"]:focus,.update-field select:focus,.update-field textarea:focus{outline:none;border-color:var(--border-info);box-shadow:0 0 0 2px rgba(55,138,221,0.12);}'
+            . '.update-field input[type="text"]:focus,.update-field input[type="date"]:focus,.update-field select:focus,.update-field textarea:focus{outline:none;border-color:var(--border-info);box-shadow:0 0 0 2px rgba(55,138,221,0.25);}'
             . '.update-field textarea{resize:vertical;line-height:1.5;}'
             . '.update-field-full{grid-column:span 2;}'
             . '.renewal-update-actions{display:flex;justify-content:flex-end;gap:8px;}'
@@ -330,7 +333,7 @@ final class Layout
             . '.form-row{margin-bottom:14px;}'
             . '.form-label{font-size:12px;color:var(--text-secondary);margin-bottom:5px;}'
             . '.form-input,.form-select{width:100%;padding:8px 11px;border:0.5px solid var(--border-medium);border-radius:var(--radius-md);font-size:13px;background:var(--bg-primary);color:var(--text-primary);font-family:inherit;}'
-            . '.form-input:focus,.form-select:focus{outline:none;border-color:var(--border-info);box-shadow:0 0 0 2px rgba(55,138,221,0.12);}'
+            . '.form-input:focus,.form-select:focus{outline:none;border-color:var(--border-info);box-shadow:0 0 0 2px rgba(55,138,221,0.25);}'
             . 'textarea.form-input{resize:none;}'
             . '.radio-group{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-top:2px;}'
             . '.radio-inline{display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;user-select:none;white-space:nowrap;}'
@@ -378,7 +381,7 @@ final class Layout
             . '.search-label{font-size:12px;color:var(--text-secondary);white-space:nowrap;font-weight:500;}'
             . '.search-sep{font-size:12px;color:var(--text-secondary);margin:0 1px;}'
             . '.compact-input{padding:3px 8px;font-size:13px;border:0.5px solid var(--border-medium);border-radius:6px;height:30px;background:var(--bg-primary);color:var(--text-primary);font-family:inherit;box-sizing:border-box;}'
-            . '.compact-input:focus{outline:none;border-color:var(--border-info);box-shadow:0 0 0 2px rgba(55,138,221,0.12);}'
+            . '.compact-input:focus{outline:none;border-color:var(--border-info);box-shadow:0 0 0 2px rgba(55,138,221,0.25);}'
             . '.compact-input.w-date{width:128px;}.compact-input.w-sm{width:90px;}.compact-input.w-md{width:148px;}.compact-input.w-lg{width:190px;}'
             . 'select.compact-input{cursor:pointer;}'
             . '.search-actions{margin-left:auto;display:flex;gap:6px;align-items:center;}'
@@ -539,5 +542,39 @@ final class Layout
     public static function escape(string $value): string
     {
         return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+    }
+
+    /**
+     * 入力要素用の aria-* 属性を生成する（WCAG 2.1 AA 対応）。
+     * aria-describedby はエラー有無に関わらず常時付与し、参照切れを防ぐ。
+     *
+     * @param array<string, mixed> $errors
+     */
+    public static function fieldAria(array $errors, string $fieldName, bool $required = false): string
+    {
+        $attrs = ' aria-describedby="' . self::escape($fieldName) . '-err"';
+        if ($required) {
+            $attrs .= ' aria-required="true"';
+        }
+        if (isset($errors[$fieldName]) && (string) $errors[$fieldName] !== '') {
+            $attrs .= ' aria-invalid="true"';
+        }
+        return $attrs;
+    }
+
+    /**
+     * エラーメッセージ span を生成する（id 付き、aria-describedby 参照用）。
+     * エラーが無い場合は hidden 属性付きの空 span を返し、参照切れを防ぐ。
+     *
+     * @param array<string, mixed> $errors
+     */
+    public static function fieldError(array $errors, string $fieldName): string
+    {
+        $id = self::escape($fieldName) . '-err';
+        if (!isset($errors[$fieldName]) || (string) $errors[$fieldName] === '') {
+            return '<span id="' . $id . '" class="field-error" hidden></span>';
+        }
+        return '<span id="' . $id . '" class="field-error">'
+            . self::escape((string) $errors[$fieldName]) . '</span>';
     }
 }
