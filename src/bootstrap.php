@@ -390,10 +390,21 @@ $router->post('logout', static function () use ($authController): void {
     $authController->logout();
 });
 
-// ローカル開発用裏口ログイン（APP_ENV=local のみ有効）
-if (($config->appEnv ?? '') === 'local') {
-    $router->get('dev/login', static function () use ($session, $config, $commonFactory): void {
-        // dev@local.test ユーザーでセッションを確立する
+// 開発/ステージング用裏口ログイン（APP_ENV=local / staging のみ有効）
+$devLoginAllowedEmails = [
+    'local'   => ['dev@local.test'],
+    'staging' => ['staff1@te002.test', 'staff2@te002.test'],
+];
+$currentEnv = (string) ($config->appEnv ?? '');
+if (isset($devLoginAllowedEmails[$currentEnv])) {
+    $router->get('dev/login', static function () use ($session, $config, $commonFactory, $devLoginAllowedEmails, $currentEnv): void {
+        $allowed = $devLoginAllowedEmails[$currentEnv];
+        $email = isset($_GET['email']) && is_string($_GET['email']) ? $_GET['email'] : $allowed[0];
+        if (!in_array($email, $allowed, true)) {
+            http_response_code(400);
+            echo '<h1>dev login error: email not allowed</h1>';
+            return;
+        }
         $pdo = $commonFactory->create();
         $stmt = $pdo->prepare(
             'SELECT u.id AS user_id, u.name, u.display_name, u.is_system_admin,
@@ -404,7 +415,7 @@ if (($config->appEnv ?? '') === 'local') {
              WHERE u.email = :email AND u.is_deleted = 0 AND ut.is_deleted = 0
              LIMIT 1'
         );
-        $stmt->execute([':email' => 'dev@local.test']);
+        $stmt->execute([':email' => $email]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         if (!is_array($row)) {

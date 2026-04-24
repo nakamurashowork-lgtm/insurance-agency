@@ -141,6 +141,31 @@ final class SjnetImportRepository
     }
 
     /**
+     * 直近の取込バッチ履歴を新しい順に返す（モーダルの履歴一覧で使用）。
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function findRecentBatches(int $limit = 5): array
+    {
+        if ($limit <= 0) {
+            $limit = 5;
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT id, file_name, source_encoding, import_status,
+                    total_row_count, insert_count, update_count, error_count,
+                    started_at, finished_at
+             FROM t_sjnet_import_batch
+             ORDER BY id DESC
+             LIMIT :lim'
+        );
+        $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : [];
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     public function findBatchById(int $batchId): ?array

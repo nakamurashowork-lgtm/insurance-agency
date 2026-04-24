@@ -1688,7 +1688,7 @@ final class TenantSettingsView
                 . '<div style="display:flex;align-items:center;gap:8px;font-size:13px;">'
                 . '<span style="color:var(--text-secondary);">満期</span>'
                 . self::daySelectHtml($fieldPrefix . '_days', $days)
-                . '<span style="color:var(--text-secondary);">日前に通知</span>'
+                . '<span style="color:var(--text-secondary);">日前から通知</span>'
                 . '</div>'
                 . '</div>';
         }

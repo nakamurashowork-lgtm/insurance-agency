@@ -31,7 +31,8 @@
   initDropdown('accident-user',  'accident-summary',   renderAccidentCard);
   initDropdown('sales-case-user','sales-case-summary', renderSalesCaseCard);
   initReloadDropdown('sales-user',   'sales_user');
-  initReloadDropdown('fiscal-year',  'fiscal_year');
+  initYearTabs('fiscal-year',        'fiscal_year');
+  initCardLinks();
 
   // ─── ドロップダウン初期化 ─────────────────────────────────────────
 
@@ -64,21 +65,68 @@
     var el = document.getElementById(dropdownId);
     if (!el) return;
     el.addEventListener('change', function () {
-      var value = this.value;
-      try {
-        var url = new URL(window.location.href);
-        url.searchParams.set(paramName, value);
-        url.hash = 'perf-summary';
-        window.location.href = url.toString();
-      } catch (e) {
-        // URL API 非対応ブラウザ向けフォールバック
-        var base = window.location.href.split('#')[0];
-        var sep = base.indexOf('?') >= 0 ? '&' : '?';
-        window.location.href = base + sep
-          + encodeURIComponent(paramName) + '=' + encodeURIComponent(value)
-          + '#perf-summary';
-      }
+      reloadWithParam(paramName, this.value);
     });
+  }
+
+  /**
+   * 年度タブ（button タブ群）。コンテナ ID は '#fiscal-year' を維持。
+   * 子ボタンの [data-year] 値で URL 再読込する。
+   * `initReloadDropdown` と同じく `#perf-summary` アンカーで位置復帰。
+   */
+  function initYearTabs(containerId, paramName) {
+    var el = document.getElementById(containerId);
+    if (!el) return;
+    el.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-year]');
+      if (!btn || !el.contains(btn)) return;
+      var value = btn.getAttribute('data-year');
+      if (value === null || value === '') return;
+      reloadWithParam(paramName, value);
+    });
+  }
+
+  /**
+   * [data-href] 属性付きカードを全面クリック可能にする。
+   * 内部の操作要素（select / a / button / input / textarea / label）への
+   * クリックは遷移させない（stopPropagation ではなく closest() で判定する）。
+   * キーボード操作（Enter / Space）でも遷移可能にして role="link" の体裁を保つ。
+   */
+  function initCardLinks() {
+    var INTERACTIVE_SELECTOR = 'a, button, input, select, textarea, label, [contenteditable]';
+    var cards = document.querySelectorAll('[data-href]');
+    Array.prototype.forEach.call(cards, function (card) {
+      card.addEventListener('click', function (e) {
+        if (e.target.closest(INTERACTIVE_SELECTOR)) return;
+        var href = card.getAttribute('data-href');
+        if (href) window.location.href = href;
+      });
+      card.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        if (e.target.closest(INTERACTIVE_SELECTOR)) return;
+        var href = card.getAttribute('data-href');
+        if (href) {
+          e.preventDefault();
+          window.location.href = href;
+        }
+      });
+    });
+  }
+
+  function reloadWithParam(paramName, value) {
+    try {
+      var url = new URL(window.location.href);
+      url.searchParams.set(paramName, value);
+      url.hash = 'perf-summary';
+      window.location.href = url.toString();
+    } catch (e) {
+      // URL API 非対応ブラウザ向けフォールバック
+      var base = window.location.href.split('#')[0];
+      var sep = base.indexOf('?') >= 0 ? '&' : '?';
+      window.location.href = base + sep
+        + encodeURIComponent(paramName) + '=' + encodeURIComponent(value)
+        + '#perf-summary';
+    }
   }
 
   // ─── API 呼び出し ─────────────────────────────────────────────────
@@ -120,7 +168,7 @@
     if (highEl) {
       highEl.textContent = data.high_priority + ' 件';
       // danger クラスは高優先度 > 0 のときのみ付与
-      var base = 'biz-metric-value high';
+      var base = 'metric-cell-value high';
       highEl.className = data.high_priority > 0 ? base + ' danger' : base;
     }
     setCardText('card-accident', '.normal', data.normal_priority + ' 件');

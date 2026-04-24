@@ -89,11 +89,6 @@ final class RenewalNotificationBatchService
                             continue;
                         }
 
-                        if ($this->repository->hasDeliveryForSchedule($renewalCaseId, $phaseId, $runDate)) {
-                            $skipCount++;
-                            continue;
-                        }
-
                         $notificationKey = $this->resolveRetryNotificationKey((int) ($target['days_before'] ?? -1));
                         if ($notificationKey === null) {
                             $this->repository->updateDeliveryForRetry(
@@ -196,6 +191,15 @@ final class RenewalNotificationBatchService
                 ];
             }
 
+            $sortedDays = array_map(static fn($d) => (int) $d['days_before'], $notificationDefinitions);
+            sort($sortedDays);
+            $lowerBoundByDays = [];
+            $prev = -1;
+            foreach ($sortedDays as $d) {
+                $lowerBoundByDays[$d] = $prev + 1;
+                $prev = $d;
+            }
+
             foreach ($notificationDefinitions as $definition) {
                 $phase = $this->repository->findPhaseForDaysBefore((int) $definition['days_before']);
                 if (!is_array($phase)) {
@@ -207,7 +211,9 @@ final class RenewalNotificationBatchService
                     continue;
                 }
 
-                $targets = $this->repository->findRenewalTargetsByExactDays($runDate, (int) $definition['days_before']);
+                $fromDaysBefore = (int) $definition['days_before'];
+                $toDaysBefore   = $lowerBoundByDays[$fromDaysBefore] ?? 0;
+                $targets = $this->repository->findRenewalTargetsByPhase($runDate, $fromDaysBefore, $toDaysBefore);
                 $deliverableTargets = [];
 
                 foreach ($targets as $target) {

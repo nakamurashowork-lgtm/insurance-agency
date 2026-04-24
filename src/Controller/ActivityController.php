@@ -46,15 +46,36 @@ final class ActivityController
         $customers = [];
         $staffUsers = [];
         $activityTypes = [];
+        $quickFilterCounts = [];
         $error = null;
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
             $activityTypes = (new ActivityTypeRepository($pdo))->findActiveMap();
 
+            // ログイン中スタッフの m_staff.id を解決（user_id 一致 → display_name 一致で fallback）
+            $staffUsers     = (new StaffRepository($pdo))->findActive();
+            $loginUserName  = trim((string) ($auth['display_name'] ?? ''));
+            $loginStaffId   = 0;
+            $fallbackByName = 0;
+            foreach ($staffUsers as $u) {
+                $uid   = (int) ($u['user_id'] ?? 0);
+                $sid   = (int) ($u['id'] ?? 0);
+                $sname = trim((string) ($u['staff_name'] ?? ''));
+                if ($loginUserId > 0 && $uid === $loginUserId) { $loginStaffId = $sid; break; }
+                if ($fallbackByName === 0 && $loginUserName !== '' && $sname === $loginUserName) {
+                    $fallbackByName = $sid;
+                }
+            }
+            if ($loginStaffId === 0) { $loginStaffId = $fallbackByName; }
+
+            $searchCriteria = $criteria;
+            $searchCriteria['_login_staff_id'] = (string) $loginStaffId;
+            $searchCriteria['_today']          = $today;
+
             $repository = new ActivityRepository($pdo);
             $result = $repository->searchPage(
-                $criteria,
+                $searchCriteria,
                 (int) $listState['page'],
                 (int) $listState['per_page'],
                 (string) $listState['sort'],
@@ -65,7 +86,7 @@ final class ActivityController
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
             $listUrl = $this->listUrl($criteria, $listState);
             $customers = $repository->fetchCustomers(500);
-            $staffUsers = (new StaffRepository($pdo))->findActive();
+            $quickFilterCounts = $repository->countByQuickFilters($criteria, $loginStaffId, $today);
             $staffUserNames = $this->buildUserNameMap($staffUsers);
             $rows = $this->attachStaffNamesToRows($rows, $staffUserNames);
         } catch (Throwable) {
@@ -81,7 +102,7 @@ final class ActivityController
             $criteria,
             $listState,
             $staffUsers,
-            $listUrl,
+            $this->config->routeUrl('activity/list'),
             $this->config->routeUrl('activity/detail'),
             $this->config->routeUrl('activity/daily'),
             $this->config->routeUrl('customer/detail'),
@@ -91,7 +112,8 @@ final class ActivityController
             $activityTypes,
             $isAdmin,
             (string) ($_GET['filter_open'] ?? '') === '1',
-            ControllerLayoutHelper::build($this->guard, $this->config, 'activity')
+            ControllerLayoutHelper::build($this->guard, $this->config, 'activity'),
+            $quickFilterCounts
         ));
     }
 
@@ -590,12 +612,18 @@ final class ActivityController
         $dateFrom = trim((string) ($source['activity_date_from'] ?? ''));
         $dateTo   = trim((string) ($source['activity_date_to'] ?? ''));
 
+        $quickFilter = trim((string) ($source['quick_filter'] ?? ''));
+        if (!in_array($quickFilter, ['today', 'week', 'mine'], true)) {
+            $quickFilter = '';
+        }
+
         return [
             'activity_date_from'  => $dateFrom,
             'activity_date_to'    => $dateTo,
             'customer_name'       => trim((string) ($source['customer_name'] ?? '')),
             'activity_type'       => trim((string) ($source['activity_type'] ?? '')),
             'staff_id'            => trim((string) ($source['staff_id'] ?? '')),
+            'quick_filter'        => $quickFilter,
         ];
     }
 

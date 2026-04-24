@@ -7,6 +7,7 @@ use App\Domain\SalesCase\SalesCaseRepository;
 use App\Presentation\View\Layout;
 use App\Presentation\View\ListPageRenderer as LP;
 use App\Presentation\View\ListViewHelper;
+use App\Presentation\View\StatusBadge;
 
 final class SalesCaseListView
 {
@@ -40,7 +41,8 @@ final class SalesCaseListView
         ?string $flashSuccess,
         ?string $errorMessage,
         array $layoutOptions,
-        array $salesCaseStatuses = []
+        array $salesCaseStatuses = [],
+        array $quickFilterCounts = []
     ): string {
         $noticeHtml = '';
         if (is_string($flashError) && $flashError !== '') {
@@ -54,63 +56,76 @@ final class SalesCaseListView
         }
 
         $perPage    = (int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE);
-        $filterOpen = ListViewHelper::hasActiveFilters($criteria);
         $pager      = ListViewHelper::buildPager((int) ($listState['page'] ?? '1'), $perPage, $total);
         $listState['page'] = (string) ($pager['currentPage'] ?? 1);
 
         $topToolbar  = LP::toolbar($listUrl, $criteria, $listState, $pager, $total, $perPage);
         $bottomPager = LP::bottomPager($listUrl, $criteria, $listState, $pager);
 
-        $filterFormHtml = self::renderFilterForm($criteria, $listUrl, $staffUsers, $listState, $salesCaseStatuses);
-        $tableHtml = '<div class="table-wrap">'
+        // 絞込バッジ件数（case_name=検索バー以外）
+        $advancedFilterCount = 0;
+        foreach (['customer_name', 'status', 'prospect_rank', 'staff_id'] as $k) {
+            if ((string) ($criteria[$k] ?? '') !== '') {
+                $advancedFilterCount++;
+            }
+        }
+
+        $toolbarHtml = LP::searchToolbar([
+            'searchUrl'         => $listUrl,
+            'searchParam'       => 'case_name',
+            'searchValue'       => (string) ($criteria['case_name'] ?? ''),
+            'searchPlaceholder' => '見込案件名で検索',
+            'criteria'          => $criteria,
+            'listState'         => $listState,
+            'filterDialogId'    => 'scase-filter-dialog',
+            'advancedCount'     => $advancedFilterCount,
+            'headerActions'     => '<button class="btn btn-primary" type="button" data-open-dialog="sales-case-create-dialog">＋ 見込案件登録</button>',
+        ]);
+
+        $quickFilterTabsHtml = LP::quickFilterTabs([
+            'currentKey' => (string) ($criteria['quick_filter'] ?? ''),
+            'tabs' => [
+                ''          => ['label' => 'すべて',          'countKey' => 'all'],
+                'high_open' => ['label' => '高見込度・未成約', 'countKey' => 'high_open'],
+                'open'      => ['label' => '未成約',          'countKey' => 'open'],
+                'mine'      => ['label' => '自分',            'countKey' => 'mine'],
+                'completed' => ['label' => '成約',            'countKey' => 'completed'],
+            ],
+            'counts'    => $quickFilterCounts,
+            'paramName' => 'quick_filter',
+            'searchUrl' => $listUrl,
+            'criteria'  => $criteria,
+            'listState' => $listState,
+        ]);
+
+        $filterDialogHtml = self::renderFilterDialog($criteria, $listUrl, $staffUsers, $listState, $salesCaseStatuses);
+
+        $tableHtml = '<div class="table-wrap list-pc-only">'
             . self::renderTable($rows, $detailBaseUrl, $customerDetailBaseUrl, $deleteUrl, $deleteCsrf, $listUrl, $criteria, $listState, $salesCaseStatuses)
-            . '</div>';
+            . '</div>'
+            . LP::mobileCardList(
+                $rows,
+                fn (array $row): string => self::buildMobileCardHtml($row, $detailBaseUrl),
+                '見込案件一覧（モバイル表示）'
+            );
 
 
         $content =
             '<div class="list-page-frame">'
-            . LP::pageHeader('見込案件一覧', '<button class="btn btn-primary" type="button" data-open-dialog="sales-case-create-dialog">＋ 見込案件登録</button>')
+            . LP::pageHeader('見込案件一覧', '')
             . $noticeHtml
-            . $filterFormHtml
+            . $toolbarHtml
+            . $quickFilterTabsHtml
             . LP::tableCard($topToolbar, $tableHtml, $bottomPager)
             . '</div>'
-            . '<dialog id="dlg-delete-scase-confirm" class="modal-dialog">'
-            . '<div class="modal-head"><h2>削除の確認</h2>'
-            . '<button type="button" class="modal-close" id="dlg-delete-scase-close">×</button>'
-            . '</div>'
-            . '<p id="dlg-delete-scase-msg" style="margin:16px 0;"></p>'
-            . '<div class="dialog-actions">'
-            . '<button type="button" id="dlg-delete-scase-ok" class="btn btn-danger">削除する</button>'
-            . '<button type="button" id="dlg-delete-scase-cancel" class="btn btn-ghost">キャンセル</button>'
-            . '</div>'
-            . '</dialog>'
-            . '<script>(function(){'
-            . 'var dlgD=document.getElementById("dlg-delete-scase-confirm");'
-            . 'if(dlgD&&typeof dlgD.showModal==="function"){'
-            . 'var msgD=document.getElementById("dlg-delete-scase-msg");'
-            . 'var pendingId=null;'
-            . 'document.querySelectorAll("[data-delete-form]").forEach(function(btn){'
-            . 'btn.addEventListener("click",function(){'
-            . 'pendingId=btn.getAttribute("data-delete-form");'
-            . 'var label=btn.getAttribute("data-delete-label")||"この件";'
-            . 'msgD.textContent="「"+label+"」を削除しますか？この操作は取り消せません。";'
-            . 'if(!dlgD.open){dlgD.showModal();}});});'
-            . 'function closeDlgD(){if(dlgD.open){dlgD.close();}pendingId=null;}'
-            . 'document.getElementById("dlg-delete-scase-ok").addEventListener("click",function(){'
-            . 'if(pendingId){var f=document.getElementById(pendingId);if(f){f.submit();}}'
-            . 'closeDlgD();});'
-            . 'document.getElementById("dlg-delete-scase-cancel").addEventListener("click",closeDlgD);'
-            . 'document.getElementById("dlg-delete-scase-close").addEventListener("click",closeDlgD);'
-            . '}}());</script>'
+            . LP::deleteConfirmDialog([
+                'deleteUrl' => $deleteUrl,
+                'csrfToken' => $deleteCsrf,
+                'listQuery' => LP::queryParams($criteria, $listState),
+            ])
+            . $filterDialogHtml
             . self::renderCreateDialog($storeUrl, $storeCsrf, $customers, $staffUsers, $productCategories, $loginStaffId, $listUrl, $salesCaseStatuses)
-            . '<script>(function(){'
-            . 'var dlg=document.getElementById("sales-case-create-dialog");'
-            . 'if(!dlg)return;'
-            . 'document.querySelectorAll("[data-open-dialog=\'sales-case-create-dialog\']").forEach(function(btn){'
-            . 'btn.addEventListener("click",function(){if(typeof dlg.showModal==="function"&&!dlg.open){dlg.showModal();}});});'
-            . 'dlg.querySelectorAll("[data-close-dialog=\'sales-case-create-dialog\']").forEach(function(btn){'
-            . 'btn.addEventListener("click",function(){if(dlg.open){dlg.close();}});});'
-            . '})();</script>';
+            . LP::dialogScript(['sales-case-create-dialog', 'scase-filter-dialog']);
 
         return Layout::render('見込案件一覧', $content, $layoutOptions);
     }
@@ -121,14 +136,13 @@ final class SalesCaseListView
      * @param array<string, string>                 $listState
      * @param array<int, array<string, mixed>> $salesCaseStatuses
      */
-    private static function renderFilterForm(
+    private static function renderFilterDialog(
         array $criteria,
         string $listUrl,
         array $staffUsers,
         array $listState,
         array $salesCaseStatuses = []
     ): string {
-        $caseName     = Layout::escape($criteria['case_name'] ?? '');
         $customerName = Layout::escape($criteria['customer_name'] ?? '');
         $selStatus    = $criteria['status'] ?? '';
         $selRank      = $criteria['prospect_rank'] ?? '';
@@ -154,29 +168,22 @@ final class SalesCaseListView
             $staffOptions .= '<option value="' . $uid . '"' . $sel . '>' . $name . '</option>';
         }
 
-        return '<div class="search-panel-compact">'
-            . '<div class="toggle-header">'
-            . '<span class="toggle-header-title">検索条件を閉じる</span>'
-            . '<span class="toggle-header-arrow">▲</span>'
-            . '</div>'
-            . '<div class="search-panel-body">'
-            . '<form method="get" action="' . Layout::escape(LP::formAction($listUrl)) . '">'
-            . LP::routeInput($listUrl)
-            . LP::hiddenInputs(LP::queryParams([], $listState, false))
-            . '<div class="search-row">'
-            . '<div class="search-field"><span class="search-label">見込案件名</span><input type="text" name="case_name" class="compact-input w-md" value="' . $caseName . '"></div>'
-            . '<div class="search-field"><span class="search-label">顧客名</span><input type="text" name="customer_name" class="compact-input w-md" value="' . $customerName . '"></div>'
-            . '<div class="search-field"><span class="search-label">担当者</span><select name="staff_id" class="compact-input w-md">' . $staffOptions . '</select></div>'
-            . '<div class="search-field"><span class="search-label">対応状況</span><select name="status" class="compact-input w-md">' . $statusOptions . '</select></div>'
-            . '<div class="search-field"><span class="search-label">見込度</span><select name="prospect_rank" class="compact-input w-sm">' . $rankOptions . '</select></div>'
-            . '<div class="search-actions">'
-            . '<button type="submit" class="btn btn-small">検索</button>'
-            . '<a href="' . Layout::escape($listUrl) . '" class="btn btn-small btn-secondary">クリア</a>'
-            . '</div>'
-            . '</div>'
-            . '</form>'
-            . '</div>'
-            . '</div>';
+        return LP::filterDialog([
+            'id'        => 'scase-filter-dialog',
+            'title'     => '絞り込み条件',
+            'searchUrl' => $listUrl,
+            'listState' => $listState,
+            'preserveCriteria' => [
+                'quick_filter' => (string) ($criteria['quick_filter'] ?? ''),
+            ],
+            'fields'    => [
+                ['label' => '顧客名',   'html' => '<input type="text" name="customer_name" value="' . $customerName . '" placeholder="部分一致">'],
+                ['label' => '担当者',   'html' => '<select name="staff_id">' . $staffOptions . '</select>'],
+                ['label' => '対応状況', 'html' => '<select name="status">' . $statusOptions . '</select>'],
+                ['label' => '見込度',   'html' => '<select name="prospect_rank">' . $rankOptions . '</select>'],
+            ],
+            'clearUrl'  => $listUrl,
+        ]);
     }
 
     /**
@@ -203,10 +210,9 @@ final class SalesCaseListView
             }
         }
         $colgroup = '<colgroup>'
-            . '<col class="list-col-name">'
-            . '<col class="list-col-customer">'
-            . '<col class="list-col-type">'
             . '<col class="list-col-rank">'
+            . '<col class="list-col-name">'
+            . '<col class="list-col-product">'
             . '<col class="list-col-status">'
             . '<col class="list-col-staff">'
             . '<col class="list-col-action">'
@@ -214,10 +220,9 @@ final class SalesCaseListView
 
         $thead =
             '<thead><tr>'
-            . '<th>' . LP::sortLink('見込案件名', 'case_name', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th>' . LP::sortLink('顧客名', 'customer_name', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th>' . LP::sortLink('種別', 'case_type', $searchUrl, $criteria, $listState) . '</th>'
             . '<th style="text-align:center;white-space:nowrap;">' . LP::sortLink('見込度', 'prospect_rank', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('見込案件名', 'case_name', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>種目</th>'
             . '<th>' . LP::sortLink('対応状況', 'status', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>担当者</th>'
             . '<th></th>'
@@ -225,57 +230,99 @@ final class SalesCaseListView
 
         if ($rows === []) {
             return '<table class="table-fixed table-card list-table list-table-scase">' . $colgroup . $thead
-                . '<tbody><tr><td colspan="7">該当する見込案件はありません。</td></tr></tbody></table>';
+                . '<tbody><tr><td colspan="6">該当する見込案件はありません。</td></tr></tbody></table>';
         }
 
         $tbody = '<tbody>';
         foreach ($rows as $row) {
             $id           = (int) ($row['id'] ?? 0);
-            $customerId   = (int) ($row['customer_id'] ?? 0);
             $customerName = (string) ($row['customer_name'] ?? '') ?: (string) ($row['prospect_name'] ?? '');
             $caseName     = (string) ($row['case_name'] ?? '');
             $caseType     = (string) ($row['case_type'] ?? '');
-            $productType  = (string) ($row['product_type'] ?? '');
             $rank         = (string) ($row['prospect_rank'] ?? '');
-            $closeMonth   = (string) ($row['expected_contract_month'] ?? '');
             $status       = (string) ($row['status'] ?? '');
             $staffName    = (string) ($row['staff_name'] ?? '');
 
             $caseTypeLabel = SalesCaseRepository::ALLOWED_CASE_TYPES[$caseType] ?? $caseType;
 
-            $custUrl  = $customerId > 0
-                ? Layout::escape(ListViewHelper::buildUrl($customerDetailBaseUrl, ['id' => (string) $customerId]))
-                : '';
-            $custLink = $custUrl !== ''
-                ? '<a class="text-link" href="' . $custUrl . '">' . Layout::escape($customerName) . '</a>'
-                : Layout::escape($customerName);
-
             $detailUrl  = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, ['id' => (string) $id]));
-            $deleteFormId = 'form-del-scase-' . $id;
-            $deleteForm = '<form id="' . $deleteFormId . '" method="post" action="' . Layout::escape($deleteUrl) . '" style="display:inline;">'
-                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($deleteCsrf) . '">'
-                . '<input type="hidden" name="id" value="' . $id . '">'
-                . '<button type="button" class="btn-icon-delete" title="削除"'
-                . ' data-delete-form="' . $deleteFormId . '"'
-                . ' data-delete-label="' . Layout::escape($caseName) . '">'
-                . '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>'
-                . '</button>'
-                . '</form>';
+            $deleteLabel = $caseName !== '' ? $caseName : ('ID: ' . $id);
+
+            $secondaryHtml = $customerName !== ''
+                ? '<div class="list-row-secondary">' . Layout::escape($customerName) . '</div>'
+                : '';
+
+            $rankCtx   = StatusBadge::renderByRank($rank);
+            $rankBadge = $rank !== ''
+                ? '<span class="badge ' . $rankCtx['badge'] . '">' . Layout::escape($rankCtx['label']) . '</span>'
+                : '<span class="muted">-</span>';
 
             $rowClass = isset($completedNames[$status]) ? ' class="is-completed-row"' : '';
-            $tbody .= '<tr' . $rowClass . '>'
-                . '<td class="cell-ellipsis" data-label="見込案件名" title="' . Layout::escape($caseName) . '"><a class="text-link" href="' . $detailUrl . '">' . Layout::escape($caseName) . '</a></td>'
-                . '<td class="cell-ellipsis" data-label="顧客名" title="' . Layout::escape($customerName) . '">' . $custLink . '</td>'
-                . '<td class="cell-ellipsis" data-label="種別" title="' . Layout::escape($caseTypeLabel) . '">' . Layout::escape($caseTypeLabel) . '</td>'
-                . '<td data-label="見込度" style="text-align:center;">' . self::rankBadge($rank) . '</td>'
-                . '<td data-label="対応状況" style="white-space:nowrap;">' . self::statusBadge($status) . '</td>'
+            $tbody .= '<tr' . $rowClass . ' data-urgency="' . Layout::escape($rankCtx['urgency']) . '">'
+                . '<td class="td-pair" data-label="見込度" style="text-align:center;">' . $rankBadge . '</td>'
+                . '<td data-label="見込案件名">'
+                . '<div class="list-row-stack">'
+                . '<a class="list-row-primary text-link" href="' . $detailUrl . '" title="' . Layout::escape($caseName) . '">' . Layout::escape($caseName) . '</a>'
+                . $secondaryHtml
+                . '</div>'
+                . '</td>'
+                . '<td class="cell-ellipsis" data-label="種目" title="' . Layout::escape($caseTypeLabel) . '">' . Layout::escape($caseTypeLabel) . '</td>'
+                . '<td class="td-pair" data-label="対応状況" style="white-space:nowrap;">' . self::statusBadge($status) . '</td>'
                 . '<td class="cell-ellipsis" data-label="担当者" title="' . Layout::escape($staffName) . '">' . Layout::escape($staffName) . '</td>'
-                . '<td style="text-align:center;">' . $deleteForm . '</td>'
+                . '<td style="text-align:center;">' . LP::deleteButton($id, $deleteLabel) . '</td>'
                 . '</tr>';
         }
         $tbody .= '</tbody>';
 
         return '<table class="table-fixed table-card list-table list-table-scase">' . $colgroup . $thead . $tbody . '</table>';
+    }
+
+    /**
+     * モバイル用 list-card HTML（事故案件カードと同じ構成）。
+     *
+     * @param array<string, mixed> $row
+     */
+    private static function buildMobileCardHtml(array $row, string $detailBaseUrl): string
+    {
+        $id              = (int) ($row['id'] ?? 0);
+        $customerName    = (string) ($row['customer_name'] ?? '') ?: (string) ($row['prospect_name'] ?? '');
+        $caseName        = (string) ($row['case_name'] ?? '');
+        $caseType        = (string) ($row['case_type'] ?? '');
+        $caseTypeLabel   = SalesCaseRepository::ALLOWED_CASE_TYPES[$caseType] ?? $caseType;
+        $rank            = (string) ($row['prospect_rank'] ?? '');
+        $status          = (string) ($row['status'] ?? '');
+        $staffName       = (string) ($row['staff_name'] ?? '');
+        $expectedMonth   = (string) ($row['expected_contract_month'] ?? '');
+        $detailUrl       = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, ['id' => (string) $id]));
+
+        $rankCtx   = StatusBadge::renderByRank($rank);
+        $rankBadge = $rank !== ''
+            ? '<span class="badge ' . $rankCtx['badge'] . '">' . Layout::escape($rankCtx['label']) . '</span>'
+            : '';
+        $statusBadge = '<span class="badge badge-gray">' . Layout::escape($status !== '' ? $status : '未設定') . '</span>';
+
+        $iconCalendar = '<svg class="list-card-meta-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
+        $iconTag      = '<svg class="list-card-meta-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>';
+        $iconUser     = '<svg class="list-card-meta-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+
+        return '<li class="list-card with-stripe" data-urgency="' . Layout::escape($rankCtx['urgency']) . '">'
+            . '<span class="list-card-stripe ' . Layout::escape($rankCtx['stripe']) . '" aria-hidden="true"></span>'
+            . '<a class="list-card-link" href="' . $detailUrl . '">'
+            . '<div class="list-card-top">'
+            . '<span class="list-card-top-left">' . $rankBadge
+            . ($caseTypeLabel !== '' ? '<span class="list-card-product">' . Layout::escape($caseTypeLabel) . '</span>' : '')
+            . '</span>'
+            . '<span class="list-card-top-right">' . $statusBadge . '</span>'
+            . '</div>'
+            . '<div class="list-card-customer">' . Layout::escape($customerName !== '' ? $customerName : '（顧客未設定）') . '</div>'
+            . '<div class="list-card-policy">案件名: ' . ($caseName !== '' ? Layout::escape($caseName) : '−') . '</div>'
+            . '<div class="list-card-meta">'
+            . '<span class="list-card-meta-item">' . $iconCalendar . '<span class="list-card-meta-value">' . ($expectedMonth !== '' ? Layout::escape($expectedMonth) : '−') . '</span></span>'
+            . '<span class="list-card-meta-item">' . $iconTag . '<span class="list-card-meta-value">' . ($caseTypeLabel !== '' ? Layout::escape($caseTypeLabel) : '−') . '</span></span>'
+            . '<span class="list-card-meta-item">' . $iconUser . '<span class="list-card-meta-value">' . ($staffName !== '' ? Layout::escape($staffName) : '−') . '</span></span>'
+            . '</div>'
+            . '</a>'
+            . '</li>';
     }
 
     private static function rankBadge(string $rank): string

@@ -267,11 +267,12 @@ final class AccidentNotificationBatchService
 
         $todayWeekday = (int) $date->format('N');
         $weekdaysCsv = (string) ($rule['weekdays_csv'] ?? '');
-        if ($weekdaysCsv !== '') {
-            $weekdays = array_map('intval', explode(',', $weekdaysCsv));
-            if (!in_array($todayWeekday, $weekdays, true)) {
-                return false;
-            }
+        if ($weekdaysCsv === '') {
+            return false;
+        }
+        $weekdays = array_map('intval', explode(',', $weekdaysCsv));
+        if (!in_array($todayWeekday, $weekdays, true)) {
+            return false;
         }
 
         $startDate = (string) ($rule['start_date'] ?? '');
@@ -300,8 +301,10 @@ final class AccidentNotificationBatchService
             return false;
         }
 
-        $intervalDays = $intervalWeeks * 7;
-        if ($dayDiff % $intervalDays !== 0) {
+        $baseMonday = $base->modify('-' . ((int) $base->format('N') - 1) . ' days');
+        $todayMonday = $date->modify('-' . ((int) $date->format('N') - 1) . ' days');
+        $weeksSinceBase = (int) ($baseMonday->diff($todayMonday)->format('%r%a')) / 7;
+        if ($weeksSinceBase % $intervalWeeks !== 0) {
             return false;
         }
 

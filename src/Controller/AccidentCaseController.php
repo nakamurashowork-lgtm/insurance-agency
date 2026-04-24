@@ -35,18 +35,24 @@ final class AccidentCaseController
 
         $criteria = $this->extractCriteria($_GET);
         $listState = $this->extractListState($_GET);
+        $loginUserId = (int) ($auth['user_id'] ?? 0);
+
+        // buildWhereClause に login user id を伝えるための内部キー
+        $searchCriteria = $criteria;
+        $searchCriteria['_login_user_id'] = (string) $loginUserId;
 
         $rows = [];
         $total = 0;
         $customerOptions = [];
         $accidentStatuses = [];
+        $quickFilterCounts = [];
         $error = null;
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
             $repository = new AccidentCaseRepository($pdo);
             $result = $repository->searchPage(
-                $criteria,
+                $searchCriteria,
                 (int) $listState['page'],
                 (int) $listState['per_page'],
                 (string) $listState['sort'],
@@ -57,6 +63,7 @@ final class AccidentCaseController
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
             $customerOptions = $repository->fetchCustomers(500);
             $accidentStatuses = (new CaseStatusRepository($pdo))->findByType('accident');
+            $quickFilterCounts = $repository->countByQuickFilters($searchCriteria, $loginUserId);
 
             // 次回リマインド日を付与
             $caseIds = array_map(fn($r) => (int) ($r['id'] ?? 0), $rows);
@@ -115,7 +122,8 @@ final class AccidentCaseController
             $flashSuccess,
             (string) ($_GET['filter_open'] ?? '') === '1',
             ControllerLayoutHelper::build($this->guard, $this->config, 'accident'),
-            $accidentStatuses
+            $accidentStatuses,
+            $quickFilterCounts
         ));
     }
 
@@ -523,6 +531,10 @@ final class AccidentCaseController
     private function extractCriteria(array $source): array
     {
         $assignedUserId = (int) ($source['assigned_staff_id'] ?? 0);
+        $quickFilter = trim((string) ($source['quick_filter'] ?? ''));
+        if (!in_array($quickFilter, ['high_open', 'open', 'mine', 'completed'], true)) {
+            $quickFilter = '';
+        }
         return [
             'accepted_date_from' => trim((string) ($source['accepted_date_from'] ?? '')),
             'accepted_date_to'   => trim((string) ($source['accepted_date_to'] ?? '')),
@@ -532,6 +544,7 @@ final class AccidentCaseController
             'status'             => trim((string) ($source['status'] ?? '')),
             'priority'           => trim((string) ($source['priority'] ?? '')),
             'assigned_staff_id'  => $assignedUserId > 0 ? (string) $assignedUserId : '',
+            'quick_filter'       => $quickFilter,
         ];
     }
 

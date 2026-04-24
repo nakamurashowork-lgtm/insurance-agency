@@ -323,7 +323,7 @@ JSCODE;
             . '</div>'
 
             . '<label class="list-filter-field"><span>活動種別' . $req . '</span>'
-            . '<select name="activity_type" required>' . $typeOptionsHtml . '</select></label>'
+            . '<select name="activity_type" required aria-required="true">' . $typeOptionsHtml . '</select></label>'
 
             . '<label class="list-filter-field"><span>用件区分</span>'
             . '<select name="purpose_type">' . $purposeOptionsHtml . '</select></label>'
@@ -332,7 +332,7 @@ JSCODE;
             . '<input type="text" name="visit_place" value="' . Layout::escape($visitPlaceVal) . '" maxlength="200"></label>'
 
             . '<label class="list-filter-field modal-form-wide"><span>活動概要' . $req . '</span>'
-            . '<input type="text" name="subject" required maxlength="200" value="' . Layout::escape($subjectVal) . '"></label>'
+            . '<input type="text" name="subject" required aria-required="true" maxlength="200" value="' . Layout::escape($subjectVal) . '"></label>'
 
             . '<label class="list-filter-field modal-form-wide"><span>活動詳細</span>'
             . '<textarea name="content_summary" maxlength="500" rows="4" style="width:100%;resize:vertical;">'
@@ -810,7 +810,7 @@ CBJS;
             . '</div>'
 
             . '<label class="list-filter-field"><span>活動種別' . $req . '</span>'
-            . '<select name="activity_type" required>' . $typeOptionsHtml . '</select></label>'
+            . '<select name="activity_type" required aria-required="true">' . $typeOptionsHtml . '</select></label>'
             . '<label class="list-filter-field"><span>用件区分</span>'
             . '<select name="purpose_type">' . $purposeOptionsHtml . '</select></label>'
 
@@ -818,7 +818,7 @@ CBJS;
             . '<input type="text" name="visit_place" value="' . Layout::escape($visitPlaceVal) . '" maxlength="200"></label>'
 
             . '<label class="list-filter-field modal-form-wide"><span>活動概要' . $req . '</span>'
-            . '<input type="text" name="subject" required maxlength="200" value="' . Layout::escape($subjectVal) . '"></label>'
+            . '<input type="text" name="subject" required aria-required="true" maxlength="200" value="' . Layout::escape($subjectVal) . '"></label>'
 
             . '<label class="list-filter-field modal-form-wide"><span>活動詳細</span>'
             . '<textarea name="content_summary" maxlength="500" rows="4" style="width:100%;resize:vertical;">'

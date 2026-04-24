@@ -33,7 +33,8 @@ final class ActivityListView
         array $allowedActivityTypes,
         bool $isAdmin,
         bool $forceFilterOpen,
-        array $layoutOptions
+        array $layoutOptions,
+        array $quickFilterCounts = []
     ): string {
         $noticeHtml = '';
         if (is_string($flashError) && $flashError !== '') {
@@ -46,16 +47,16 @@ final class ActivityListView
             $noticeHtml .= '<div class="error">' . Layout::escape($errorMessage) . '</div>';
         }
 
-        $perPage    = (int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE);
-        $filterOpen = $forceFilterOpen;
-        $pager      = ListViewHelper::buildPager((int) ($listState['page'] ?? '1'), $perPage, $totalCount);
+        $perPage = (int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE);
+        $pager   = ListViewHelper::buildPager((int) ($listState['page'] ?? '1'), $perPage, $totalCount);
         $listState['page'] = (string) ($pager['currentPage'] ?? 1);
 
-        $dateFrom          = Layout::escape((string) ($criteria['activity_date_from'] ?? ''));
-        $dateTo            = Layout::escape((string) ($criteria['activity_date_to'] ?? ''));
-        $customerName      = Layout::escape((string) ($criteria['customer_name'] ?? ''));
-        $activityType      = (string) ($criteria['activity_type'] ?? '');
-        $staffUserId       = (string) ($criteria['staff_id'] ?? '');
+        $dateFrom     = Layout::escape((string) ($criteria['activity_date_from'] ?? ''));
+        $dateTo       = Layout::escape((string) ($criteria['activity_date_to'] ?? ''));
+        $customerName = (string) ($criteria['customer_name'] ?? '');
+        $activityType = (string) ($criteria['activity_type'] ?? '');
+        $staffUserId  = (string) ($criteria['staff_id'] ?? '');
+
         // 活動種別セレクト
         $typeOptionsHtml = '<option value="">すべて</option>';
         foreach ($allowedActivityTypes as $val => $label) {
@@ -72,107 +73,219 @@ final class ActivityListView
             $staffOptionsHtml .= '<option value="' . $uid . '"' . $sel . '>' . Layout::escape($name) . '</option>';
         }
 
-        // 行HTML
+        // PC テーブル行
         $rowsHtml = '';
         foreach ($rows as $row) {
-            $id        = (int) ($row['id'] ?? 0);
-            $actDate   = (string) ($row['activity_date'] ?? '');
-            $custId    = (int) ($row['customer_id'] ?? 0);
-            $custName  = (string) ($row['customer_name'] ?? '');
-            $type      = (string) ($row['activity_type'] ?? '');
-            $typeLabel = $allowedActivityTypes[$type] ?? Layout::escape($type);
-            $subject   = (string) ($row['subject'] ?? '');
-            $summary   = (string) ($row['content_summary'] ?? '');
-            $nextDate  = (string) ($row['next_action_date'] ?? '');
-            $staffName = (string) ($row['staff_name'] ?? '');
-            $staffUid  = (int) ($row['staff_id'] ?? 0);
-
-            $detailUrl = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, ['id' => (string) $id, 'from' => 'list']));
-            $dailyUrl  = Layout::escape(ListViewHelper::buildUrl($dailyBaseUrl, ['date' => $actDate, 'staff' => (string) $staffUid]));
-            $custUrl   = $custId > 0 ? Layout::escape(ListViewHelper::buildUrl($customerDetailBaseUrl, ['id' => (string) $custId])) : '';
-
-            $isNullCustomer = ($row['customer_id'] === null || $row['customer_id'] === '');
-            $custHtml = $isNullCustomer
-                ? '<span style="color:#888;font-size:12px;">（顧客なし）</span>'
-                : ($custUrl !== ''
-                    ? '<a href="' . $custUrl . '" class="text-link">' . Layout::escape($custName) . '</a>'
-                    : Layout::escape($custName));
-
-            $rowsHtml .=
-                '<tr>'
-                . '<td data-label="活動日" style="white-space:nowrap;">' . Layout::escape($actDate) . '</td>'
-                . '<td class="cell-ellipsis" data-label="顧客名" title="' . Layout::escape($custName) . '">' . $custHtml . '</td>'
-                . '<td class="cell-ellipsis" data-label="活動概要" title="' . Layout::escape($subject) . '"><a href="' . $detailUrl . '" class="text-link">' . Layout::escape($subject) . '</a></td>'
-                . '<td class="cell-ellipsis" data-label="担当者" title="' . Layout::escape($staffName) . '">' . Layout::escape($staffName) . '</td>'
-                . '<td data-label="活動種別">' . Layout::escape($typeLabel) . '</td>'
-                . '<td data-label="次回予定日" style="white-space:nowrap;">' . Layout::escape($nextDate) . '</td>'
-                . '</tr>';
+            $rowsHtml .= self::buildTableRowHtml($row, $detailBaseUrl, $customerDetailBaseUrl, $allowedActivityTypes);
         }
-
         if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="6">該当する活動の記録がありません。</td></tr>';
+            $rowsHtml = '<tr><td colspan="5">該当する活動の記録がありません。</td></tr>';
         }
 
         $tableHtml =
-            '<div class="table-wrap">'
-            . '<table class="table-fixed table-card list-table list-table-activity">'
+            '<div class="table-wrap list-pc-only">'
+            . '<table class="table-fixed list-table list-table-activity">'
             . '<colgroup>'
             . '<col class="list-col-date">'
-            . '<col class="list-col-customer">'
-            . '<col>'
             . '<col class="list-col-type">'
+            . '<col>'
             . '<col class="list-col-user">'
             . '<col class="list-col-next">'
             . '</colgroup>'
             . '<thead><tr>'
-            . '<th>活動日</th><th>顧客名</th><th>活動概要</th>'
-            . '<th>担当者</th><th>活動種別</th><th>次回予定日</th>'
+            . '<th>' . LP::sortLink('活動日時', 'activity_date', $listUrl, $criteria, $listState) . '</th>'
+            . '<th>種別</th>'
+            . '<th>活動内容／顧客</th>'
+            . '<th>担当者</th>'
+            . '<th>' . LP::sortLink('次回予定日', 'next_action_date', $listUrl, $criteria, $listState) . '</th>'
             . '</tr></thead>'
             . '<tbody>' . $rowsHtml . '</tbody>'
             . '</table>'
-            . '</div>';
+            . '</div>'
+            . LP::mobileCardList(
+                $rows,
+                fn (array $row): string => self::buildMobileCardHtml($row, $detailBaseUrl, $customerDetailBaseUrl, $allowedActivityTypes),
+                '営業活動一覧（モバイル表示）'
+            );
+
+        // 絞り込みボタンのバッジ件数（customer_name 以外で適用中）
+        $advancedFilterCount = 0;
+        foreach (['activity_date_from', 'activity_date_to', 'activity_type', 'staff_id'] as $k) {
+            if ((string) ($criteria[$k] ?? '') !== '') {
+                $advancedFilterCount++;
+            }
+        }
+
+        // ツールバー（検索バー + 絞込ボタン）
+        // ページヘッダ: 営業日報ボタン（ツールバー右側に配置）
+        $dailyViewUrl      = Layout::escape(ListViewHelper::buildUrl($dailyBaseUrl, ['date' => date('Y-m-d'), 'staff' => $staffUserId]));
+        $headerActionsHtml = '<button type="button" class="btn btn-primary" onclick="location.href=\'' . $dailyViewUrl . '\'">日報を表示</button>';
+
+        $toolbarBarHtml = LP::searchToolbar([
+            'searchUrl'         => $listUrl,
+            'searchParam'       => 'customer_name',
+            'searchValue'       => $customerName,
+            'searchPlaceholder' => '顧客名で検索',
+            'criteria'          => $criteria,
+            'listState'         => $listState,
+            'filterDialogId'    => 'activity-filter-dialog',
+            'advancedCount'     => $advancedFilterCount,
+            'headerActions'     => $headerActionsHtml,
+        ]);
+
+        $currentQuickFilter = (string) ($criteria['quick_filter'] ?? '');
+        $quickFilterTabsHtml = LP::quickFilterTabs([
+            'currentKey' => $currentQuickFilter,
+            'tabs' => [
+                ''        => ['label' => 'すべて',   'countKey' => 'all'],
+                'today'   => ['label' => '今日',     'countKey' => 'today'],
+                'week'    => ['label' => '今週',     'countKey' => 'week'],
+                'mine'    => ['label' => '自分',     'countKey' => 'mine'],
+            ],
+            'counts'    => $quickFilterCounts,
+            'paramName' => 'quick_filter',
+            'searchUrl' => $listUrl,
+            'criteria'  => $criteria,
+            'listState' => $listState,
+        ]);
+
+        // フィルタダイアログ
+        $filterDialogHtml = LP::filterDialog([
+            'id'        => 'activity-filter-dialog',
+            'title'     => '絞り込み条件',
+            'searchUrl' => $listUrl,
+            'listState' => $listState,
+            'fields' => [
+                ['label' => '活動日（開始）', 'html' => '<input type="date" name="activity_date_from" value="' . $dateFrom . '">'],
+                ['label' => '活動日（終了）', 'html' => '<input type="date" name="activity_date_to" value="' . $dateTo . '">'],
+                ['label' => '活動種別', 'html' => '<select name="activity_type">' . $typeOptionsHtml . '</select>'],
+                ['label' => '担当者',   'html' => '<select name="staff_id">' . $staffOptionsHtml . '</select>'],
+            ],
+            'preserveCriteria' => ['quick_filter' => $currentQuickFilter],
+            'clearUrl' => $listUrl,
+        ]);
 
         $topToolbar  = LP::toolbar($listUrl, $criteria, $listState, $pager, $totalCount, $perPage);
         $bottomPager = LP::bottomPager($listUrl, $criteria, $listState, $pager);
 
-        $filterPanelHtml =
-            '<div class="search-panel-compact">'
-            . '<div class="toggle-header">'
-            . '<span class="toggle-header-title">検索条件を閉じる</span>'
-            . '<span class="toggle-header-arrow">▲</span>'
-            . '</div>'
-            . '<div class="search-panel-body">'
-            . '<form method="get" action="' . Layout::escape(LP::formAction($listUrl)) . '">'
-            . LP::routeInput($listUrl)
-            . LP::hiddenInputs(LP::queryParams([], $listState, false))
-            . '<div class="search-row">'
-            . '<div class="search-field date-range"><span class="search-label">活動日</span><input type="date" name="activity_date_from" class="compact-input w-date" value="' . $dateFrom . '"><span class="search-sep">〜</span><input type="date" name="activity_date_to" class="compact-input w-date" value="' . $dateTo . '"></div>'
-            . '<div class="search-field"><span class="search-label">顧客名</span><input type="text" name="customer_name" class="compact-input w-md" value="' . $customerName . '"></div>'
-            . '</div>'
-            . '<div class="search-row">'
-            . '<div class="search-field"><span class="search-label">活動種別</span><select name="activity_type" class="compact-input w-md">' . $typeOptionsHtml . '</select></div>'
-            . '<div class="search-field"><span class="search-label">担当者</span><select name="staff_id" class="compact-input w-md">' . $staffOptionsHtml . '</select></div>'
-            . '<div class="search-actions">'
-            . '<button class="btn btn-small" type="submit">検索</button>'
-            . '<a class="btn btn-small btn-secondary" href="' . Layout::escape($listUrl) . '">クリア</a>'
-            . '</div>'
-            . '</div>'
-            . '</form>'
-            . '</div>'
-            . '</div>';
-
-        $dailyViewUrl = Layout::escape(ListViewHelper::buildUrl($dailyBaseUrl, ['date' => date('Y-m-d'), 'staff' => $staffUserId]));
-        $headerActionsHtml = '<a href="' . $dailyViewUrl . '" class="btn">営業日報</a>';
-
         $content =
             '<div class="list-page-frame">'
-            . LP::pageHeader('営業活動一覧', $headerActionsHtml)
+            . LP::pageHeader('営業活動一覧', '')
             . $noticeHtml
-            . $filterPanelHtml
+            . $toolbarBarHtml
+            . $quickFilterTabsHtml
             . LP::tableCard($topToolbar, $tableHtml, $bottomPager)
-            . '</div>';
+            . '</div>'
+            . $filterDialogHtml
+            . LP::dialogScript(['activity-filter-dialog']);
 
         return Layout::render('営業活動一覧', $content, $layoutOptions);
     }
 
+    /**
+     * PC テーブル 1 行の HTML を生成する。
+     *
+     * @param array<string, mixed> $row
+     * @param array<string, string> $allowedActivityTypes
+     */
+    private static function buildTableRowHtml(
+        array $row,
+        string $detailBaseUrl,
+        string $customerDetailBaseUrl,
+        array $allowedActivityTypes
+    ): string {
+        $id        = (int) ($row['id'] ?? 0);
+        $actDate   = (string) ($row['activity_date'] ?? '');
+        $custId    = (int) ($row['customer_id'] ?? 0);
+        $custName  = (string) ($row['customer_name'] ?? '');
+        $type      = (string) ($row['activity_type'] ?? '');
+        $typeLabel = $allowedActivityTypes[$type] ?? $type;
+        $subject   = (string) ($row['subject'] ?? '');
+        $nextDate  = (string) ($row['next_action_date'] ?? '');
+        $staffName = (string) ($row['staff_name'] ?? '');
+
+        $detailUrl = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, ['id' => (string) $id, 'from' => 'list']));
+
+        $isNullCustomer = ($row['customer_id'] === null || $row['customer_id'] === '');
+        $custLabel = $isNullCustomer ? '（顧客なし）' : $custName;
+
+        $secondaryHtml = $custLabel !== ''
+            ? '<div class="list-row-secondary">' . Layout::escape($custLabel) . '</div>'
+            : '';
+
+        $primaryLabel = $subject !== '' ? $subject : '（件名なし）';
+
+        return '<tr>'
+            . '<td class="cell-date" data-label="活動日時" style="white-space:nowrap;">' . Layout::escape($actDate) . '</td>'
+            . '<td class="cell-ellipsis" data-label="種別" title="' . Layout::escape($typeLabel) . '">' . Layout::escape($typeLabel) . '</td>'
+            . '<td data-label="活動内容／顧客">'
+            . '<div class="list-row-stack">'
+            . '<a class="list-row-primary text-link" href="' . $detailUrl . '" title="' . Layout::escape($primaryLabel) . '">' . Layout::escape($primaryLabel) . '</a>'
+            . $secondaryHtml
+            . '</div>'
+            . '</td>'
+            . '<td class="cell-ellipsis" data-label="担当者" title="' . Layout::escape($staffName) . '">' . Layout::escape($staffName) . '</td>'
+            . '<td class="cell-date" data-label="次回予定日">' . Layout::escape($nextDate) . '</td>'
+            . '</tr>';
+    }
+
+    /**
+     * モバイル用 list-card の HTML を生成する（LP::mobileCardList から closure で呼ばれる）。
+     *
+     * @param array<string, mixed> $row
+     * @param array<string, string> $allowedActivityTypes
+     */
+    private static function buildMobileCardHtml(
+        array $row,
+        string $detailBaseUrl,
+        string $customerDetailBaseUrl,
+        array $allowedActivityTypes
+    ): string {
+        $id        = (int) ($row['id'] ?? 0);
+        $actDate   = (string) ($row['activity_date'] ?? '');
+        $custId    = (int) ($row['customer_id'] ?? 0);
+        $custName  = (string) ($row['customer_name'] ?? '');
+        $type      = (string) ($row['activity_type'] ?? '');
+        $typeLabel = $allowedActivityTypes[$type] ?? $type;
+        $subject   = (string) ($row['subject'] ?? '');
+        $nextDate  = (string) ($row['next_action_date'] ?? '');
+        $staffName = (string) ($row['staff_name'] ?? '');
+
+        $detailUrl = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, ['id' => (string) $id, 'from' => 'list']));
+
+        $customerLabel = $custId > 0 && $custName !== ''
+            ? $custName
+            : '（顧客なし）';
+
+        $summary = (string) ($row['content_summary'] ?? '');
+
+        $typeBadge = '<span class="badge badge-gray">' . Layout::escape($typeLabel !== '' ? $typeLabel : '活動') . '</span>';
+        $nextBadge = $nextDate !== ''
+            ? '<span class="badge badge-gray">次回 ' . Layout::escape($nextDate) . '</span>'
+            : '';
+
+        $iconCalendar = '<svg class="list-card-meta-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
+        $iconTag      = '<svg class="list-card-meta-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>';
+        $iconUser     = '<svg class="list-card-meta-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+
+        return '<li class="list-card with-stripe">'
+            . '<span class="list-card-stripe stripe-gray" aria-hidden="true"></span>'
+            . '<a class="list-card-link" href="' . $detailUrl . '">'
+            . '<div class="list-card-top">'
+            . '<span class="list-card-top-left">' . $typeBadge . '</span>'
+            . '<span class="list-card-top-right">' . $nextBadge . '</span>'
+            . '</div>'
+            . '<div class="list-card-customer">' . Layout::escape($customerLabel) . '</div>'
+            . '<div class="list-card-policy">' . Layout::escape($subject !== '' ? $subject : '（件名なし）') . '</div>'
+            . ($summary !== ''
+                ? '<div class="list-card-summary">' . Layout::escape($summary) . '</div>'
+                : '')
+            . '<div class="list-card-meta">'
+            . '<span class="list-card-meta-item">' . $iconCalendar . '<span class="list-card-meta-value">' . ($actDate !== '' ? Layout::escape($actDate) : '−') . '</span></span>'
+            . '<span class="list-card-meta-item">' . $iconTag . '<span class="list-card-meta-value">' . ($typeLabel !== '' ? Layout::escape($typeLabel) : '−') . '</span></span>'
+            . '<span class="list-card-meta-item">' . $iconUser . '<span class="list-card-meta-value">' . Layout::escape($staffName !== '' ? $staffName : '−') . '</span></span>'
+            . '</div>'
+            . '</a>'
+            . '</li>';
+    }
 }

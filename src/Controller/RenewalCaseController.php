@@ -46,6 +46,8 @@ final class RenewalCaseController
         $importRows = [];
         $allUsers = [];
         $renewalStatuses = [];
+        $quickFilterCounts = [];
+        $recentImportBatches = [];
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
@@ -60,6 +62,8 @@ final class RenewalCaseController
             $rows = $result['rows'];
             $total = (int) ($result['total'] ?? 0);
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
+            // クイックフィルタタブの件数（他 criteria と AND 結合）
+            $quickFilterCounts = $repository->countByQuickFilters($criteria);
             // フィルタ・表示用スタッフ一覧
             $staffList = (new StaffRepository($pdo))->findActive();
             $staffMap = [];
@@ -74,9 +78,12 @@ final class RenewalCaseController
             $allUsers = $staffList;
             $renewalStatuses = (new CaseStatusRepository($pdo))->findByType('renewal');
 
+            // 直近 5 件の取込履歴（モーダルで常時表示）
+            $sjnetRepo = new SjnetImportRepository($pdo);
+            $recentImportBatches = $sjnetRepo->findRecentBatches(5);
+
             $importBatchId = (int) ($_GET['import_batch_id'] ?? 0);
             if ($importBatchId > 0) {
-                $sjnetRepo = new SjnetImportRepository($pdo);
                 $importBatch = $sjnetRepo->findBatchById($importBatchId);
                 if ($importBatch !== null) {
                     $importRows = $sjnetRepo->findRowsByBatchId($importBatchId, 200);
@@ -115,7 +122,9 @@ final class RenewalCaseController
             ControllerLayoutHelper::build($this->guard, $this->config, 'renewal'),
             $flashSuccess,
             $renewalStatuses,
-            $this->config->routeUrl('customer/detail')
+            $this->config->routeUrl('customer/detail'),
+            $quickFilterCounts,
+            $recentImportBatches
         ));
     }
 
@@ -595,6 +604,12 @@ final class RenewalCaseController
             $window = 'all';
         }
 
+        // クイックフィルタタブ（「すべて / 対応遅れ / 満期7日前 / ... / 完了以外」）
+        $quickFilter = trim((string) ($source['quick_filter'] ?? ''));
+        if (!in_array($quickFilter, ['all', 'overdue', 'w7', 'w14', 'w28', 'w60', 'incomplete'], true)) {
+            $quickFilter = '';
+        }
+
         return [
             'customer_name'    => trim((string) ($source['customer_name'] ?? '')),
             'policy_no'        => trim((string) ($source['policy_no'] ?? '')),
@@ -602,6 +617,7 @@ final class RenewalCaseController
             'maturity_window'  => $window,
             'assigned_staff_id' => trim((string) ($source['assigned_staff_id'] ?? '')),
             'product_type'     => trim((string) ($source['product_type'] ?? '')),
+            'quick_filter'     => $quickFilter,
         ];
     }
 

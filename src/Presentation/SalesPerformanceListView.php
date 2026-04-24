@@ -47,7 +47,8 @@ final class SalesPerformanceListView
         ?string $fatalError,
         array $allowedTypes,
         bool $forceFilterOpen,
-        array $layoutOptions
+        array $layoutOptions,
+        array $quickFilterCounts = []
     ): string {
         $noticeHtml = '';
         if (is_string($flashError) && $flashError !== '') {
@@ -95,7 +96,47 @@ final class SalesPerformanceListView
         $topToolbar  = LP::toolbar($listUrl, $criteria, $listState, $pager, $totalCount, $perPage);
         $bottomPager = LP::bottomPager($listUrl, $criteria, $listState, $pager);
 
-        $filterFormHtml = self::renderSearchForm($criteria, $listState, $staffUsers, $performanceMonths, $listUrl);
+        // ツールバー + クイックフィルタチップ + フィルタダイアログ
+        $advancedFilterCount = 0;
+        foreach (['performance_fiscal_year', 'performance_month_num', 'source_type', 'performance_type', 'staff_id', 'product_type', 'policy_no', 'settlement_month'] as $k) {
+            if ((string) ($criteria[$k] ?? '') !== '') {
+                $advancedFilterCount++;
+            }
+        }
+
+        $headerActionsHtml = '<button type="button" class="btn btn-primary" onclick="location.href=\'' . Layout::escape($bulkUrl) . '\'">＋ 一括入力</button>';
+
+        $toolbarHtml = LP::searchToolbar([
+            'searchUrl'         => $listUrl,
+            'searchParam'       => 'customer_name',
+            'searchValue'       => (string) ($criteria['customer_name'] ?? ''),
+            'searchPlaceholder' => '契約者名で検索',
+            'criteria'          => $criteria,
+            'listState'         => $listState,
+            'filterDialogId'    => 'sales-filter-dialog',
+            'advancedCount'     => $advancedFilterCount,
+            'headerActions'     => $headerActionsHtml,
+        ]);
+
+        $currentQuickFilter = (string) ($criteria['quick_filter'] ?? '');
+        $quickFilterTabsHtml = LP::quickFilterTabs([
+            'currentKey' => $currentQuickFilter,
+            'tabs' => [
+                ''           => ['label' => 'すべて', 'countKey' => 'all'],
+                'this_month' => ['label' => '今月',   'countKey' => 'this_month'],
+                'this_fy'    => ['label' => '今年度', 'countKey' => 'this_fy'],
+                'mine'       => ['label' => '自分',   'countKey' => 'mine'],
+                'non_life'   => ['label' => '損保',   'countKey' => 'non_life'],
+                'life'       => ['label' => '生保',   'countKey' => 'life'],
+            ],
+            'counts'    => $quickFilterCounts,
+            'paramName' => 'quick_filter',
+            'searchUrl' => $listUrl,
+            'criteria'  => $criteria,
+            'listState' => $listState,
+        ]);
+
+        $filterDialogHtml = self::renderFilterDialog($criteria, $listState, $staffUsers, $performanceMonths, $listUrl, $currentQuickFilter);
 
         $tableHtml =
             '<div class="table-wrap">'
@@ -103,19 +144,17 @@ final class SalesPerformanceListView
             . '<colgroup>'
             . '<col class="list-col-date">'
             . '<col>'
-            . '<col class="list-col-staff">'
-            . '<col class="list-col-source">'
             . '<col class="list-col-product">'
+            . '<col class="list-col-staff">'
             . '<col class="list-col-premium">'
             . '<col class="list-col-action">'
             . '</colgroup>'
             . '<thead><tr>'
-            . '<th>' . LP::sortLink('計上日', 'performance_date', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . LP::sortLink('契約者名', 'customer_name', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . LP::sortLink('担当者名', 'staff_id', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . LP::sortLink('業務区分', 'source_type', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . LP::sortLink('種目', 'product_type', $listUrl, $criteria, $listState) . '</th>'
-            . '<th>' . LP::sortLink('保険料', 'premium_amount', $listUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('成績計上日', 'performance_date', $listUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('契約者名 / 証券番号', 'customer_name', $listUrl, $criteria, $listState) . '</th>'
+            . '<th>種目</th>'
+            . '<th>' . LP::sortLink('担当者', 'staff_id', $listUrl, $criteria, $listState) . '</th>'
+            . '<th style="text-align:right;">' . LP::sortLink('保険料', 'premium_amount', $listUrl, $criteria, $listState) . '</th>'
             . '<th></th>'
             . '</tr></thead>'
             . '<tbody>' . $rowsHtml . '</tbody>'
@@ -124,13 +163,14 @@ final class SalesPerformanceListView
 
         $content =
             '<div class="list-page-frame">'
-            . LP::pageHeader('成績管理一覧',
-                '<a class="btn btn-primary" href="' . Layout::escape($bulkUrl) . '">+ 一括入力</a>'
-            )
+            . LP::pageHeader('成績管理一覧', '')
             . $noticeHtml
-            . $filterFormHtml
+            . $toolbarHtml
+            . $quickFilterTabsHtml
             . LP::tableCard($topToolbar, $tableHtml, $bottomPager)
             . '</div>'
+            . $filterDialogHtml
+            . LP::dialogScript(['sales-filter-dialog'])
             . '<dialog id="sales-create-nonlife-dialog" class="modal-dialog modal-dialog-wide">'
             . '<form method="dialog" class="modal-close-form"><button type="submit" class="modal-close" aria-label="閉じる">×</button></form>'
             . '<div class="modal-head"><h2>成績を登録（損保）</h2></div>'
@@ -167,6 +207,78 @@ final class SalesPerformanceListView
      * @param array<int, array<string, mixed>> $staffUsers
      * @param array<int, string> $performanceMonths
      */
+    private static function renderFilterDialog(array $criteria, array $listState, array $staffUsers, array $performanceMonths, string $listUrl, string $currentQuickFilter): string
+    {
+        $selectedFY       = (string) ($criteria['performance_fiscal_year'] ?? '');
+        $selectedMonthNum = (string) ($criteria['performance_month_num'] ?? '');
+        $staffUserId      = (string) ($criteria['staff_id'] ?? '');
+        $selectedSourceType = (string) ($criteria['source_type'] ?? '');
+        $productType      = Layout::escape((string) ($criteria['product_type'] ?? ''));
+        $policyNo         = Layout::escape((string) ($criteria['policy_no'] ?? ''));
+
+        // 年度セレクト
+        $fiscalYears = [];
+        foreach ($performanceMonths as $ym) {
+            if (!preg_match('/^(\d{4})-(\d{2})$/', $ym, $m)) {
+                continue;
+            }
+            $fy = (int) $m[2] >= 4 ? (int) $m[1] : (int) $m[1] - 1;
+            $fyStr = (string) $fy;
+            if (!in_array($fyStr, $fiscalYears, true)) {
+                $fiscalYears[] = $fyStr;
+            }
+        }
+        if ($selectedFY !== '' && !in_array($selectedFY, $fiscalYears, true)) {
+            $fiscalYears[] = $selectedFY;
+        }
+        rsort($fiscalYears);
+        $fyOptions = '<option value="">すべて</option>';
+        foreach ($fiscalYears as $fy) {
+            $sel       = $fy === $selectedFY ? ' selected' : '';
+            $fyOptions .= '<option value="' . Layout::escape($fy) . '"' . $sel . '>' . Layout::escape($fy . '年度') . '</option>';
+        }
+
+        $monthOptions = '<option value="">すべて</option>';
+        foreach ([4,5,6,7,8,9,10,11,12,1,2,3] as $mn) {
+            $sel           = (string) $mn === $selectedMonthNum ? ' selected' : '';
+            $monthOptions .= '<option value="' . $mn . '"' . $sel . '>' . $mn . '月</option>';
+        }
+
+        $staffOptions = '<option value="">すべて</option>';
+        foreach ($staffUsers as $user) {
+            $id   = (int) ($user['id'] ?? 0);
+            $name = trim((string) ($user['staff_name'] ?? $user['name'] ?? ''));
+            if ($id <= 0 || $name === '') {
+                continue;
+            }
+            $sel          = $staffUserId !== '' && (int) $staffUserId === $id ? ' selected' : '';
+            $staffOptions .= '<option value="' . $id . '"' . $sel . '>' . Layout::escape($name) . '</option>';
+        }
+
+        $sourceSelectHtml = '<select name="source_type">'
+            . '<option value="">すべて</option>'
+            . '<option value="non_life"' . ($selectedSourceType === 'non_life' ? ' selected' : '') . '>損保</option>'
+            . '<option value="life"' . ($selectedSourceType === 'life' ? ' selected' : '') . '>生保</option>'
+            . '</select>';
+
+        return LP::filterDialog([
+            'id'        => 'sales-filter-dialog',
+            'title'     => '絞り込み条件',
+            'searchUrl' => $listUrl,
+            'listState' => $listState,
+            'preserveCriteria' => ['quick_filter' => $currentQuickFilter],
+            'fields' => [
+                ['label' => '年度',       'html' => '<select name="performance_fiscal_year">' . $fyOptions . '</select>'],
+                ['label' => '月',         'html' => '<select name="performance_month_num">' . $monthOptions . '</select>'],
+                ['label' => '業務区分',   'html' => $sourceSelectHtml],
+                ['label' => '担当者',     'html' => '<select name="staff_id">' . $staffOptions . '</select>'],
+                ['label' => '種目',       'html' => '<input type="text" name="product_type" value="' . $productType . '" placeholder="部分一致">'],
+                ['label' => '証券番号',   'html' => '<input type="text" name="policy_no" value="' . $policyNo . '" placeholder="部分一致">'],
+            ],
+            'clearUrl' => $listUrl,
+        ]);
+    }
+
     private static function renderSearchForm(array $criteria, array $listState, array $staffUsers, array $performanceMonths, string $listUrl): string
     {
         $selectedFY       = (string) ($criteria['performance_fiscal_year'] ?? '');
@@ -480,19 +592,31 @@ final class SalesPerformanceListView
                 . '</button>'
                 . '</form>';
 
+            $performanceDate = (string) ($row['performance_date'] ?? '');
+            $productType     = (string) ($row['product_type'] ?? '');
+            $policyNo        = (string) ($row['policy_no_display'] ?? $row['policy_no'] ?? '');
+            $secondaryHtml   = $policyNo !== ''
+                ? '<div class="list-row-secondary">' . Layout::escape($policyNo) . '</div>'
+                : '';
+            $primaryLabel = $customerName !== '' ? $customerName : '（契約者未設定）';
+
             $rowsHtml .= '<tr>'
-                . '<td data-label="計上日" style="white-space:nowrap;"><a class="text-link" href="' . $detailUrl . '">' . Layout::escape((string) ($row['performance_date'] ?? '')) . '</a></td>'
-                . '<td class="cell-ellipsis" data-label="契約者名" title="' . Layout::escape($customerName) . '">' . $customerHtml . '</td>'
-                . '<td class="cell-ellipsis" data-label="担当者名" title="' . Layout::escape((string) ($row['staff_user_name'] ?? '')) . '">' . Layout::escape((string) ($row['staff_user_name'] ?? '')) . '</td>'
-                . '<td data-label="業務区分">' . Layout::escape(self::businessLabel((string) ($row['source_type'] ?? ''), (string) ($row['performance_type'] ?? ''))) . '</td>'
-                . '<td class="cell-ellipsis" data-label="種目" title="' . Layout::escape((string) ($row['product_type'] ?? '')) . '">' . Layout::escape((string) ($row['product_type'] ?? '')) . '</td>'
+                . '<td class="cell-date" data-label="成績計上日" style="white-space:nowrap;">' . Layout::escape($performanceDate) . '</td>'
+                . '<td data-label="契約者名 / 証券番号">'
+                . '<div class="list-row-stack">'
+                . '<a class="list-row-primary text-link" href="' . $detailUrl . '" title="' . Layout::escape($primaryLabel) . '">' . Layout::escape($primaryLabel) . '</a>'
+                . $secondaryHtml
+                . '</div>'
+                . '</td>'
+                . '<td class="cell-ellipsis" data-label="種目" title="' . Layout::escape($productType) . '">' . Layout::escape($productType) . '</td>'
+                . '<td class="cell-ellipsis" data-label="担当者" title="' . Layout::escape((string) ($row['staff_user_name'] ?? '')) . '">' . Layout::escape((string) ($row['staff_user_name'] ?? '')) . '</td>'
                 . '<td data-label="保険料" style="white-space:nowrap;text-align:right;">' . $premiumHtml . '</td>'
                 . '<td>' . $deleteForm . '</td>'
                 . '</tr>';
         }
 
         if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="7">該当データはありません。</td></tr>';
+            $rowsHtml = '<tr><td colspan="6">該当データはありません。</td></tr>';
         }
 
         return $rowsHtml;

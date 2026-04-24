@@ -210,107 +210,227 @@ final class DashboardView
         ];
 
         // ─── CSS ────────────────────────────────────────────────────────
+        // 方針: `docs/screens/wireframe/insurance_wireframe.html` のトーンに寄せた
+        // CSS 磨き込み。HTML 構造と JS 接点 (ID / 状態クラス) は不変。
         $css = '<style>'
-            . '.alert-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}'
-            . '.alert-card{border-radius:var(--radius-md);padding:14px 18px;cursor:pointer;transition:box-shadow 0.15s;text-decoration:none;display:block;}'
-            . '.alert-card:hover{box-shadow:0 2px 8px rgba(0,0,0,0.08);}'
-            . '.alert-card-danger{background:var(--bg-danger);border:0.5px solid var(--border-danger);}'
-            . '.alert-card-warning{background:var(--bg-warning);border:0.5px solid var(--border-warning);}'
-            . '.alert-card-label{font-size:12px;color:var(--text-secondary);margin-bottom:4px;}'
-            . '.alert-card-danger .alert-card-label{color:var(--text-danger);}'
-            . '.alert-card-warning .alert-card-label{color:var(--text-warning);}'
-            . '.alert-card-value{font-size:28px;font-weight:500;line-height:1.2;}'
-            . '.alert-card-danger .alert-card-value{color:var(--text-danger);}'
-            . '.alert-card-warning .alert-card-value{color:var(--text-warning);}'
-            . '.alert-card-sub{font-size:12px;margin-top:4px;}'
-            . '.alert-card-danger .alert-card-sub{color:var(--text-danger);opacity:0.8;}'
-            . '.alert-card-warning .alert-card-sub{color:var(--text-warning);opacity:0.8;}'
-            . '.user-select{font-size:12px;padding:3px 6px;border:0.5px solid var(--border-medium);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-primary);cursor:pointer;max-width:140px;}'
-            . '.biz-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;}'
-            . '.biz-card{background:var(--bg-primary);border:0.5px solid var(--border-light);border-radius:var(--radius-lg);padding:16px 18px;transition:box-shadow 0.15s,border-color 0.15s;text-decoration:none;display:block;color:inherit;}'
-            . '.biz-card-link{cursor:pointer;}.biz-card-link:hover{box-shadow:0 2px 8px rgba(0,0,0,0.07);border-color:var(--border-medium);}'
-            . '.biz-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}'
-            . '.biz-card-title{font-size:13px;font-weight:500;color:var(--text-primary);}'
-            . '.biz-card-arrow{font-size:14px;color:var(--text-secondary);text-decoration:none;}'
-            . '.biz-card-metrics{display:flex;flex-direction:column;gap:6px;}'
-            . '.biz-metric{display:flex;justify-content:space-between;align-items:baseline;}'
-            . '.biz-metric-label{font-size:12px;color:var(--text-secondary);}'
-            . '.biz-metric-value{font-size:14px;font-weight:500;color:var(--text-primary);}'
-            . '.biz-metric-value.accent{color:var(--text-info);}'
-            . '.biz-metric-value.danger{color:var(--text-danger);}'
-            . '.biz-card-single{display:flex;align-items:center;justify-content:center;min-height:52px;}'
-            . '.biz-card-single-text{font-size:13px;color:var(--text-info);}'
-            . '.perf-card{background:var(--bg-primary);border:0.5px solid var(--border-light);border-radius:var(--radius-lg);padding:18px 20px;margin-bottom:14px;}'
-            . '.year-summary-label{font-size:12px;font-weight:500;color:var(--text-secondary);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.4px;}'
+            // ページタイトル（wireframe .page-title 基準。ホーム画面スコープで上書き）
+            . '.page-header .title{font-size:22px;font-weight:700;color:var(--text-heading);letter-spacing:-0.3px;line-height:1.25;}'
+            // 要確認エリア（wireframe .alert-card: icon + body + chev）--------
+            . '.alert-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;}'
+            . '.alert-card{display:flex;align-items:center;gap:14px;border-radius:var(--radius-lg);padding:16px 18px;border:1px solid transparent;cursor:pointer;text-decoration:none;color:inherit;box-shadow:var(--shadow-card);transition:box-shadow .15s,transform .15s,border-color .15s;}'
+            . '.alert-card:hover{box-shadow:var(--shadow-card-hover);transform:translateY(-1px);}'
+            . '.alert-card:active{transform:translateY(0);box-shadow:var(--shadow-card);}'
+            . '.alert-card-danger{background:var(--bg-danger);border-color:var(--border-danger);}'
+            . '.alert-card-warning{background:var(--bg-warning);border-color:var(--border-warning);}'
+            . '.alert-icon{width:var(--icon-size-md);height:var(--icon-size-md);border-radius:var(--radius-md);display:grid;place-items:center;flex:0 0 var(--icon-size-md);}'
+            . '.alert-card-danger .alert-icon{background:var(--bg-icon-danger);color:var(--text-danger);}'
+            . '.alert-card-warning .alert-icon{background:var(--bg-icon-warning);color:var(--text-warning);}'
+            . '.alert-icon svg{width:24px;height:24px;}'
+            . '.alert-body{flex:1;min-width:0;}'
+            . '.alert-label{font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:2px;letter-spacing:0.2px;}'
+            . '.alert-card-danger .alert-label{color:var(--text-danger);}'
+            . '.alert-card-warning .alert-label{color:var(--text-warning);}'
+            . '.alert-count{font-size:26px;font-weight:700;letter-spacing:-0.5px;line-height:1.1;font-variant-numeric:tabular-nums;}'
+            . '.alert-card-danger .alert-count{color:var(--text-danger);}'
+            . '.alert-card-warning .alert-count{color:var(--text-warning);}'
+            . '.alert-sub{font-size:13px;margin-top:6px;font-weight:500;}'
+            . '.alert-card-danger .alert-sub{color:var(--text-danger);opacity:0.85;}'
+            . '.alert-card-warning .alert-sub{color:var(--text-warning);opacity:0.85;}'
+            . '.alert-chev{flex:0 0 auto;color:var(--text-muted-cool);font-size:22px;line-height:1;font-weight:700;}'
+            . '.alert-card-danger .alert-chev{color:var(--text-danger);opacity:0.7;}'
+            . '.alert-card-warning .alert-chev{color:var(--text-warning);opacity:0.7;}'
+            // 要確認: 数値ペア（対応遅れ / 7日以内）
+            . '.alert-metric-pair{display:flex;gap:20px;align-items:baseline;flex-wrap:wrap;}'
+            . '.alert-metric-title{font-size:12px;margin-right:5px;color:inherit;opacity:0.9;font-weight:600;}'
+            . '.alert-metric-num{font-size:24px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-0.3px;}'
+            . '.alert-metric-unit{font-size:13px;font-weight:500;margin-left:3px;}'
+            // ユーザー選択セレクト --------------------------------------------
+            . '.user-select{font-size:13px;padding:5px 10px;min-height:32px;border:1px solid var(--border-medium);border-radius:var(--radius-md);background:var(--bg-primary);color:var(--text-heading);font-weight:500;cursor:pointer;max-width:140px;transition:border-color .12s,box-shadow .12s;}'
+            . '.user-select:hover{border-color:var(--border-cool-accent);}'
+            // 業務入口（wireframe .entry-card: head + metric-row + foot）-------
+            . '.entry-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px;}'
+            . '.entry-card{background:var(--bg-primary);border:1px solid var(--border-light);border-radius:var(--radius-lg);padding:18px;box-shadow:var(--shadow-card);transition:box-shadow .15s,transform .15s,border-color .15s;color:inherit;cursor:pointer;}'
+            . '.entry-card:hover{box-shadow:var(--shadow-card-hover);border-color:var(--border-cool-accent);}'
+            . '.entry-card:focus-visible{outline:2px solid var(--border-info);outline-offset:2px;}'
+            . '.entry-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;}'
+            . '.entry-name{display:flex;align-items:center;gap:10px;min-width:0;}'
+            . '.entry-icon{width:var(--icon-size-sm);height:var(--icon-size-sm);border-radius:var(--radius-md);display:grid;place-items:center;flex:0 0 var(--icon-size-sm);}'
+            . '.entry-icon svg{width:18px;height:18px;}'
+            . '.entry-icon-info{background:var(--bg-icon-info);color:var(--text-info);}'
+            . '.entry-icon-warning{background:var(--bg-icon-warning);color:var(--text-warning);}'
+            . '.entry-icon-success{background:var(--bg-icon-success);color:var(--text-success);}'
+            . '.entry-title-text{font-size:15px;font-weight:700;color:var(--text-heading);letter-spacing:-0.1px;min-width:0;}'
+            . '.entry-title-hint{font-size:12px;font-weight:500;color:var(--text-muted-cool);margin-left:5px;}'
+            . '.entry-right{display:flex;align-items:center;gap:8px;flex-shrink:0;}'
+            // metric-row（3 カラムグリッド）------------------------------------
+            . '.metric-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px;border-radius:var(--radius-md);overflow:hidden;background:var(--bg-subtle);}'
+            . '.metric-cell{background:var(--bg-primary);padding:12px 10px;text-align:center;min-width:0;}'
+            . '.metric-cell-label{font-size:11px;color:var(--text-secondary);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;}'
+            . '.metric-cell-value{font-size:20px;font-weight:700;color:var(--text-heading);letter-spacing:-0.4px;line-height:1.15;font-variant-numeric:tabular-nums;}'
+            . '.metric-cell-value.accent{color:var(--text-info);}'
+            . '.metric-cell-value.danger{color:var(--text-danger);}'
+            . '.metric-cell-value.up{color:var(--text-success);}'
+            . '.metric-cell-value.down{color:var(--text-danger);}'
+            // 成績サマリ（カード外枠）------------------------------------------
+            . '.perf-card{background:var(--bg-primary);border:1px solid var(--border-light);border-radius:var(--radius-lg);padding:20px 22px;margin-bottom:14px;box-shadow:var(--shadow-card);}'
+            . '.year-summary-label{font-size:13px;font-weight:600;color:var(--text-label);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.4px;}'
             . '.year-summary-main{display:flex;align-items:baseline;gap:6px;margin-bottom:16px;}'
-            . '.year-summary-amount{font-size:52px;font-weight:500;color:var(--text-primary);line-height:1;}'
-            . '.year-summary-unit{font-size:16px;color:var(--text-secondary);}'
-            . '.year-summary-compare{display:flex;align-items:stretch;border-top:0.5px solid var(--border-light);padding-top:12px;gap:0;}'
+            . '.year-summary-amount{font-size:52px;font-weight:600;color:var(--text-heading);line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-1px;}'
+            . '.year-summary-unit{font-size:16px;color:var(--text-label);font-weight:500;}'
+            . '.year-summary-compare{display:flex;align-items:stretch;border-top:1px solid var(--border-light);padding-top:12px;gap:0;}'
             . '.year-summary-compare-item{flex:1;display:flex;flex-direction:column;gap:4px;padding:0 14px;}'
             . '.year-summary-compare-item:first-child{padding-left:0;}'
             . '.year-summary-compare-item:last-child{padding-right:0;}'
-            . '.year-summary-compare-divider{width:0.5px;background:var(--border-light);flex-shrink:0;}'
-            . '.year-summary-compare-label{font-size:12px;color:var(--text-secondary);}'
-            . '.year-summary-compare-value{font-size:13px;font-weight:500;color:var(--text-primary);}'
+            . '.year-summary-compare-divider{width:1px;background:var(--border-light);flex-shrink:0;}'
+            . '.year-summary-compare-label{font-size:12px;color:var(--text-label);font-weight:500;}'
+            . '.year-summary-compare-value{font-size:14px;font-weight:600;color:var(--text-heading);}'
             . '.year-summary-compare-value.up{color:var(--text-success);}'
             . '.year-summary-compare-value.down{color:var(--text-danger);}'
+            // 成績タイル（全体 / 損保 / 生保）-----------------------------------
             . '.perf-tile-grid{display:flex;gap:12px;flex-wrap:wrap;}'
-            . '.perf-tile{flex:1 1 200px;min-width:200px;padding:12px 14px;border:0.5px solid var(--border-light);border-radius:var(--radius-md);background:var(--bg-primary);display:flex;flex-direction:column;gap:6px;}'
-            . '.perf-tile-head{display:flex;align-items:center;min-height:22px;}'
-            . '.perf-tile-title{font-size:12px;font-weight:600;color:var(--text-primary);}'
-            . '.perf-tile-amount{display:flex;align-items:baseline;gap:4px;}'
-            . '.perf-tile-num{font-size:28px;font-weight:500;color:var(--text-primary);line-height:1;}'
-            . '.perf-tile-unit{font-size:12px;color:var(--text-secondary);}'
-            . '.perf-tile-count{font-size:12px;color:var(--text-secondary);}'
-            . '.perf-tile-metrics{display:flex;gap:12px;border-top:0.5px solid var(--border-light);padding-top:6px;margin-top:2px;}'
-            . '.perf-tile-metric{flex:1;display:flex;flex-direction:column;gap:2px;}'
-            . '.perf-tile-metric-label{font-size:12px;color:var(--text-secondary);}'
-            . '.perf-tile-metric-value{font-size:13px;font-weight:500;color:var(--text-primary);}'
+            . '.perf-tile{flex:1 1 200px;min-width:200px;padding:14px 16px;border:1px solid var(--border-light);border-radius:var(--radius-md);background:var(--bg-subtle);display:flex;flex-direction:column;gap:7px;}'
+            . '.perf-tile-head{display:flex;align-items:center;min-height:22px;margin-bottom:1px;}'
+            . '.perf-tile-title{font-size:12px;font-weight:700;color:var(--text-label);}'
+            . '.perf-tile-amount{display:flex;align-items:baseline;gap:5px;}'
+            . '.perf-tile-num{font-size:26px;font-weight:700;color:var(--text-heading);line-height:1.1;font-variant-numeric:tabular-nums;letter-spacing:-0.5px;}'
+            . '.perf-tile-unit{font-size:12px;color:var(--text-secondary);font-weight:500;}'
+            . '.perf-tile-count{font-size:12px;color:var(--text-secondary);font-variant-numeric:tabular-nums;font-weight:500;}'
+            // 達成率プログレスバー ----------------------------------------------
+            . '.perf-tile-bar{display:flex;flex-direction:column;gap:4px;margin-top:2px;}'
+            . '.perf-tile-bar-track{height:6px;border-radius:999px;background:var(--bg-tertiary);overflow:hidden;}'
+            . '.perf-tile-bar-fill{height:100%;border-radius:999px;transition:width .3s ease;background:linear-gradient(90deg,var(--chart-bar-current),var(--border-info));}'
+            . '.perf-tile-life .perf-tile-bar-fill{background:linear-gradient(90deg,var(--chart-bar-life),#e0a74f);}'
+            . '.perf-tile-bar-caption{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;color:var(--text-secondary);font-weight:500;}'
+            . '.perf-tile-bar-value{font-size:12px;font-weight:700;color:var(--text-heading);font-variant-numeric:tabular-nums;}'
+            . '.perf-tile-bar-value.achievement-over{color:var(--text-success);}'
+            . '.perf-tile-bar-value.is-unset{color:var(--text-muted-cool);font-weight:500;}'
+            // metrics（前年比 + 年度目標 の 2 カラム）----------------------------
+            . '.perf-tile-metrics{display:flex;gap:10px;border-top:1px solid var(--border-light);padding-top:8px;margin-top:3px;}'
+            . '.perf-tile-metric{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0;}'
+            . '.perf-tile-metric-label{font-size:12px;color:var(--text-secondary);font-weight:500;}'
+            . '.perf-tile-metric-value{font-size:13px;font-weight:600;color:var(--text-heading);font-variant-numeric:tabular-nums;}'
             . '.perf-tile-metric-value.up{color:var(--text-success);}'
             . '.perf-tile-metric-value.down{color:var(--text-danger);}'
             . '.perf-tile-metric-value.achievement-over{color:var(--text-success);}'
             . '@media (max-width: 1024px){.perf-tile{flex:1 1 calc(50% - 6px);min-width:0;}}'
             . '@media (max-width: 480px){.perf-tile{flex:1 1 100%;}}'
-            . '.perf-chart{margin-top:16px;padding-top:14px;border-top:0.5px solid var(--border-light);}'
-            . '.perf-chart-title{font-size:12px;color:var(--text-secondary);margin-bottom:10px;font-weight:500;text-transform:uppercase;letter-spacing:0.4px;}'
+            // 年度タブ（wireframe tab-bar 準拠）---------------------------------
+            . '.year-tabs{display:inline-flex;gap:0;border-radius:var(--radius-md);background:var(--bg-subtle);border:1px solid var(--border-cool);padding:3px;}'
+            . '.year-tab{appearance:none;font-size:13px;font-weight:600;padding:5px 12px;min-height:30px;border-radius:var(--radius-sm);border:none;background:transparent;color:var(--text-label);cursor:pointer;font-family:inherit;transition:background .12s,color .12s;line-height:1.4;}'
+            . '.year-tab:hover{color:var(--text-heading);}'
+            . '.year-tab.is-active{background:var(--bg-primary);color:var(--text-info);font-weight:700;box-shadow:var(--shadow-card);}'
+            // 月次推移（チャート + トグル）--------------------------------------
+            . '.perf-chart{margin-top:20px;padding-top:16px;border-top:1px solid var(--border-light);}'
+            . '.perf-chart-title{font-size:13px;color:var(--text-heading);margin-bottom:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;}'
             . '.perf-chart-pane{display:none;}'
             . '.perf-chart-pane.active{display:block;}'
             . '.chart-toggle{display:inline-flex;gap:4px;text-transform:none;letter-spacing:0;}'
-            . '.chart-toggle-btn{font-size:12px;padding:2px 10px;border-radius:var(--radius-md);border:0.5px solid var(--border-medium);background:var(--bg-primary);color:var(--text-secondary);cursor:pointer;font-weight:500;line-height:1.6;}'
-            . '.chart-toggle-btn:hover{border-color:var(--border-dark,#627d98);color:var(--text-primary);}'
-            . '.chart-toggle-btn.active{background:var(--bg-info,#ebf8ff);color:var(--text-info);border-color:var(--border-info,#90cdf4);font-weight:600;}'
-            . '.chart-toggle-btn[data-target="life"].active{background:var(--bg-warning,#fffaf0);color:var(--text-warning);border-color:var(--border-warning,#f6ad55);}'
-            . '.chart-toggle-btn[data-target="all"].active{background:var(--bg-secondary,#f7fafc);color:var(--text-primary);border-color:var(--border-medium);}'
-            . '.chart-container{width:100%;overflow-x:auto;}'
-            . '.chart-table{width:100%;border-collapse:collapse;}'
-            . '.chart-table th{font-size:12px;color:var(--text-secondary);font-weight:500;padding:4px 6px;text-align:center;white-space:nowrap;border-bottom:0.5px solid var(--border-light);}'
-            . '.chart-table th.current{color:var(--text-info);font-weight:600;}'
-            . '.chart-table td{font-size:12px;padding:5px 6px;text-align:right;white-space:nowrap;border-bottom:0.5px solid var(--border-light);}'
-            . '.chart-table td.row-header{text-align:left;color:var(--text-secondary);font-size:12px;}'
-            . '.chart-table td.current-month{background:rgba(55,138,221,0.04);font-weight:500;}'
-            . '.chart-table td.current{background:rgba(55,138,221,0.04);font-weight:500;}'
-            . '.chart-table td.up{color:var(--text-success);}'
-            . '.chart-table td.down{color:var(--text-danger);}'
-            . '.chart-table td.achievement-rate{font-weight:600;}'
+            . '.chart-toggle-btn{font-size:13px;padding:5px 14px;min-height:30px;border-radius:var(--radius-md);border:1px solid var(--border-medium);background:var(--bg-primary);color:var(--text-label);cursor:pointer;font-weight:600;line-height:1.4;transition:background .12s,color .12s,border-color .12s;}'
+            . '.chart-toggle-btn:hover{border-color:var(--border-cool-accent);color:var(--text-heading);}'
+            . '.chart-toggle-btn.active{background:var(--bg-info);color:var(--text-info);border-color:var(--border-info);font-weight:700;}'
+            . '.chart-toggle-btn[data-target="life"].active{background:var(--bg-warning);color:var(--text-warning);border-color:var(--border-warning);}'
+            . '.chart-toggle-btn[data-target="all"].active{background:var(--bg-secondary);color:var(--text-heading);border-color:var(--border-medium);}'
+            // SVG 棒グラフ本体 -------------------------------------------------
+            . '.chart-svg-wrap{width:100%;margin:8px 0 10px;overflow-x:auto;-webkit-overflow-scrolling:touch;}'
+            . '.chart-svg{width:100%;min-width:680px;height:220px;display:block;overflow:visible;}'
+            . '.chart-axis{stroke:var(--border-cool);stroke-width:1;fill:none;}'
+            . '.chart-grid{stroke:var(--border-light);stroke-width:1;stroke-dasharray:2 3;fill:none;}'
+            . '.chart-grid-label{font-size:10px;fill:var(--text-secondary);font-variant-numeric:tabular-nums;}'
+            . '.chart-month{font-size:10px;fill:var(--text-secondary);text-anchor:middle;}'
+            . '.chart-month.is-current{fill:var(--text-info);font-weight:700;}'
+            . '.chart-bar-current{fill:var(--chart-bar-current);}'
+            . '.chart-bar-previous{fill:var(--chart-bar-previous);}'
+            . '.perf-chart-pane[data-src="life"] .chart-bar-current{fill:var(--chart-bar-life);}'
+            . '.perf-chart-pane[data-src="life"] .chart-bar-previous{fill:var(--chart-bar-life-previous);}'
+            . '.perf-chart-pane[data-src="life"] .legend-swatch-current{background:var(--chart-bar-life);}'
+            . '.perf-chart-pane[data-src="life"] .legend-swatch-previous{background:var(--chart-bar-life-previous);}'
+            . '.chart-target-line{stroke:var(--border-info);stroke-width:2;stroke-dasharray:5 3;fill:none;}'
+            . '.chart-target-label{font-size:11px;fill:var(--text-info);font-weight:700;font-variant-numeric:tabular-nums;}'
+            // グラフ凡例 -------------------------------------------------------
+            . '.chart-legend{display:flex;gap:14px;font-size:12px;color:var(--text-label);margin-bottom:10px;align-items:center;flex-wrap:wrap;}'
+            . '.legend-item{display:inline-flex;align-items:center;gap:6px;}'
+            . '.legend-swatch{display:inline-block;width:12px;height:12px;border-radius:3px;}'
+            . '.legend-swatch-current{background:var(--chart-bar-current);}'
+            . '.legend-swatch-previous{background:var(--chart-bar-previous);}'
+            . '.legend-swatch-life-current{background:var(--chart-bar-life);}'
+            . '.legend-swatch-life-previous{background:var(--chart-bar-life-previous);}'
+            . '.legend-swatch-target{background:transparent;border-top:2px dashed var(--border-info);width:18px;height:0;border-radius:0;}'
+            // 数値テーブル（常時表示、グラフの下）---------------------------
+            . '.perf-chart-table-block{margin-top:16px;}'
+            . '.perf-chart-table-caption{font-size:13px;font-weight:700;color:var(--text-heading);margin-bottom:8px;letter-spacing:0.2px;}'
+            . '.chart-container{width:100%;overflow-x:auto;border:1px solid var(--border-light);border-radius:var(--radius-md);}'
+            . '.chart-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;}'
+            . '.chart-table th{font-size:12px;color:var(--text-label);font-weight:600;padding:8px 8px;text-align:center;white-space:nowrap;border-bottom:1px solid var(--border-light);background:var(--bg-subtle);}'
+            . '.chart-table th.current{color:var(--text-info);font-weight:700;}'
+            . '.chart-table td{font-size:13px;padding:8px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--border-light);color:var(--text-primary);}'
+            . '.chart-table td.row-header{text-align:left;color:var(--text-label);font-size:12px;font-weight:600;background:var(--bg-subtle);}'
+            . '.chart-table td.current-month{background:rgba(55,138,221,0.08);font-weight:600;}'
+            . '.chart-table td.current{background:rgba(55,138,221,0.08);font-weight:600;}'
+            . '.chart-table td.up{color:var(--text-success);font-weight:600;}'
+            . '.chart-table td.down{color:var(--text-danger);font-weight:600;}'
+            . '.chart-table td.achievement-rate{font-weight:700;}'
             . '.achievement-over{color:var(--text-success);}'
-            . '.activity-card{background:var(--bg-primary);border:0.5px solid var(--border-light);border-radius:var(--radius-lg);padding:16px 18px;}'
-            . '.activity-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}'
-            . '.activity-title{font-size:13px;font-weight:500;color:var(--text-primary);}'
-            . '.activity-link{font-size:12px;color:var(--text-info);cursor:pointer;text-decoration:none;}'
+            . '.perf-legend{display:flex;justify-content:flex-end;margin-top:8px;font-size:12px;color:var(--text-label);font-weight:500;}'
+            . '.perf-legend-link{color:var(--text-info);text-decoration:none;font-weight:600;}'
+            . '.perf-legend-link:hover{text-decoration:underline;}'
+            . '.perf-error{color:var(--text-label);font-size:13px;padding:10px 0;font-weight:500;}'
+            . '.perf-chart-title-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}'
+            . '.chart-col-annual{color:var(--text-label)!important;font-size:12px;font-weight:600;background:var(--bg-subtle);}'
+            . '.activity-card-foot{margin-top:12px;text-align:right;}'
+            // 旧 activity-card 系（後方互換で保持）-------------------------------
+            . '.activity-card{background:var(--bg-primary);border:1px solid var(--border-light);border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow-card);}'
+            . '.activity-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}'
+            . '.activity-title{font-size:14px;font-weight:700;color:var(--text-heading);}'
+            . '.activity-link{font-size:13px;color:var(--text-info);font-weight:600;cursor:pointer;text-decoration:none;}'
             . '.activity-link:hover{text-decoration:underline;}'
-            . '.activity-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;}'
-            . '.activity-row:not(:last-child){border-bottom:0.5px solid var(--border-light);}'
-            . '.activity-label{font-size:13px;color:var(--text-secondary);}'
-            . '.activity-value{font-size:13px;font-weight:500;color:var(--text-primary);}'
-
-            . '.bottom-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}'
-            . '.section-label{font-size:12px;font-weight:500;color:var(--text-secondary);margin-bottom:12px;padding-bottom:5px;text-transform:uppercase;letter-spacing:0.4px;}'
+            . '.activity-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;}'
+            . '.activity-row:not(:last-child){border-bottom:1px solid var(--border-light);}'
+            . '.activity-label{font-size:13px;color:var(--text-label);font-weight:500;}'
+            . '.activity-value{font-size:14px;font-weight:600;color:var(--text-heading);font-variant-numeric:tabular-nums;}'
+            // 共通（セクション見出し / 下部グリッド）-----------------------------
+            . '.bottom-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}'
+            . '.section-label{font-size:13px;font-weight:700;color:var(--text-label);margin-bottom:12px;padding-bottom:5px;text-transform:uppercase;letter-spacing:0.6px;}'
+            // 成績サマリ カード内ヘッダー（年度 + 担当者）-----------------------
+            . '.perf-card-header{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-bottom:14px;flex-wrap:wrap;}'
+            . '@media(max-width:480px){.perf-card-header{gap:8px;margin-bottom:12px;}}'
+            // アンカージャンプ時の sticky header 分オフセット（site-header: 50px + 余白）
+            . '#perf-summary{scroll-margin-top:70px;}'
+            // モバイル（768px 以下）---------------------------------------------
             . '@media(max-width:768px){'
-            . '.alert-grid{grid-template-columns:1fr;}'
-            . '.biz-grid{grid-template-columns:1fr;}'
-            . '.bottom-grid{grid-template-columns:1fr;}'
+            . '.alert-grid{grid-template-columns:1fr;gap:8px;margin-bottom:14px;}'
+            . '.entry-grid{grid-template-columns:1fr;gap:8px;margin-bottom:14px;}'
+            . '.bottom-grid{grid-template-columns:1fr;gap:10px;}'
             . '.chart-container{overflow-x:scroll;-webkit-overflow-scrolling:touch;}'
             . '.chart-table{min-width:620px;}'
+            . '.perf-card{padding:14px 16px;}'
+            . '.alert-card{padding:12px 14px;gap:12px;}'
+            . '.entry-card{padding:14px;}'
+            . '.entry-head{margin-bottom:10px;}'
+            . '.metric-cell{padding:10px 8px;}'
+            . '.section-label{margin-bottom:10px;padding-bottom:4px;}'
+            . '.year-tabs{overflow-x:auto;max-width:100%;}'
+            . '.chart-svg{height:200px;min-width:700px;}'
+            . '.chart-svg-wrap{border:1px solid var(--border-light);border-radius:var(--radius-md);background:var(--bg-subtle);padding:4px;}'
+            . '.perf-chart{margin-top:14px;padding-top:12px;}'
+            . '.perf-tile{padding:14px;gap:6px;}'
+            . '}'
+            // 小型スマホ（480px 以下）-----------------------------------------
+            . '@media(max-width:480px){'
+            . '.alert-card{padding:11px 12px;gap:10px;}'
+            . '.alert-metric-pair{gap:12px;}'
+            . '.alert-icon{width:36px;height:36px;flex:0 0 36px;}'
+            . '.alert-icon svg{width:20px;height:20px;}'
+            . '.alert-count{font-size:26px;}'
+            . '.alert-metric-num{font-size:22px;}'
+            . '.entry-card{padding:12px 14px;}'
+            . '.entry-head{margin-bottom:8px;}'
+            . '.entry-title-text{font-size:14px;}'
+            . '.metric-cell{padding:8px 6px;}'
+            . '.metric-cell-value{font-size:18px;}'
+            . '.metric-cell-label{font-size:11px;}'
+            . '.year-summary-amount{font-size:40px;}'
+            . '.perf-tile{padding:12px 14px;}'
+            . '.chart-svg{min-width:640px;height:200px;}'
             . '}'
             . '</style>';
 
@@ -330,24 +450,36 @@ final class DashboardView
 
         $renewalOverdueVal  = $renewalOverdue  !== null ? $renewalOverdue  . ' <span style="font-size:13px;font-weight:400;">件</span>' : '—';
         $renewalWithin7Val  = $renewalWithin7  !== null ? $renewalWithin7  . ' <span style="font-size:13px;font-weight:400;">件</span>' : '—';
-        $accidentHighVal    = $accidentHighCnt !== null ? $accidentHighCnt . ' <span style="font-size:13px;font-weight:400;">件</span>' : '—';
+        $accidentHighVal    = $accidentHighCnt !== null ? $accidentHighCnt . '<span class="alert-metric-unit">件</span>' : '—';
+
+        // インライン SVG アイコン（アクセシビリティ用 aria-hidden）
+        $iconCalendar = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
+        $iconAlertTriangle = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+        $iconTarget = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>';
+        $iconChev = '<span class="alert-chev" aria-hidden="true">›</span>';
 
         $alertGrid = '<div class="section-label">要確認</div>'
             . '<div class="alert-grid">'
             // 満期（対応遅れ＋7日以内）を1枚にまとめる
-            . '<a href="' . Layout::escape($renewalListUrl) . '" class="alert-card alert-card-danger">'
-            . '<div class="alert-card-label">満期</div>'
-            . '<div style="display:flex;gap:24px;align-items:baseline;margin:6px 0 4px;">'
-            . '<div><span style="font-size:12px;margin-right:4px;">対応遅れ</span><span style="font-size:22px;font-weight:700;line-height:1;">' . ($renewalOverdue !== null ? $renewalOverdue : '—') . '</span> <span style="font-size:13px;font-weight:400;">件</span></div>'
-            . '<div><span style="font-size:12px;margin-right:4px;">7日以内</span><span style="font-size:22px;font-weight:700;line-height:1;">' . ($renewalWithin7 !== null ? $renewalWithin7 : '—') . '</span> <span style="font-size:13px;font-weight:400;">件</span></div>'
+            . '<a href="' . Layout::escape($renewalListUrl) . '" class="alert-card alert-card-danger" aria-label="満期一覧へ">'
+            . '<div class="alert-icon">' . $iconCalendar . '</div>'
+            . '<div class="alert-body">'
+            . '<div class="alert-label">満期</div>'
+            . '<div class="alert-metric-pair">'
+            . '<span><span class="alert-metric-title">対応遅れ</span><span class="alert-metric-num">' . ($renewalOverdue !== null ? (int) $renewalOverdue : '—') . '</span><span class="alert-metric-unit">件</span></span>'
+            . '<span><span class="alert-metric-title">7日以内</span><span class="alert-metric-num">' . ($renewalWithin7 !== null ? (int) $renewalWithin7 : '—') . '</span><span class="alert-metric-unit">件</span></span>'
             . '</div>'
-            . '<div class="alert-card-sub">満期一覧へ</div>'
+            . '</div>'
+            . $iconChev
             . '</a>'
             // 事故 — 高優先度未完了
-            . '<a href="' . Layout::escape($accidentListUrl) . '" class="alert-card alert-card-warning">'
-            . '<div class="alert-card-label">事故 — 高優先度未完了</div>'
-            . '<div class="alert-card-value">' . $accidentHighVal . '</div>'
-            . '<div class="alert-card-sub">事故案件一覧へ</div>'
+            . '<a href="' . Layout::escape($accidentListUrl) . '" class="alert-card alert-card-warning" aria-label="事故案件一覧へ">'
+            . '<div class="alert-icon">' . $iconAlertTriangle . '</div>'
+            . '<div class="alert-body">'
+            . '<div class="alert-label">事故 — 高優先度未完了</div>'
+            . '<div class="alert-count">' . ($accidentHighCnt !== null ? (int) $accidentHighCnt : '—') . '<span class="alert-metric-unit">件</span></div>'
+            . '</div>'
+            . $iconChev
             . '</a>'
             . '</div>';
 
@@ -376,69 +508,90 @@ final class DashboardView
 
         $accidentHighCls = (!isset($accidentBizData['error']) && (int) ($accidentBizData['high_priority'] ?? 0) > 0) ? ' danger' : '';
 
+        // 業務入口用アイコン（entry-icon 内に埋め込む 18px SVG）
+        $iconRenewal = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>';
+        $iconAccident = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L2 7v5c0 5 3.8 9.5 10 11 6.2-1.5 10-6 10-11V7l-10-5z"/></svg>';
+        $iconProspect = $iconTarget; // 見込は target アイコン流用
+
+        // entry-card は全面タップ可能（dashboard.js の initCardLinks が data-href を扱う）
+        // select 等の内部操作要素はクリックを停止伝播させて遷移させない
+
         $bizGrid = '<div class="section-label">業務入口</div>'
-            . '<div class="biz-grid">'
+            . '<div class="entry-grid">'
             // 満期業務
-            . '<div class="biz-card" id="card-renewal">'
-            . '<div class="biz-card-header">'
-            . '<span class="biz-card-title">満期業務 <span style="font-size:11px;font-weight:400;color:var(--text-secondary);">(未完了)</span></span>'
-            . $renewalDropdown
+            . '<div class="entry-card" id="card-renewal" data-href="' . Layout::escape($renewalListUrl) . '" role="link" tabindex="0" aria-label="満期業務を開く">'
+            . '<div class="entry-head">'
+            . '<div class="entry-name">'
+            . '<div class="entry-icon entry-icon-info">' . $iconRenewal . '</div>'
+            . '<div class="entry-title-text">満期業務<span class="entry-title-hint">(未完了)</span></div>'
             . '</div>'
-            . '<div class="biz-card-metrics">'
-            . '<div class="biz-metric"><span class="biz-metric-label">14日以内</span><span class="biz-metric-value accent within-14">' . Layout::escape($renewalWithin14Str) . '</span></div>'
-            . '<div class="biz-metric"><span class="biz-metric-label">28日以内</span><span class="biz-metric-value within-28">' . Layout::escape($renewalWithin28Str) . '</span></div>'
-            . '<div class="biz-metric"><span class="biz-metric-label">60日以内</span><span class="biz-metric-value within-60">' . Layout::escape($renewalWithin60Str) . '</span></div>'
+            . '<div class="entry-right">' . $renewalDropdown . '</div>'
             . '</div>'
-            . '<div style="margin-top:10px;text-align:right;"><a href="' . Layout::escape($renewalListUrl) . '" style="font-size:12px;color:var(--text-info);text-decoration:none;">満期一覧へ</a></div>'
+            . '<div class="metric-row">'
+            . '<div class="metric-cell"><div class="metric-cell-label">14日以内</div><div class="metric-cell-value accent within-14">' . Layout::escape($renewalWithin14Str) . '</div></div>'
+            . '<div class="metric-cell"><div class="metric-cell-label">28日以内</div><div class="metric-cell-value within-28">' . Layout::escape($renewalWithin28Str) . '</div></div>'
+            . '<div class="metric-cell"><div class="metric-cell-label">60日以内</div><div class="metric-cell-value within-60">' . Layout::escape($renewalWithin60Str) . '</div></div>'
+            . '</div>'
             . '</div>'
             // 事故案件
-            . '<div class="biz-card" id="card-accident">'
-            . '<div class="biz-card-header">'
-            . '<span class="biz-card-title">事故案件 <span style="font-size:11px;font-weight:400;color:var(--text-secondary);">(未完了)</span></span>'
-            . $accidentDropdown
+            . '<div class="entry-card" id="card-accident" data-href="' . Layout::escape($accidentListUrl) . '" role="link" tabindex="0" aria-label="事故案件を開く">'
+            . '<div class="entry-head">'
+            . '<div class="entry-name">'
+            . '<div class="entry-icon entry-icon-warning">' . $iconAccident . '</div>'
+            . '<div class="entry-title-text">事故案件<span class="entry-title-hint">(未完了)</span></div>'
             . '</div>'
-            . '<div class="biz-card-metrics">'
-            . '<div class="biz-metric"><span class="biz-metric-label">高優先度</span><span class="biz-metric-value high' . $accidentHighCls . '">' . Layout::escape($accidentHighStr) . '</span></div>'
-            . '<div class="biz-metric"><span class="biz-metric-label">中優先度</span><span class="biz-metric-value normal">' . Layout::escape($accidentMidStr) . '</span></div>'
-            . '<div class="biz-metric"><span class="biz-metric-label">低優先度</span><span class="biz-metric-value low">' . Layout::escape($accidentLowStr) . '</span></div>'
+            . '<div class="entry-right">' . $accidentDropdown . '</div>'
             . '</div>'
-            . '<div style="margin-top:10px;text-align:right;"><a href="' . Layout::escape($accidentListUrl) . '" style="font-size:12px;color:var(--text-info);text-decoration:none;">事故案件一覧へ</a></div>'
+            . '<div class="metric-row">'
+            . '<div class="metric-cell"><div class="metric-cell-label">高優先度</div><div class="metric-cell-value high' . $accidentHighCls . '">' . Layout::escape($accidentHighStr) . '</div></div>'
+            . '<div class="metric-cell"><div class="metric-cell-label">中優先度</div><div class="metric-cell-value normal">' . Layout::escape($accidentMidStr) . '</div></div>'
+            . '<div class="metric-cell"><div class="metric-cell-label">低優先度</div><div class="metric-cell-value low">' . Layout::escape($accidentLowStr) . '</div></div>'
+            . '</div>'
             . '</div>'
             // 見込管理
-            . '<div class="biz-card" id="card-sales-case">'
-            . '<div class="biz-card-header">'
-            . '<span class="biz-card-title">見込管理 <span style="font-size:11px;font-weight:400;color:var(--text-secondary);">(未完了)</span></span>'
-            . $salesCaseDropdown
+            . '<div class="entry-card" id="card-sales-case" data-href="' . Layout::escape($salesCaseListUrl) . '" role="link" tabindex="0" aria-label="見込管理を開く">'
+            . '<div class="entry-head">'
+            . '<div class="entry-name">'
+            . '<div class="entry-icon entry-icon-success">' . $iconProspect . '</div>'
+            . '<div class="entry-title-text">見込管理<span class="entry-title-hint">(未完了)</span></div>'
             . '</div>'
-            . '<div class="biz-card-metrics">'
-            . '<div class="biz-metric"><span class="biz-metric-label">見込A</span><span class="biz-metric-value accent prospect-a">' . Layout::escape($scRankAStr) . '</span></div>'
-            . '<div class="biz-metric"><span class="biz-metric-label">見込B</span><span class="biz-metric-value prospect-b">' . Layout::escape($scRankBStr) . '</span></div>'
-            . '<div class="biz-metric"><span class="biz-metric-label">今月成約予定</span><span class="biz-metric-value expected">' . Layout::escape($scClosingStr) . '</span></div>'
+            . '<div class="entry-right">' . $salesCaseDropdown . '</div>'
             . '</div>'
-            . '<div style="margin-top:10px;text-align:right;"><a href="' . Layout::escape($salesCaseListUrl) . '" style="font-size:12px;color:var(--text-info);text-decoration:none;">見込案件一覧へ</a></div>'
+            . '<div class="metric-row">'
+            . '<div class="metric-cell"><div class="metric-cell-label">見込A</div><div class="metric-cell-value accent prospect-a">' . Layout::escape($scRankAStr) . '</div></div>'
+            . '<div class="metric-cell"><div class="metric-cell-label">見込B</div><div class="metric-cell-value prospect-b">' . Layout::escape($scRankBStr) . '</div></div>'
+            . '<div class="metric-cell"><div class="metric-cell-label">今月成約</div><div class="metric-cell-value expected">' . Layout::escape($scClosingStr) . '</div></div>'
+            . '</div>'
             . '</div>'
             . '</div>';
 
         // ─── 成績サマリカード ───────────────────────────────────────────
         // ─── 成績サマリ セクションヘッダー（年度プルダウン + 担当者ドロップダウン）─────
 
-        // 年度プルダウン（JS で部分更新。値は年度数値のみ）
-        $yearOptions = '';
+        // 年度タブ（wireframe tab-bar 準拠。ID `fiscal-year` はコンテナに移譲）
+        // dashboard.js initYearTabs() が [data-year] を拾って URL 再読込する。
+        $yearTabButtons = '';
         foreach ($availableYears as $yr) {
             $yr = (int) $yr;
-            $selected = ($yr === $fiscalYear) ? ' selected' : '';
-            $yearOptions .= '<option value="' . $yr . '"' . $selected . '>' . $yr . '年度</option>';
+            $active = ($yr === $fiscalYear) ? ' is-active' : '';
+            $selected = ($yr === $fiscalYear) ? 'true' : 'false';
+            $yearTabButtons .= '<button type="button" class="year-tab' . $active . '" role="tab" aria-selected="' . $selected . '" data-year="' . $yr . '">' . $yr . '年度</button>';
         }
-        $yearToggle = '<select id="fiscal-year" class="user-select">'
-            . $yearOptions
-            . '</select>';
+        $yearToggle = '<div id="fiscal-year" class="year-tabs" role="tablist" aria-label="年度切替">'
+            . $yearTabButtons
+            . '</div>';
 
         // 成績サマリ 担当者ドロップダウン
         $salesUserDropdown = self::buildUserDropdown('sales-user', $salesUserParam, $loginUserId, $loginDisplayName, $tenantUsers);
 
-        $perfSectionHeader = '<div id="perf-summary" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'
-            . '<div class="section-label" style="margin-bottom:0;">成績サマリ</div>'
-            . '<div style="display:flex;align-items:center;gap:8px;">' . $yearToggle . $salesUserDropdown . '</div>'
+        // #perf-summary はスクロールアンカー。カード内にツール群があっても、
+        // 画面遷移時は section-label の位置に戻ってくるようここにアンカーを置く。
+        $perfSectionHeader = '<div id="perf-summary" class="section-label">成績サマリ</div>';
+
+        // カード内ヘッダー（年度タブ + 担当者プルダウン）
+        $perfCardHeader = '<div class="perf-card-header">'
+            . $yearToggle
+            . $salesUserDropdown
             . '</div>';
 
         $perfCard = $perfSectionHeader . self::renderPerfCard(
@@ -459,7 +612,8 @@ final class DashboardView
             $perfPrevLife,
             $targetNonLife,
             $targetLife,
-            $perfTab
+            $perfTab,
+            $perfCardHeader
         );
 
         $bottomGrid = '';
@@ -527,19 +681,15 @@ final class DashboardView
         array $perfPrevLife = [],
         int $targetNonLife = 0,
         int $targetLife = 0,
-        string $activeTab = 'all'
+        string $activeTab = 'all',
+        string $cardHeaderHtml = ''
     ): string {
         $monthNames = [1 => '1月', 2 => '2月', 3 => '3月', 4 => '4月', 5 => '5月', 6 => '6月',
                        7 => '7月', 8 => '8月', 9 => '9月', 10 => '10月', 11 => '11月', 12 => '12月'];
 
         if ($perfError) {
-            $perfBody = '<div style="color:var(--text-secondary);font-size:12px;padding:8px 0;">取得できませんでした</div>';
+            $perfBody = '<div class="perf-error">取得できませんでした</div>';
         } else {
-            $currentMonthLabel = $monthNames[$currentMonth] ?? '';
-            $periodLabel = ($fiscalYear < $currentFiscalYear)
-                ? $fiscalYear . '年度（4月〜3月）'
-                : $fiscalYear . '年度 4月〜' . $currentMonthLabel;
-
             $tilesHtml = '';
             foreach ($perfTiles as $tile) {
                 $premium = (int) $tile['premium'];
@@ -559,12 +709,16 @@ final class DashboardView
 
                 // 達成率
                 if ($target !== null && $target > 0) {
-                    $achRate = round($premium / $target * 100, 1);
-                    $achStr  = number_format($achRate, 1) . '%';
-                    $achCls  = $achRate >= 100 ? ' achievement-over' : '';
+                    $achRate   = round($premium / $target * 100, 1);
+                    $achStr    = number_format($achRate, 1) . '%';
+                    $achCls    = $achRate >= 100 ? ' achievement-over' : '';
+                    $barWidth  = number_format(min($achRate, 100.0), 1, '.', '');
+                    $barUnset  = false;
                 } else {
-                    $achStr = '目標未設定';
-                    $achCls = '';
+                    $achStr    = '目標未設定';
+                    $achCls    = ' is-unset';
+                    $barWidth  = '0';
+                    $barUnset  = true;
                 }
 
                 // 年度目標（円 → 千円、切り捨て。未設定は「未設定」。達成率側と文言を被らせないため短縮表記）
@@ -581,22 +735,30 @@ final class DashboardView
                     ? $badgeHtml
                     : '<span class="perf-tile-title">' . Layout::escape($tile['label']) . '</span>';
 
+                // 達成率プログレスバー（目標未設定時は空トラック + キャプション「目標未設定」）
+                $barBlock = '<div class="perf-tile-bar">'
+                    . '<div class="perf-tile-bar-track">'
+                    . '<div class="perf-tile-bar-fill" style="width:' . $barWidth . '%"></div>'
+                    . '</div>'
+                    . '<div class="perf-tile-bar-caption">'
+                    . '<span class="perf-tile-bar-label">達成率</span>'
+                    . '<span class="perf-tile-bar-value' . $achCls . '">' . Layout::escape($achStr) . '</span>'
+                    . '</div>'
+                    . '</div>';
+
                 $tilesHtml .= '<div class="perf-tile perf-tile-' . Layout::escape($tile['key']) . '">'
                     . '<div class="perf-tile-head">' . $labelHtml . '</div>'
                     . '<div class="perf-tile-amount"><span class="perf-tile-num">' . Layout::escape(number_format((int) floor($premium / 1000))) . '</span><span class="perf-tile-unit">千円</span></div>'
+                    . $barBlock
                     . '<div class="perf-tile-count">' . Layout::escape(number_format($count)) . ' 件</div>'
                     . '<div class="perf-tile-metrics">'
                     . '<div class="perf-tile-metric"><span class="perf-tile-metric-label">前年比</span><span class="perf-tile-metric-value' . $yoyCls . '">' . Layout::escape($yoyStr) . '</span></div>'
                     . '<div class="perf-tile-metric"><span class="perf-tile-metric-label">年度目標</span><span class="perf-tile-metric-value">' . Layout::escape($targetStr) . '</span></div>'
-                    . '<div class="perf-tile-metric"><span class="perf-tile-metric-label">達成率</span><span class="perf-tile-metric-value' . $achCls . '">' . Layout::escape($achStr) . '</span></div>'
                     . '</div>'
                     . '</div>';
             }
 
-            $perfBody = '<div class="year-summary-label">'
-                . Layout::escape($periodLabel)
-                . '</div>'
-                . '<div class="perf-tile-grid">'
+            $perfBody = '<div class="perf-tile-grid">'
                 . $tilesHtml
                 . '</div>';
         }
@@ -640,8 +802,8 @@ final class DashboardView
             . '<button type="button" class="chart-toggle-btn' . $tabLife    . ' data-target="life">生保</button>'
             . '</span>';
 
-        $sharedLegend = '<div style="display:flex;justify-content:flex-end;margin-top:6px;font-size:12px;color:var(--text-secondary);">'
-            . '<span>単位: 千円 ｜ <a href="' . Layout::escape($salesListUrl) . '" style="color:var(--text-info);text-decoration:none;">成績管理一覧 →</a></span>'
+        $sharedLegend = '<div class="perf-legend">'
+            . '<span>単位: 千円 ｜ <a href="' . Layout::escape($salesListUrl) . '" class="perf-legend-link">成績管理一覧 →</a></span>'
             . '</div>';
 
         // 切替用 JS（初期表示は .active pane のみ。CSS で非 active を display:none にしている）
@@ -658,7 +820,7 @@ final class DashboardView
             . '})();</script>';
 
         $chartBlock = '<div class="perf-chart">'
-            . '<div class="perf-chart-title" style="display:flex;align-items:center;gap:8px;">'
+            . '<div class="perf-chart-title perf-chart-title-row">'
             . '<span>月次推移（前年対比）</span>'
             . $toggleChips
             . '</div>'
@@ -670,6 +832,7 @@ final class DashboardView
             . $toggleScript;
 
         return '<div class="perf-card" id="card-sales">'
+            . $cardHeaderHtml
             . $perfBody
             . $chartBlock
             . '</div>';
@@ -710,7 +873,7 @@ final class DashboardView
             $cls = $isCurrent ? ' class="current"' : '';
             $thCells .= '<th' . $cls . '>' . Layout::escape($monthLabels[$m] ?? '') . '</th>';
         }
-        $thCells .= '<th style="color:var(--text-secondary);font-weight:400;">年間</th>';
+        $thCells .= '<th class="chart-col-annual">年間</th>';
 
         // 未来月判定用（年度内月順: 4,5,...,12,1,2,3）
         $cutoffMonth = ($fiscalYear < $currentFiscalYear) ? 3 : $currentMonth;
@@ -729,7 +892,7 @@ final class DashboardView
             $currentRow .= '<td class="' . $classes . '" data-month="' . $m . '">' . Layout::escape($val) . '</td>';
         }
         $annualCyStr = $annualCy > 0 ? number_format((int) floor($annualCy / 1000)) : '—';
-        $currentRow .= '<td class="annual-current" style="color:var(--text-secondary);font-size:12px;">' . Layout::escape($annualCyStr) . '</td></tr>';
+        $currentRow .= '<td class="annual-current chart-col-annual">' . Layout::escape($annualCyStr) . '</td></tr>';
 
         // 前年行（JS 更新用: class="previous" data-month="{m}"）
         // 未来月は「—」。年間列は YTD 範囲（cutoffMonth まで）の前年合計
@@ -748,7 +911,7 @@ final class DashboardView
             $prevRow .= '<td class="' . $classes . '" data-month="' . $m . '">' . Layout::escape($val) . '</td>';
         }
         $annualPyYTDStr = $annualPyYTD > 0 ? number_format((int) floor($annualPyYTD / 1000)) : '—';
-        $prevRow .= '<td class="annual-previous" style="color:var(--text-secondary);font-size:12px;">' . Layout::escape($annualPyYTDStr) . '</td></tr>';
+        $prevRow .= '<td class="annual-previous chart-col-annual">' . Layout::escape($annualPyYTDStr) . '</td></tr>';
 
         // 前年差行（JS 更新用: class="diff ..." data-month="{m}"）
         // 年間列は YTD 同士の比較（annualCy vs annualPyYTD）
@@ -811,19 +974,19 @@ final class DashboardView
         }
         $annualAchColStr = $lastAchRate !== null ? number_format($lastAchRate, 1) . '%' : '—';
         $annualAchColCls  = ($lastAchRate !== null && $lastAchRate >= 100) ? ' achievement-over' : '';
-        $achievementRow .= '<td class="achievement-annual' . $annualAchColCls . '" style="color:var(--text-secondary);font-size:12px;">'
+        $achievementRow .= '<td class="achievement-annual chart-col-annual' . $annualAchColCls . '">'
             . Layout::escape($annualAchColStr) . '</td></tr>';
 
         $legend = $showFooterLegend
-            ? '<div style="display:flex;justify-content:flex-end;margin-top:6px;font-size:12px;color:var(--text-secondary);">'
-                . '<span>単位: 千円 ｜ <a href="' . Layout::escape($salesListUrl) . '" style="color:var(--text-info);text-decoration:none;">成績管理一覧 →</a></span>'
+            ? '<div class="perf-legend">'
+                . '<span>単位: 千円 ｜ <a href="' . Layout::escape($salesListUrl) . '" class="perf-legend-link">成績管理一覧 →</a></span>'
                 . '</div>'
             : '';
 
         $tableIdAttr = ($tableId !== null && $tableId !== '') ? ' id="' . Layout::escape($tableId) . '"' : '';
 
         if ($perfError) {
-            $tableContent = '<div style="color:var(--text-secondary);font-size:12px;padding:8px 0;">取得できませんでした</div>';
+            $tableContent = '<div class="perf-error">取得できませんでした</div>';
         } else {
             $tableContent = '<div class="chart-container">'
                 . '<table' . $tableIdAttr . ' class="chart-table">'
@@ -833,11 +996,35 @@ final class DashboardView
                 . '</div>';
         }
 
-        // pane モード: 外側 .perf-chart とタイトル・凡例は呼び出し側が共有で描画する
+        // pane モード: グラフ凡例 + SVG 棒グラフ + details 折りたたみテーブル
         if ($paneKey !== null) {
             $activeCls = $paneActive ? ' active' : '';
+            // 凡例（life pane は CSS で swatch 色が上書きされる）
+            $chartLegend = '<div class="chart-legend">'
+                . '<span class="legend-item"><i class="legend-swatch legend-swatch-current"></i>今年</span>'
+                . '<span class="legend-item"><i class="legend-swatch legend-swatch-previous"></i>前年</span>'
+                . ($targetAnnual !== null && $targetAnnual > 0
+                    ? '<span class="legend-item"><i class="legend-swatch legend-swatch-target"></i>月次目標</span>'
+                    : '')
+                . '</div>';
+            // SVG 棒グラフ
+            $svgChart = $perfError
+                ? '<div class="perf-error">取得できませんでした</div>'
+                : self::renderBarChart(
+                    $fiscalYear, $currentMonth, $currentFiscalYear,
+                    $perfCurrent, $perfPrev, $targetAnnual, $paneKey
+                );
+            // 数値テーブルは常時表示（#monthly-trend は all pane のみ）
+            $tableBlock = $perfError
+                ? ''
+                : '<div class="perf-chart-table-block">'
+                    . '<div class="perf-chart-table-caption">月別成績（千円）</div>'
+                    . $tableContent
+                    . '</div>';
             return '<div class="perf-chart-pane' . $activeCls . '" data-src="' . Layout::escape($paneKey) . '">'
-                . $tableContent
+                . $chartLegend
+                . $svgChart
+                . $tableBlock
                 . '</div>';
         }
 
@@ -851,6 +1038,161 @@ final class DashboardView
             . $tableContent
             . $legend
             . '</div>';
+    }
+
+    /**
+     * 月次棒グラフ（SVG）をレンダリングする。
+     * 各月 2 本のグループバー（今年 + 前年）を描画し、年度目標ラインも引く。
+     * 値は千円単位に切り捨てて正規化し、Y 軸はデータ最大値から近い切りの良い値へ拡張。
+     *
+     * @param array<int, array{premium: int, count: int}> $perfCurrent 今年度の月次成績
+     * @param array<int, array{premium: int, count: int}> $perfPrev    前年度の月次成績
+     */
+    private static function renderBarChart(
+        int $fiscalYear,
+        int $currentMonth,
+        int $currentFiscalYear,
+        array $perfCurrent,
+        array $perfPrev,
+        ?int $targetAnnual,
+        string $paneKey
+    ): string {
+        $monthLabels = [4 => '4月', 5 => '5月', 6 => '6月', 7 => '7月', 8 => '8月', 9 => '9月',
+                        10 => '10月', 11 => '11月', 12 => '12月', 1 => '1月', 2 => '2月', 3 => '3月'];
+        $fiscalOrder = [4=>0,5=>1,6=>2,7=>3,8=>4,9=>5,10=>6,11=>7,12=>8,1=>9,2=>10,3=>11];
+
+        // 千円単位への正規化
+        $toThousands = static function ($v): int { return (int) floor(((int) $v) / 1000); };
+        $targetMonthlyK = ($targetAnnual !== null && $targetAnnual > 0)
+            ? (int) floor($targetAnnual / 12 / 1000)
+            : null;
+
+        // Y 軸スケール決定
+        $maxValue = 0;
+        foreach (self::FISCAL_MONTHS as $m) {
+            $cy = $toThousands($perfCurrent[$m]['premium'] ?? 0);
+            $py = $toThousands($perfPrev[$m]['premium'] ?? 0);
+            $maxValue = max($maxValue, $cy, $py);
+        }
+        if ($targetMonthlyK !== null) {
+            $maxValue = max($maxValue, $targetMonthlyK);
+        }
+        if ($maxValue === 0) {
+            $maxValue = 100;
+        }
+        $niceScale = self::niceCeil($maxValue * 1.15);
+
+        // SVG 座標系
+        $vbW = 720;  $vbH = 220;
+        $padL = 44;  $padR = 16;  $padT = 20;  $padB = 32;
+        $plotW = $vbW - $padL - $padR;         // 660
+        $plotH = $vbH - $padT - $padB;         // 168
+        $plotBottom = $padT + $plotH;          // 188
+        $slotW = $plotW / 12;                  // 55
+        $barW  = 16;  $barGap = 3;
+        $groupW = $barW * 2 + $barGap;         // 35
+        $groupOffset = ($slotW - $groupW) / 2; // 10
+
+        $yAt = static function (float $v) use ($plotH, $plotBottom, $niceScale): float {
+            if ($niceScale <= 0) {
+                return (float) $plotBottom;
+            }
+            return $plotBottom - ($v / $niceScale) * $plotH;
+        };
+        $fmt = static function (float $v): string {
+            return number_format($v, 2, '.', '');
+        };
+
+        // グリッド線 + Y ラベル（5 段階）
+        $grids = '';
+        $steps = 4;
+        for ($i = 0; $i <= $steps; $i++) {
+            $v = ($niceScale / $steps) * $i;
+            $y = $yAt($v);
+            $grids .= '<line class="chart-grid" x1="' . $padL . '" y1="' . $fmt($y)
+                   . '" x2="' . ($padL + $plotW) . '" y2="' . $fmt($y) . '"/>';
+            $grids .= '<text class="chart-grid-label" x="' . ($padL - 6) . '" y="' . $fmt($y + 3)
+                   . '" text-anchor="end">' . Layout::escape(number_format((int) round($v))) . '</text>';
+        }
+
+        // X 軸ベース
+        $axis = '<line class="chart-axis" x1="' . $padL . '" y1="' . $plotBottom
+              . '" x2="' . ($padL + $plotW) . '" y2="' . $plotBottom . '"/>';
+
+        // バー + 月ラベル
+        $bars = '';
+        $labels = '';
+        $idx = 0;
+        foreach (self::FISCAL_MONTHS as $m) {
+            $isFuture = ($fiscalYear === $currentFiscalYear)
+                && (($fiscalOrder[$m] ?? 0) > ($fiscalOrder[$currentMonth] ?? 0));
+            $isCurrent = ($m === $currentMonth);
+            $cy = $toThousands($perfCurrent[$m]['premium'] ?? 0);
+            $py = $toThousands($perfPrev[$m]['premium']    ?? 0);
+
+            $slotX = $padL + $slotW * $idx;
+            $bar1X = $slotX + $groupOffset;             // 今年
+            $bar2X = $bar1X + $barW + $barGap;          // 前年
+
+            if (!$isFuture && $cy > 0) {
+                $y = $yAt((float) $cy);
+                $h = $plotBottom - $y;
+                $bars .= '<rect class="chart-bar-current" x="' . $fmt($bar1X)
+                      . '" y="' . $fmt($y) . '" width="' . $barW . '" height="' . $fmt($h) . '" rx="2">'
+                      . '<title>' . Layout::escape($monthLabels[$m] . ' 今年 ' . number_format($cy) . ' 千円') . '</title>'
+                      . '</rect>';
+            }
+            if ($py > 0) {
+                $y = $yAt((float) $py);
+                $h = $plotBottom - $y;
+                $bars .= '<rect class="chart-bar-previous" x="' . $fmt($bar2X)
+                      . '" y="' . $fmt($y) . '" width="' . $barW . '" height="' . $fmt($h) . '" rx="2">'
+                      . '<title>' . Layout::escape($monthLabels[$m] . ' 前年 ' . number_format($py) . ' 千円') . '</title>'
+                      . '</rect>';
+            }
+
+            $centerX = $slotX + $slotW / 2;
+            $labelCls = 'chart-month' . ($isCurrent ? ' is-current' : '');
+            $labels .= '<text class="' . $labelCls . '" x="' . $fmt($centerX)
+                    . '" y="' . ($plotBottom + 16) . '">' . Layout::escape($monthLabels[$m] ?? '') . '</text>';
+            $idx++;
+        }
+
+        // 目標ライン
+        $targetLine = '';
+        if ($targetMonthlyK !== null && $targetMonthlyK > 0) {
+            $y = $yAt((float) $targetMonthlyK);
+            $targetLine = '<line class="chart-target-line" x1="' . $padL . '" y1="' . $fmt($y)
+                        . '" x2="' . ($padL + $plotW) . '" y2="' . $fmt($y) . '"/>'
+                        . '<text class="chart-target-label" x="' . ($padL + $plotW - 4) . '" y="' . $fmt($y - 4)
+                        . '" text-anchor="end">目標 ' . Layout::escape(number_format($targetMonthlyK)) . '</text>';
+        }
+
+        return '<div class="chart-svg-wrap">'
+            . '<svg class="chart-svg" viewBox="0 0 ' . $vbW . ' ' . $vbH
+            . '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="月次推移棒グラフ（' . Layout::escape($paneKey) . '）">'
+            . $grids . $axis . $bars . $targetLine . $labels
+            . '</svg>'
+            . '</div>';
+    }
+
+    /**
+     * Y 軸スケールを見やすい切りの良い値へ丸める。
+     * 例: 372 → 500、1230 → 2000、89 → 100。
+     */
+    private static function niceCeil(float $value): float
+    {
+        if ($value <= 0) {
+            return 100.0;
+        }
+        $magnitude = (float) pow(10, (int) floor(log10($value)));
+        $normalized = $value / $magnitude;
+        foreach ([1.0, 2.0, 2.5, 5.0, 10.0] as $step) {
+            if ($normalized <= $step) {
+                return $step * $magnitude;
+            }
+        }
+        return 10.0 * $magnitude;
     }
 
     /**
@@ -908,7 +1250,7 @@ final class DashboardView
             . '<span class="activity-label">今日の活動</span>'
             . '<span class="activity-value">' . Layout::escape($countStr) . '</span>'
             . '</div>'
-            . '<div style="margin-top:10px;text-align:right;"><a href="' . Layout::escape($activityDailyUrl) . '" style="font-size:12px;color:var(--text-info);text-decoration:none;">日報ビューへ</a></div>'
+            . '<div class="activity-card-foot"><a href="' . Layout::escape($activityDailyUrl) . '" class="activity-link">日報ビューへ</a></div>'
             . '</div>';
     }
 }

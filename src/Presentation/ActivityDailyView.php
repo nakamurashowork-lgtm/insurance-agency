@@ -295,7 +295,7 @@ final class ActivityDailyView
             . '<span class="daily-date-label">' . Layout::escape($date) . '</span>'
             . ($nextDate <= date('Y-m-d')
                 ? '<a href="' . $nextUrl . '" class="btn btn-ghost btn-small">翌日 →</a>'
-                : '<span class="btn btn-ghost btn-small" style="opacity:0.4;pointer-events:none;cursor:default;" aria-disabled="true">翌日 →</span>'
+                : '<span class="btn btn-ghost btn-small" style="pointer-events:none;" aria-disabled="true">翌日 →</span>'
             )
             . '<span class="daily-staff-label">担当：<strong>' . Layout::escape($staffDisplayName) . '</strong></span>'
             . '</div>'
