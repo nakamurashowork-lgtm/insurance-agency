@@ -49,24 +49,21 @@ final class AccidentNotificationBatchRepository
                     r.last_notified_on,
                           ac.accident_date,
                     ac.status AS accident_status,
-                          c.customer_name,
+                          COALESCE(mc.customer_name, ac.prospect_name, "") AS customer_name,
                     GROUP_CONCAT(w.weekday_cd ORDER BY w.weekday_cd SEPARATOR ",") AS weekdays_csv
              FROM t_accident_reminder_rule r
              INNER JOIN t_accident_case ac
                      ON ac.id = r.accident_case_id
                     AND ac.is_deleted = 0
-                      INNER JOIN t_contract ct
-                        ON ct.id = ac.contract_id
-                          AND ct.is_deleted = 0
-                      INNER JOIN m_customer c
-                        ON c.id = ct.customer_id
-                          AND c.is_deleted = 0
+             LEFT JOIN m_customer mc
+                    ON mc.id = ac.customer_id
+                   AND mc.is_deleted = 0
              LEFT JOIN t_accident_reminder_rule_weekday w
                     ON w.accident_reminder_rule_id = r.id
              WHERE r.is_enabled = 1
                AND r.is_deleted = 0
-               AND ac.status IN ("accepted", "linked", "in_progress", "waiting_docs")
-                      GROUP BY r.id, r.accident_case_id, r.interval_weeks, r.base_date, r.start_date, r.end_date, r.last_notified_on, ac.accident_date, ac.status, c.customer_name
+               AND ac.status IN ("受付", "対応中", "書類待ち", "保険会社連絡済み")
+                      GROUP BY r.id, r.accident_case_id, r.interval_weeks, r.base_date, r.start_date, r.end_date, r.last_notified_on, ac.accident_date, ac.status, mc.customer_name, ac.prospect_name
              ORDER BY r.id ASC'
         );
         $rows = $stmt->fetchAll();

@@ -50,6 +50,7 @@ final class SalesPerformanceController
         $createDraft = $this->consumeCreateDraft();
         $importBatch = null;
         $importRows = [];
+        $quickFilterCounts = [];
         $error = null;
 
         $openModal = trim((string) ($_GET['open_modal'] ?? ''));
@@ -62,9 +63,31 @@ final class SalesPerformanceController
 
         try {
             $pdo = $this->tenantConnectionFactory->createForAuthenticatedUser($this->guard->requireAuthenticated());
+
+            $today         = (new DateTimeImmutable())->format('Y-m-d');
+            $loginUserId   = (int) ($auth['user_id'] ?? 0);
+            $loginUserName = trim((string) ($auth['display_name'] ?? ''));
+            $staffUsers    = (new StaffRepository($pdo))->findActive();
+            $loginStaffId  = 0;
+            $fallbackByName = 0;
+            foreach ($staffUsers as $u) {
+                $uid   = (int) ($u['user_id'] ?? 0);
+                $sid   = (int) ($u['id'] ?? 0);
+                $sname = trim((string) ($u['staff_name'] ?? ''));
+                if ($loginUserId > 0 && $uid === $loginUserId) { $loginStaffId = $sid; break; }
+                if ($fallbackByName === 0 && $loginUserName !== '' && $sname === $loginUserName) {
+                    $fallbackByName = $sid;
+                }
+            }
+            if ($loginStaffId === 0) { $loginStaffId = $fallbackByName; }
+
+            $searchCriteria = $criteria;
+            $searchCriteria['_login_staff_id'] = (string) $loginStaffId;
+            $searchCriteria['_today']          = $today;
+
             $repository = new SalesPerformanceRepository($pdo);
             $result = $repository->searchPage(
-                $criteria,
+                $searchCriteria,
                 (int) $listState['page'],
                 (int) $listState['per_page'],
                 (string) $listState['sort'],
@@ -75,10 +98,11 @@ final class SalesPerformanceController
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
             $listUrl = $this->listUrl($criteria, $listState);
             $customers = $repository->fetchCustomers(5000);
-            $staffUsers = (new StaffRepository($pdo))->findActive();
+            $quickFilterCounts = $repository->countByQuickFilters($criteria, $loginStaffId, $today);
             $contracts = $repository->fetchContracts(500);
             $renewalCases = $repository->fetchRenewalCases(500);
             $performanceMonths = $repository->fetchPerformanceMonths();
+            // $staffUsers は先に取得済み
             $staffUserNames = $this->buildUserNameMap($staffUsers);
             $rows = $this->attachStaffNamesToRows($rows, $staffUserNames);
         } catch (Throwable) {
@@ -100,7 +124,7 @@ final class SalesPerformanceController
             $performanceMonths,
             $createDraft,
             $openModal,
-            $listUrl,
+            $this->config->routeUrl('sales/list'),
             $this->config->routeUrl('sales/detail'),
             $this->config->routeUrl('customer/detail'),
             $this->config->routeUrl('sales/create'),
@@ -113,7 +137,8 @@ final class SalesPerformanceController
             $error,
             self::ALLOWED_TYPES,
             (string) ($_GET['filter_open'] ?? '') === '1',
-            ControllerLayoutHelper::build($this->guard, $this->config, 'sales')
+            ControllerLayoutHelper::build($this->guard, $this->config, 'sales'),
+            $quickFilterCounts
         ));
     }
 
@@ -463,6 +488,11 @@ final class SalesPerformanceController
         $performanceFiscalYear = trim((string) ($source['performance_fiscal_year'] ?? ''));
         $performanceMonthNum   = trim((string) ($source['performance_month_num'] ?? ''));
 
+        $quickFilter = trim((string) ($source['quick_filter'] ?? ''));
+        if (!in_array($quickFilter, ['this_month', 'this_fy', 'mine', 'non_life', 'life'], true)) {
+            $quickFilter = '';
+        }
+
         return [
             'performance_fiscal_year' => $performanceFiscalYear,
             'performance_month_num'   => $performanceMonthNum,
@@ -473,6 +503,7 @@ final class SalesPerformanceController
             'policy_no' => trim((string) ($source['policy_no'] ?? '')),
             'product_type' => trim((string) ($source['product_type'] ?? '')),
             'settlement_month' => trim((string) ($source['settlement_month'] ?? '')),
+            'quick_filter' => $quickFilter,
         ];
     }
 

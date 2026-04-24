@@ -57,6 +57,7 @@ final class AccidentCaseRepository
         $sql =
             "SELECT ac.id,
                     ac.accident_no,
+                    ac.accident_summary,
                     ac.accepted_date,
                     ac.accident_date,
                     ac.product_type,
@@ -155,7 +156,74 @@ final class AccidentCaseRepository
             $params['priority'] = $priority;
         }
 
+        // クイックフィルタタブ (high_open / open / mine / completed / all)
+        $quickFilter = trim((string) ($criteria['quick_filter'] ?? ''));
+        $loginUserId = (int) ($criteria['_login_user_id'] ?? 0);
+        if ($quickFilter === 'high_open') {
+            $sql .= " AND ac.priority = 'high'"
+                . ' AND EXISTS (SELECT 1 FROM m_case_status cs2 WHERE cs2.case_type = "accident" AND cs2.name = ac.status AND cs2.is_completed = 0)';
+        } elseif ($quickFilter === 'open') {
+            $sql .= ' AND EXISTS (SELECT 1 FROM m_case_status cs2 WHERE cs2.case_type = "accident" AND cs2.name = ac.status AND cs2.is_completed = 0)';
+        } elseif ($quickFilter === 'mine' && $loginUserId > 0) {
+            $sql .= ' AND ac.assigned_staff_id = :login_user_id'
+                . ' AND EXISTS (SELECT 1 FROM m_case_status cs2 WHERE cs2.case_type = "accident" AND cs2.name = ac.status AND cs2.is_completed = 0)';
+            $params['login_user_id'] = $loginUserId;
+        } elseif ($quickFilter === 'completed') {
+            $sql .= ' AND EXISTS (SELECT 1 FROM m_case_status cs2 WHERE cs2.case_type = "accident" AND cs2.name = ac.status AND cs2.is_completed = 1)';
+        }
+
         return $sql;
+    }
+
+    /**
+     * クイックフィルタタブの件数を一括取得。
+     * quick_filter 以外の criteria は AND 結合で各件数に反映される。
+     *
+     * @param array<string, string> $criteria
+     * @return array{all:int,high_open:int,open:int,mine:int,completed:int}
+     */
+    public function countByQuickFilters(array $criteria, int $loginUserId): array
+    {
+        $base = $criteria;
+        unset($base['quick_filter']);
+
+        $params = [];
+        $whereSql = $this->buildWhereClause($base, $params);
+
+        $sql = 'SELECT
+            COUNT(*) AS all_cnt,
+            SUM(CASE WHEN ac.priority = "high" AND COALESCE(cs.is_completed, 0) = 0 THEN 1 ELSE 0 END) AS high_open_cnt,
+            SUM(CASE WHEN COALESCE(cs.is_completed, 0) = 0 THEN 1 ELSE 0 END) AS open_cnt,
+            SUM(CASE WHEN ac.assigned_staff_id = :qf_login_user_id AND COALESCE(cs.is_completed, 0) = 0 THEN 1 ELSE 0 END) AS mine_cnt,
+            SUM(CASE WHEN COALESCE(cs.is_completed, 0) = 1 THEN 1 ELSE 0 END) AS completed_cnt
+         FROM t_accident_case ac
+         LEFT JOIN m_customer mc
+                ON mc.id = ac.customer_id
+               AND mc.is_deleted = 0
+         LEFT JOIN t_contract c
+                ON c.id = ac.contract_id
+               AND c.is_deleted = 0
+         LEFT JOIN m_case_status cs
+                ON cs.case_type = "accident"
+               AND cs.name = ac.status'
+            . $whereSql;
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue(':' . $key, $value);
+        }
+        $stmt->bindValue(':qf_login_user_id', $loginUserId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $row = is_array($row) ? $row : [];
+
+        return [
+            'all'       => (int) ($row['all_cnt'] ?? 0),
+            'high_open' => (int) ($row['high_open_cnt'] ?? 0),
+            'open'      => (int) ($row['open_cnt'] ?? 0),
+            'mine'      => (int) ($row['mine_cnt'] ?? 0),
+            'completed' => (int) ($row['completed_cnt'] ?? 0),
+        ];
     }
 
     /**

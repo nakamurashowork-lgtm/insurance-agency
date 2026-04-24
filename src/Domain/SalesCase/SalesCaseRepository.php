@@ -74,6 +74,21 @@ final class SalesCaseRepository
             $params[':case_name'] = '%' . $caseName . '%';
         }
 
+        // クイックフィルタタブ (high_open / open / mine / completed / all)
+        $quickFilter = trim((string) ($criteria['quick_filter'] ?? ''));
+        $loginStaffId = (int) ($criteria['_login_staff_id'] ?? 0);
+        if ($quickFilter === 'high_open') {
+            $where[] = "sc.prospect_rank = 'A'";
+            $where[] = "sc.status NOT IN ('成約','失注')";
+        } elseif ($quickFilter === 'open') {
+            $where[] = "sc.status NOT IN ('成約','失注')";
+        } elseif ($quickFilter === 'mine' && $loginStaffId > 0) {
+            $where[] = 'sc.staff_id = :qf_login_staff_id';
+            $params[':qf_login_staff_id'] = $loginStaffId;
+        } elseif ($quickFilter === 'completed') {
+            $where[] = "sc.status = '成約'";
+        }
+
         $whereClause = 'WHERE ' . implode(' AND ', $where);
 
         $countSql = "SELECT COUNT(*)
@@ -131,6 +146,77 @@ final class SalesCaseRepository
             'rows'  => is_array($rows) ? $rows : [],
             'total' => $total,
             'page'  => $page,
+        ];
+    }
+
+    /**
+     * クイックフィルタタブの件数を一括取得。
+     * quick_filter 以外の criteria は AND 結合で各件数に反映される。
+     *
+     * @param array<string, string> $criteria
+     * @return array{all:int,high_open:int,open:int,mine:int,completed:int}
+     */
+    public function countByQuickFilters(array $criteria, int $loginStaffId): array
+    {
+        $base = $criteria;
+        unset($base['quick_filter'], $base['_login_staff_id']);
+
+        $where  = ['sc.is_deleted = 0'];
+        $params = [];
+
+        $customerName = trim((string) ($base['customer_name'] ?? ''));
+        if ($customerName !== '') {
+            $where[] = '(mc.customer_name LIKE :customer_name OR sc.prospect_name LIKE :customer_name)';
+            $params[':customer_name'] = '%' . $customerName . '%';
+        }
+        $staffUserId = trim((string) ($base['staff_id'] ?? ''));
+        if ($staffUserId !== '' && ctype_digit($staffUserId) && (int) $staffUserId > 0) {
+            $where[] = 'sc.staff_id = :staff_id';
+            $params[':staff_id'] = (int) $staffUserId;
+        }
+        $status = trim((string) ($base['status'] ?? ''));
+        if ($status !== '') {
+            $where[] = 'sc.status = :status';
+            $params[':status'] = $status;
+        }
+        $prospectRank = trim((string) ($base['prospect_rank'] ?? ''));
+        if ($prospectRank !== '' && in_array($prospectRank, self::ALLOWED_PROSPECT_RANKS, true)) {
+            $where[] = 'sc.prospect_rank = :prospect_rank';
+            $params[':prospect_rank'] = $prospectRank;
+        }
+        $caseName = trim((string) ($base['case_name'] ?? ''));
+        if ($caseName !== '') {
+            $where[] = 'sc.case_name LIKE :case_name';
+            $params[':case_name'] = '%' . $caseName . '%';
+        }
+
+        $whereClause = 'WHERE ' . implode(' AND ', $where);
+
+        $sql = "SELECT
+            COUNT(*) AS all_cnt,
+            SUM(CASE WHEN sc.prospect_rank = 'A' AND sc.status NOT IN ('成約','失注') THEN 1 ELSE 0 END) AS high_open_cnt,
+            SUM(CASE WHEN sc.status NOT IN ('成約','失注') THEN 1 ELSE 0 END) AS open_cnt,
+            SUM(CASE WHEN sc.staff_id = :qf_login_staff_id THEN 1 ELSE 0 END) AS mine_cnt,
+            SUM(CASE WHEN sc.status = '成約' THEN 1 ELSE 0 END) AS completed_cnt
+         FROM t_sales_case sc
+         LEFT JOIN m_customer mc ON mc.id = sc.customer_id AND mc.is_deleted = 0
+         $whereClause";
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $k => $v) {
+            $stmt->bindValue($k, $v, is_int($v) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $stmt->bindValue(':qf_login_staff_id', $loginStaffId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $row = is_array($row) ? $row : [];
+
+        return [
+            'all'       => (int) ($row['all_cnt'] ?? 0),
+            'high_open' => (int) ($row['high_open_cnt'] ?? 0),
+            'open'      => (int) ($row['open_cnt'] ?? 0),
+            'mine'      => (int) ($row['mine_cnt'] ?? 0),
+            'completed' => (int) ($row['completed_cnt'] ?? 0),
         ];
     }
 

@@ -6,7 +6,7 @@ namespace App\Domain\Notification;
 use InvalidArgumentException;
 use RuntimeException;
 
-const LINEWORKS_MAX_DISPLAY_COUNT = 10;
+const LINEWORKS_MAX_DISPLAY_COUNT = PHP_INT_MAX;
 
 function build_lineworks_absolute_url(string $appPublicUrl, string $route): string
 {

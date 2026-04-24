@@ -104,12 +104,20 @@ final class RenewalNotificationBatchRepository
                     rc.contract_id,
                     rc.maturity_date,
                     rc.case_status,
+                    ct.policy_no,
+                    c.customer_name,
                     DATEDIFF(rc.maturity_date, :run_date) AS days_before
              FROM t_renewal_case rc
+             INNER JOIN t_contract ct
+                     ON ct.id = rc.contract_id
+                    AND ct.is_deleted = 0
+             INNER JOIN m_customer c
+                     ON c.id = ct.customer_id
+                    AND c.is_deleted = 0
              WHERE rc.is_deleted = 0
                AND rc.case_status NOT IN (SELECT name FROM m_case_status WHERE case_type = "renewal" AND is_completed = 1)
                AND DATEDIFF(rc.maturity_date, :run_date) BETWEEN :to_days_before AND :from_days_before
-             ORDER BY rc.maturity_date ASC, rc.id ASC'
+             ORDER BY rc.maturity_date ASC, c.customer_name ASC, rc.id ASC'
         );
         $stmt->bindValue(':run_date', $runDate);
         $stmt->bindValue(':to_days_before', $toDaysBefore, PDO::PARAM_INT);

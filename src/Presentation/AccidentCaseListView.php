@@ -6,6 +6,7 @@ namespace App\Presentation;
 use App\Presentation\View\Layout;
 use App\Presentation\View\ListPageRenderer as LP;
 use App\Presentation\View\ListViewHelper;
+use App\Presentation\View\StatusBadge;
 
 final class AccidentCaseListView
 {
@@ -14,6 +15,7 @@ final class AccidentCaseListView
      * @param array<string, string> $criteria
      * @param array<string, mixed> $layoutOptions
      * @param array<int, array<string, mixed>> $allStatuses
+     * @param array<string, int> $quickFilterCounts
      */
     public static function render(
         array $rows,
@@ -36,7 +38,8 @@ final class AccidentCaseListView
         ?string $flashSuccess,
         bool $forceFilterOpen,
         array $layoutOptions,
-        array $allStatuses = []
+        array $allStatuses = [],
+        array $quickFilterCounts = []
     ): string {
         $listErrorHtml = '';
         if (is_string($errorMessage) && $errorMessage !== '') {
@@ -51,8 +54,7 @@ final class AccidentCaseListView
             $noticeHtml .= '<div class="notice">' . Layout::escape($flashSuccess) . '</div>';
         }
 
-        $customerName   = Layout::escape((string) ($criteria['customer_name'] ?? ''));
-        $productType    = Layout::escape((string) ($criteria['product_type'] ?? ''));
+        $productType    = (string) ($criteria['product_type'] ?? '');
         $status         = (string) ($criteria['status'] ?? '');
         $priorityFilter = (string) ($criteria['priority'] ?? '');
         $filterUserId   = (int) ($criteria['assigned_staff_id'] ?? 0);
@@ -65,178 +67,270 @@ final class AccidentCaseListView
             }
         }
 
-        $perPage    = (int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE);
-        $sort       = (string) ($listState['sort'] ?? '');
-        $direction  = (string) ($listState['direction'] ?? 'asc');
-        $filterOpen = $forceFilterOpen || ListViewHelper::hasActiveFilters($criteria) || $listErrorHtml !== '';
-        $pager      = ListViewHelper::buildPager((int) ($listState['page'] ?? '1'), $perPage, $totalCount);
+        $perPage = (int) ($listState['per_page'] ?? (string) ListViewHelper::DEFAULT_PER_PAGE);
+        $pager   = ListViewHelper::buildPager((int) ($listState['page'] ?? '1'), $perPage, $totalCount);
         $listState['page'] = (string) ($pager['currentPage'] ?? 1);
-        $listQuery  = LP::queryParams($criteria, $listState);
+        $listQuery = LP::queryParams($criteria, $listState);
 
         // ステータスフィルター選択肢と完了扱い name セット
         $completedNames = [];
         $statusFilterOptions = ['' => 'すべて'];
         foreach ($allStatuses as $sRow) {
             $name = (string) ($sRow['name'] ?? '');
-            if ($name === '') { continue; }
+            if ($name === '') {
+                continue;
+            }
             $statusFilterOptions[$name] = $name;
             if ((int) ($sRow['is_completed'] ?? 0) === 1) {
                 $completedNames[$name] = true;
             }
         }
-        $statusHtml = '';
+
+        // 絞り込みバッジ件数（customer_name 以外で適用中）
+        $advancedFilterCount = 0;
+        foreach (['product_type', 'status', 'priority', 'assigned_staff_id'] as $k) {
+            if ((string) ($criteria[$k] ?? '') !== '') {
+                $advancedFilterCount++;
+            }
+        }
+
+        // フィルタダイアログ用 HTML パーツ
+        $statusSelectHtml = '<select name="status">';
         foreach ($statusFilterOptions as $value => $label) {
-            $selected = $status === $value ? ' selected' : '';
-            $statusHtml .= '<option value="' . Layout::escape($value) . '"' . $selected . '>' . Layout::escape($label) . '</option>';
+            $sel = $status === (string) $value ? ' selected' : '';
+            $statusSelectHtml .= '<option value="' . Layout::escape((string) $value) . '"' . $sel . '>' . Layout::escape($label) . '</option>';
         }
+        $statusSelectHtml .= '</select>';
 
-        $rowsHtml = '';
-        foreach ($rows as $row) {
-            $id           = (int) ($row['id'] ?? 0);
-            $detailUrl    = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, array_merge(['id' => (string) $id], $listQuery)));
-            $assignedId   = (int) ($row['assigned_staff_id'] ?? 0);
-            $assignedName = $assignedId > 0 ? ($userMap[$assignedId] ?? '-') : '-';
-            $reminderHtml = self::formatReminderDate((string) ($row['next_reminder_date'] ?? ''));
-            $deleteFormId = 'form-del-accident-' . $id;
-            $displayCustomer = (string) ($row['display_customer'] ?? $row['customer_name'] ?? '');
-            $deleteLabel  = $displayCustomer !== '' ? $displayCustomer : ('ID: ' . $id);
-            $deleteForm = '<form id="' . $deleteFormId . '" method="post" action="' . Layout::escape($deleteActionUrl) . '" style="display:inline;">'
-                . LP::routeInput($deleteActionUrl)
-                . '<input type="hidden" name="_csrf_token" value="' . Layout::escape($deleteCsrfToken) . '">'
-                . '<input type="hidden" name="id" value="' . $id . '">'
-                . LP::hiddenInputs(LP::queryParams($criteria, $listState))
-                . '<button type="button" class="btn-icon-delete" title="削除"'
-                . ' data-delete-form="' . $deleteFormId . '"'
-                . ' data-delete-label="' . Layout::escape($deleteLabel) . '">'
-                . '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>'
-                . '</button>'
-                . '</form>';
-            $rowStatusName = (string) ($row['status'] ?? '');
-            $rowClass = isset($completedNames[$rowStatusName]) ? ' class="is-completed-row"' : '';
-            $rowsHtml .= '<tr' . $rowClass . '>'
-                . '<td class="cell-ellipsis" data-label="契約者名" title="' . Layout::escape($displayCustomer) . '"><a class="text-link" href="' . $detailUrl . '">' . Layout::escape($displayCustomer) . '</a></td>'
-                . '<td data-label="事故日" style="white-space:nowrap;">' . Layout::escape((string) ($row['accident_date'] ?? '')) . '</td>'
-                . '<td class="cell-ellipsis" data-label="種目" title="' . Layout::escape((string) ($row['product_type'] ?? '')) . '">' . Layout::escape((string) ($row['product_type'] ?? '')) . '</td>'
-                . '<td class="cell-ellipsis" data-label="担当" title="' . Layout::escape($assignedName) . '">' . Layout::escape($assignedName) . '</td>'
-                . '<td class="td-pair" data-label="状態" style="white-space:nowrap;">' . self::renderStatusBadge((string) ($row['status'] ?? '')) . '</td>'
-                . '<td class="td-pair" data-label="優先度" style="text-align:center;">' . self::renderPriorityBadge((string) ($row['priority'] ?? '')) . '</td>'
-                . '<td data-label="次回リマインド" style="white-space:nowrap;">' . $reminderHtml . '</td>'
-                . '<td>' . $deleteForm . '</td>'
-                . '</tr>';
-        }
-        if ($rowsHtml === '') {
-            $rowsHtml = '<tr><td colspan="8">該当する事故案件はありません。</td></tr>';
-        }
-
-        $topToolbar  = LP::toolbar($searchUrl, $criteria, $listState, $pager, $totalCount, $perPage);
-        $bottomPager = LP::bottomPager($searchUrl, $criteria, $listState, $pager);
-
-        $staffSelectHtml = str_replace('<select', '<select class="compact-input w-md"', self::renderUserFilterSelect($staffUsers, $filterUserId));
-        $filterPanelHtml =
-            '<div class="search-panel-compact">'
-            . '<div class="toggle-header">'
-            . '<span class="toggle-header-title">検索条件を閉じる</span>'
-            . '<span class="toggle-header-arrow">▲</span>'
-            . '</div>'
-            . '<div class="search-panel-body">'
-            . '<form method="get" action="' . Layout::escape(LP::formAction($searchUrl)) . '">'
-            . LP::routeInput($searchUrl)
-            . LP::hiddenInputs(LP::queryParams([], $listState, false, true))
-            . '<div class="search-row">'
-            . '<div class="search-field"><span class="search-label">契約者名</span><input type="text" name="customer_name" class="compact-input w-md" value="' . $customerName . '"></div>'
-            . '<div class="search-field"><span class="search-label">種目</span><input type="text" name="product_type" class="compact-input w-md" value="' . $productType . '"></div>'
-            . '<div class="search-field"><span class="search-label">状態</span><select name="status" class="compact-input w-sm">' . $statusHtml . '</select></div>'
-            . '<div class="search-field"><span class="search-label">優先度</span><select name="priority" class="compact-input w-sm">'
+        $prioritySelectHtml = '<select name="priority">'
             . '<option value="">すべて</option>'
             . '<option value="high"'   . ($priorityFilter === 'high'   ? ' selected' : '') . '>高</option>'
             . '<option value="normal"' . ($priorityFilter === 'normal' ? ' selected' : '') . '>中</option>'
             . '<option value="low"'    . ($priorityFilter === 'low'    ? ' selected' : '') . '>低</option>'
-            . '</select></div>'
-            . '<div class="search-field"><span class="search-label">担当者</span>' . $staffSelectHtml . '</div>'
-            . '<div class="search-actions">'
-            . '<button class="btn btn-small" type="submit">検索</button>'
-            . '<a class="btn btn-small btn-secondary" href="' . Layout::escape($searchUrl) . '">クリア</a>'
-            . '</div>'
-            . '</div>'
-            . '</form>'
-            . '</div>'
-            . '</div>';
+            . '</select>';
+
+        // PC テーブル行
+        $rowsHtml = '';
+        foreach ($rows as $row) {
+            $rowsHtml .= self::buildTableRowHtml(
+                $row, $detailBaseUrl, $listQuery,
+                $userMap, $completedNames
+            );
+        }
+        if ($rowsHtml === '') {
+            $rowsHtml = '<tr><td colspan="7">該当する事故案件はありません。</td></tr>';
+        }
 
         $tableHtml =
-            '<div class="table-wrap">'
-            . '<table class="table-fixed table-card list-table list-table-accident">'
+            '<div class="table-wrap list-pc-only">'
+            . '<table class="table-fixed list-table list-table-accident">'
             . '<colgroup>'
-            . '<col class="list-col-customer">'
+            . '<col class="list-col-priority">'
             . '<col class="list-col-date">'
-            . '<col class="list-col-product">'
+            . '<col class="list-col-customer">'
             . '<col class="list-col-assigned">'
             . '<col class="list-col-status">'
-            . '<col class="list-col-priority">'
             . '<col class="list-col-reminder">'
             . '<col class="list-col-action">'
             . '</colgroup>'
             . '<thead><tr>'
+            . '<th style="text-align:center;">' . LP::sortLink('優先度', 'priority', $searchUrl, $criteria, $listState) . '</th>'
+            . '<th>' . LP::sortLink('事故日', 'accident_date', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>' . LP::sortLink('契約者名', 'customer_name', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th>' . LP::sortLink('事故日', 'accepted_date', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th>' . LP::sortLink('種目', 'product_type', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>担当</th>'
             . '<th>' . LP::sortLink('状態', 'status', $searchUrl, $criteria, $listState) . '</th>'
-            . '<th style="text-align:center;">' . LP::sortLink('優先度', 'priority', $searchUrl, $criteria, $listState) . '</th>'
             . '<th>次回リマインド</th>'
             . '<th></th>'
             . '</tr></thead>'
             . '<tbody>' . $rowsHtml . '</tbody>'
             . '</table>'
-            . '</div>';
+            . '</div>'
+            . LP::mobileCardList(
+                $rows,
+                fn (array $row): string => self::buildMobileCardHtml($row, $detailBaseUrl, $listQuery, $userMap),
+                '事故案件一覧（モバイル表示）'
+            );
 
-        $deleteConfirmDialog =
-            '<dialog id="dlg-delete-accident-confirm" class="modal-dialog">'
-            . '<div class="modal-head"><h2>削除の確認</h2>'
-            . '<button type="button" class="modal-close" id="dlg-delete-accident-close">×</button>'
-            . '</div>'
-            . '<p id="dlg-delete-accident-msg" style="margin:16px 0;"></p>'
-            . '<div class="actions">'
-            . '<button type="button" id="dlg-delete-accident-ok" class="btn btn-danger">削除する</button>'
-            . '<button type="button" id="dlg-delete-accident-cancel" class="btn btn-ghost">キャンセル</button>'
-            . '</div>'
-            . '</dialog>'
-            . '<script>'
-            . '(function(){'
-            . 'var dlg=document.getElementById("dlg-delete-accident-confirm");'
-            . 'if(!dlg){return;}'
-            . 'var msg=document.getElementById("dlg-delete-accident-msg");'
-            . 'var pendingId=null;'
-            . 'function closeDlg(){if(dlg.open){dlg.close();}pendingId=null;}'
-            . 'document.querySelectorAll("[data-delete-form]").forEach(function(btn){'
-            . 'btn.addEventListener("click",function(){'
-            . 'pendingId=btn.getAttribute("data-delete-form");'
-            . 'var label=btn.getAttribute("data-delete-label")||"この件";'
-            . 'msg.textContent="「"+label+"」を削除しますか？この操作は取り消せません。";'
-            . 'if(!dlg.open){dlg.showModal();}'
-            . '});});'
-            . 'document.getElementById("dlg-delete-accident-ok").addEventListener("click",function(){'
-            . 'if(pendingId){var f=document.getElementById(pendingId);if(f){f.submit();}}'
-            . '});'
-            . 'document.getElementById("dlg-delete-accident-cancel").addEventListener("click",closeDlg);'
-            . 'document.getElementById("dlg-delete-accident-close").addEventListener("click",closeDlg);'
-            . '})();'
-            . '</script>';
+        $toolbarHtml = LP::searchToolbar([
+            'searchUrl'         => $searchUrl,
+            'searchParam'       => 'customer_name',
+            'searchValue'       => (string) ($criteria['customer_name'] ?? ''),
+            'searchPlaceholder' => '契約者名で検索',
+            'criteria'          => $criteria,
+            'listState'         => $listState,
+            'filterDialogId'    => 'accident-filter-dialog',
+            'advancedCount'     => $advancedFilterCount,
+            'headerActions'     => '<button class="btn" type="button" data-open-dialog="accident-create-dialog">事故案件を追加</button>',
+        ]);
+
+        // クイックフィルタタブ（すべて / 高優先度・未完了 / 未完了 / 自分 / 完了）
+        $quickFilterTabsHtml = LP::quickFilterTabs([
+            'currentKey' => (string) ($criteria['quick_filter'] ?? ''),
+            'tabs' => [
+                ''          => ['label' => 'すべて',         'countKey' => 'all'],
+                'high_open' => ['label' => '高優先度・未完了', 'countKey' => 'high_open'],
+                'open'      => ['label' => '未完了',         'countKey' => 'open'],
+                'mine'      => ['label' => '自分',           'countKey' => 'mine'],
+                'completed' => ['label' => '完了',           'countKey' => 'completed'],
+            ],
+            'counts'    => $quickFilterCounts,
+            'paramName' => 'quick_filter',
+            'searchUrl' => $searchUrl,
+            'criteria'  => $criteria,
+            'listState' => $listState,
+        ]);
+
+        $filterDialogHtml = LP::filterDialog([
+            'id'        => 'accident-filter-dialog',
+            'title'     => '絞り込み条件',
+            'searchUrl' => $searchUrl,
+            'listState' => $listState,
+            'preserveCriteria' => [
+                'quick_filter' => (string) ($criteria['quick_filter'] ?? ''),
+            ],
+            'fields'    => [
+                ['label' => '種目',   'html' => '<input type="text" name="product_type" value="' . Layout::escape($productType) . '" placeholder="部分一致">'],
+                ['label' => '状態',   'html' => $statusSelectHtml],
+                ['label' => '優先度', 'html' => $prioritySelectHtml],
+                ['label' => '担当者', 'html' => self::renderUserFilterSelect($staffUsers, $filterUserId)],
+            ],
+            'clearUrl'  => $searchUrl,
+        ]);
+
+        $topToolbar  = LP::toolbar($searchUrl, $criteria, $listState, $pager, $totalCount, $perPage);
+        $bottomPager = LP::bottomPager($searchUrl, $criteria, $listState, $pager);
+
+        $autoOpenId = $openModal === 'create'
+            ? 'accident-create-dialog'
+            : ($forceFilterOpen ? 'accident-filter-dialog' : null);
+
+        $deleteDialogHtml = LP::deleteConfirmDialog([
+            'deleteUrl' => $deleteActionUrl,
+            'csrfToken' => $deleteCsrfToken,
+            'listQuery' => $listQuery,
+        ]);
 
         $content =
             '<div class="list-page-frame">'
-            . LP::pageHeader('事故案件一覧', '<button class="btn" type="button" data-open-dialog="accident-create-dialog">事故案件を追加</button>')
+            . LP::pageHeader('事故案件一覧', '')
             . $noticeHtml
             . $listErrorHtml
-            . $filterPanelHtml
+            . $toolbarHtml
+            . $quickFilterTabsHtml
             . LP::tableCard($topToolbar, $tableHtml, $bottomPager)
             . '</div>'
             . self::renderCreateDialog($storeUrl, $createCsrf, $createDraft, $searchUrl, $customerOptions, $staffUsers, $currentUser, $allStatuses)
-            . $deleteConfirmDialog
-            . '<script>'
-            . '(function(){const id="accident-create-dialog";const dlg=document.getElementById(id);if(!dlg||typeof dlg.showModal!=="function"){return;}const openBtns=document.querySelectorAll("[data-open-dialog=\""+id+"\"]");openBtns.forEach((btn)=>{btn.addEventListener("click",()=>{if(!dlg.open){dlg.showModal();}});});const closeBtns=dlg.querySelectorAll("[data-close-dialog=\""+id+"\"]");closeBtns.forEach((btn)=>{btn.addEventListener("click",()=>{if(dlg.open){dlg.close();}});});dlg.addEventListener("click",(e)=>{const rect=dlg.getBoundingClientRect();const inside=rect.left<=e.clientX&&e.clientX<=rect.right&&rect.top<=e.clientY&&e.clientY<=rect.bottom;if(!inside&&dlg.open){dlg.close();}});if(' . ($openModal === 'create' ? 'true' : 'false') . '){dlg.showModal();}})()'
-            . '</script>';
+            . $deleteDialogHtml
+            . $filterDialogHtml
+            . LP::dialogScript(['accident-create-dialog', 'accident-filter-dialog'], $autoOpenId);
 
         return Layout::render('事故案件一覧', $content, $layoutOptions);
+    }
+
+    /**
+     * PC テーブル 1 行の HTML を生成する。
+     *
+     * @param array<string, mixed> $row
+     * @param array<string, string> $listQuery
+     * @param array<int, string> $userMap
+     * @param array<string, bool> $completedNames
+     */
+    private static function buildTableRowHtml(
+        array $row,
+        string $detailBaseUrl,
+        array $listQuery,
+        array $userMap,
+        array $completedNames
+    ): string {
+        $id              = (int) ($row['id'] ?? 0);
+        $displayCustomer = (string) ($row['display_customer'] ?? $row['customer_name'] ?? '');
+        $detailUrl       = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, array_merge(['id' => (string) $id], $listQuery)));
+        $assignedId      = (int) ($row['assigned_staff_id'] ?? 0);
+        $assignedName    = $assignedId > 0 ? ($userMap[$assignedId] ?? '-') : '-';
+        $reminderHtml    = self::formatReminderDate((string) ($row['next_reminder_date'] ?? ''));
+        $deleteLabel     = $displayCustomer !== '' ? $displayCustomer : ('ID: ' . $id);
+
+        $priorityCtx       = StatusBadge::renderByPriority((string) ($row['priority'] ?? ''));
+        $priorityBadgeHtml = '<span class="badge ' . $priorityCtx['badge'] . '">' . Layout::escape($priorityCtx['label']) . '</span>';
+
+        $rowStatusName = (string) ($row['status'] ?? '');
+        $rowClass = isset($completedNames[$rowStatusName]) ? ' class="is-completed-row"' : '';
+
+        $accidentDate = (string) ($row['accident_date'] ?? '');
+        $productType  = (string) ($row['product_type'] ?? '');
+        $secondaryHtml = $productType !== ''
+            ? '<div class="list-row-secondary">' . Layout::escape($productType) . '</div>'
+            : '';
+
+        return '<tr' . $rowClass . ' data-urgency="' . Layout::escape($priorityCtx['urgency']) . '">'
+            . '<td class="td-pair" data-label="優先度" style="text-align:center;">' . $priorityBadgeHtml . '</td>'
+            . '<td class="cell-date" data-label="事故日" style="white-space:nowrap;">' . Layout::escape($accidentDate) . '</td>'
+            . '<td data-label="契約者名">'
+            . '<div class="list-row-stack">'
+            . '<a class="list-row-primary text-link" href="' . $detailUrl . '" title="' . Layout::escape($displayCustomer) . '">' . Layout::escape($displayCustomer) . '</a>'
+            . $secondaryHtml
+            . '</div>'
+            . '</td>'
+            . '<td class="cell-ellipsis" data-label="担当" title="' . Layout::escape($assignedName) . '">' . Layout::escape($assignedName) . '</td>'
+            . '<td class="td-pair" data-label="状態" style="white-space:nowrap;">' . self::renderStatusBadge((string) ($row['status'] ?? '')) . '</td>'
+            . '<td data-label="次回リマインド" style="white-space:nowrap;">' . $reminderHtml . '</td>'
+            . '<td>' . LP::deleteButton($id, $deleteLabel) . '</td>'
+            . '</tr>';
+    }
+
+    /**
+     * モバイル用 list-card の HTML を生成する（LP::mobileCardList から closure で呼ばれる）。
+     *
+     * @param array<string, mixed> $row
+     * @param array<string, string> $listQuery
+     * @param array<int, string> $userMap
+     */
+    private static function buildMobileCardHtml(
+        array $row,
+        string $detailBaseUrl,
+        array $listQuery,
+        array $userMap
+    ): string {
+        $id              = (int) ($row['id'] ?? 0);
+        $displayCustomer = (string) ($row['display_customer'] ?? $row['customer_name'] ?? '');
+        $detailUrl       = Layout::escape(ListViewHelper::buildUrl($detailBaseUrl, array_merge(['id' => (string) $id], $listQuery)));
+        $productType     = (string) ($row['product_type'] ?? '');
+        $accidentDate    = (string) ($row['accident_date'] ?? '');
+        $accidentNo      = (string) ($row['accident_no'] ?? '');
+        $accidentSummary = (string) ($row['accident_summary'] ?? '');
+        $assignedId      = (int) ($row['assigned_staff_id'] ?? 0);
+        $assignedName    = $assignedId > 0 ? ($userMap[$assignedId] ?? '−') : '−';
+        $statusLabel     = (string) ($row['status'] ?? '');
+
+        $priorityCtx  = StatusBadge::renderByPriority((string) ($row['priority'] ?? ''));
+        $priorityBadge = '<span class="badge ' . $priorityCtx['badge'] . '">' . Layout::escape($priorityCtx['label']) . '</span>';
+        $statusBadge   = '<span class="badge badge-gray">' . Layout::escape($statusLabel !== '' ? $statusLabel : '未設定') . '</span>';
+
+        $iconCalendar = '<svg class="list-card-meta-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
+        $iconTag      = '<svg class="list-card-meta-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>';
+        $iconUser     = '<svg class="list-card-meta-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+
+        return '<li class="list-card with-stripe" data-urgency="' . Layout::escape($priorityCtx['urgency']) . '">'
+            . '<span class="list-card-stripe ' . Layout::escape($priorityCtx['stripe']) . '" aria-hidden="true"></span>'
+            . '<a class="list-card-link" href="' . $detailUrl . '">'
+            . '<div class="list-card-top">'
+            . '<span class="list-card-top-left">' . $priorityBadge
+            . ($productType !== '' ? '<span class="list-card-product">' . Layout::escape($productType) . '</span>' : '')
+            . '</span>'
+            . '<span class="list-card-top-right">' . $statusBadge . '</span>'
+            . '</div>'
+            . '<div class="list-card-customer">' . Layout::escape($displayCustomer !== '' ? $displayCustomer : '（顧客なし）') . '</div>'
+            . '<div class="list-card-policy">事故番号: ' . ($accidentNo !== '' ? Layout::escape($accidentNo) : '−') . '</div>'
+            . ($accidentSummary !== ''
+                ? '<div class="list-card-summary">' . Layout::escape($accidentSummary) . '</div>'
+                : '')
+            . '<div class="list-card-meta">'
+            . '<span class="list-card-meta-item">' . $iconCalendar . '<span class="list-card-meta-value">' . ($accidentDate !== '' ? Layout::escape($accidentDate) : '−') . '</span></span>'
+            . '<span class="list-card-meta-item">' . $iconTag . '<span class="list-card-meta-value">' . ($productType !== '' ? Layout::escape($productType) : '−') . '</span></span>'
+            . '<span class="list-card-meta-item">' . $iconUser . '<span class="list-card-meta-value">' . Layout::escape($assignedName) . '</span></span>'
+            . '</div>'
+            . '</a>'
+            . '</li>';
     }
 
     /**
@@ -263,18 +357,22 @@ final class AccidentCaseListView
         $firstName = '';
         foreach ($allStatuses as $sRow) {
             $name = (string) ($sRow['name'] ?? '');
-            if ($name === '') { continue; }
-            if ($firstName === '') { $firstName = $name; }
+            if ($name === '') {
+                continue;
+            }
+            if ($firstName === '') {
+                $firstName = $name;
+            }
             $selected = ($name === $currentStatus || ($currentStatus === '' && $name === $firstName)) ? ' selected' : '';
             $statusHtml .= '<option value="' . Layout::escape($name) . '"' . $selected . '>' . Layout::escape($name) . '</option>';
         }
 
         // お客さまコンボボックス用 datalist
-        $selectedCustomerId = (int) ($draft['customer_id'] ?? 0);
+        $selectedCustomerId   = (int) ($draft['customer_id'] ?? 0);
         $selectedProspectName = (string) ($draft['prospect_name'] ?? '');
         $selectedCustomerText = '';
-        $customerDlId = 'accident-create-customer-dl';
-        $customerDatalist = '';
+        $customerDlId         = 'accident-create-customer-dl';
+        $customerDatalist     = '';
         foreach ($customerOptions as $row) {
             $id = (int) ($row['id'] ?? 0);
             if ($id <= 0) {
@@ -286,12 +384,10 @@ final class AccidentCaseListView
             }
             $customerDatalist .= '<option value="' . Layout::escape($label) . '" data-id="' . $id . '">';
         }
-        // 既存顧客が選ばれていない（NULL）かつ prospect_name が draft にある場合は、その値を表示
         if ($selectedCustomerText === '' && $selectedProspectName !== '') {
             $selectedCustomerText = $selectedProspectName;
         }
 
-        // スタッフプルダウン共通生成
         $defaultUserId  = (int) ($currentUser['id'] ?? 0);
         $assignedUserId = (int) ($draft['assigned_staff_id'] ?? $defaultUserId);
         $scStaffName    = Layout::escape((string) ($draft['sc_staff_name'] ?? ''));
@@ -361,27 +457,8 @@ final class AccidentCaseListView
 
     private static function renderStatusBadge(string $status): string
     {
-        // 表示名がそのまま DB 格納値。設定画面で自由に変更できるため中立色で表示。
         $label = $status !== '' ? $status : '未設定';
         return '<span class="badge badge-gray">' . Layout::escape($label) . '</span>';
-    }
-
-    private static function renderPriorityBadge(string $priority): string
-    {
-        $label = match ($priority) {
-            'high'   => '高',
-            'normal' => '中',
-            'low'    => '低',
-            default  => '-',
-        };
-        $class = match ($priority) {
-            'high'   => 'priority-high',
-            'normal' => 'priority-medium',
-            'low'    => 'priority-low',
-            default  => 'priority-none',
-        };
-
-        return '<span class="priority-badge ' . $class . '">' . Layout::escape($label) . '</span>';
     }
 
     /**
@@ -417,5 +494,4 @@ final class AccidentCaseListView
 
         return Layout::escape($md . '（' . $weekdays[$w] . '）');
     }
-
 }

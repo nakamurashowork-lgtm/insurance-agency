@@ -544,10 +544,13 @@ final class RenewalCaseRepository
      */
     private function buildSearchQuery(array $criteria): array
     {
+        // m_case_status LEFT JOIN を常時同伴: is_completed を WHERE で参照可能にする
+        // （未マスタのステータス値は cs.* が NULL、COALESCE で 0 扱い）
         $sql =
             ' FROM t_renewal_case rc
              INNER JOIN t_contract c ON c.id = rc.contract_id AND c.is_deleted = 0
              LEFT JOIN m_customer mc ON mc.id = c.customer_id AND mc.is_deleted = 0
+             LEFT JOIN m_case_status cs ON cs.case_type = "renewal" AND cs.name = rc.case_status
              WHERE rc.is_deleted = 0';
 
         $params = [];
@@ -591,7 +594,70 @@ final class RenewalCaseRepository
             $params['product_type'] = '%' . $productType . '%';
         }
 
+        // クイックフィルタタブ (overdue / w7 / w14 / w28 / w60 / incomplete / all)
+        // 値は extractCriteria で allowlist 検証済み。日数は下記 match の固定値のみ。
+        $quickFilter = trim((string) ($criteria['quick_filter'] ?? ''));
+        $windowDays  = match ($quickFilter) {
+            'w7'  => 7,
+            'w14' => 14,
+            'w28' => 28,
+            'w60' => 60,
+            default => null,
+        };
+        if ($quickFilter === 'overdue') {
+            $sql .= ' AND rc.maturity_date < CURDATE() AND COALESCE(cs.is_completed, 0) = 0';
+        } elseif ($windowDays !== null) {
+            $sql .= ' AND rc.maturity_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL ' . $windowDays . ' DAY)'
+                . ' AND COALESCE(cs.is_completed, 0) = 0';
+        } elseif ($quickFilter === 'incomplete') {
+            $sql .= ' AND COALESCE(cs.is_completed, 0) = 0';
+        }
+        // 'all' / 空: 追加条件なし
+
         return ['sql' => $sql, 'params' => $params];
+    }
+
+    /**
+     * クイックフィルタタブの件数を一括取得。
+     * quick_filter 以外の criteria は AND 結合で各件数に反映される。
+     *
+     * @param array<string, string> $criteria
+     * @return array{all:int,overdue:int,w7:int,w14:int,w28:int,w60:int,incomplete:int}
+     */
+    public function countByQuickFilters(array $criteria): array
+    {
+        // 自身の quick_filter は除外（他 criteria 固定で各タブの件数を見るため）
+        $base = $criteria;
+        unset($base['quick_filter']);
+        $query = $this->buildSearchQuery($base);
+
+        $sql = 'SELECT
+            COUNT(*) AS all_cnt,
+            SUM(CASE WHEN rc.maturity_date < CURDATE() AND COALESCE(cs.is_completed,0) = 0 THEN 1 ELSE 0 END) AS overdue_cnt,
+            SUM(CASE WHEN rc.maturity_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY) AND COALESCE(cs.is_completed,0) = 0 THEN 1 ELSE 0 END) AS w7_cnt,
+            SUM(CASE WHEN rc.maturity_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 14 DAY) AND COALESCE(cs.is_completed,0) = 0 THEN 1 ELSE 0 END) AS w14_cnt,
+            SUM(CASE WHEN rc.maturity_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 28 DAY) AND COALESCE(cs.is_completed,0) = 0 THEN 1 ELSE 0 END) AS w28_cnt,
+            SUM(CASE WHEN rc.maturity_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 60 DAY) AND COALESCE(cs.is_completed,0) = 0 THEN 1 ELSE 0 END) AS w60_cnt,
+            SUM(CASE WHEN COALESCE(cs.is_completed,0) = 0 THEN 1 ELSE 0 END) AS incomplete_cnt'
+            . $query['sql'];
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($query['params'] as $key => $value) {
+            $stmt->bindValue(':' . $key, $value);
+        }
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $row = is_array($row) ? $row : [];
+
+        return [
+            'all'        => (int) ($row['all_cnt'] ?? 0),
+            'overdue'    => (int) ($row['overdue_cnt'] ?? 0),
+            'w7'         => (int) ($row['w7_cnt'] ?? 0),
+            'w14'        => (int) ($row['w14_cnt'] ?? 0),
+            'w28'        => (int) ($row['w28_cnt'] ?? 0),
+            'w60'        => (int) ($row['w60_cnt'] ?? 0),
+            'incomplete' => (int) ($row['incomplete_cnt'] ?? 0),
+        ];
     }
 
     /**

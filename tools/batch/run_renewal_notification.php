@@ -26,6 +26,7 @@ spl_autoload_register(static function (string $class): void {
 
 $root = dirname(__DIR__, 2);
 EnvLoader::load($root . DIRECTORY_SEPARATOR . '.env');
+date_default_timezone_set('Asia/Tokyo');
 $config = AppConfig::fromEnv();
 
 $args = $argv;

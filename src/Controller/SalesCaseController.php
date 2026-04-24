@@ -40,13 +40,39 @@ final class SalesCaseController
         $productCategories = [];
         $salesCaseStatuses = [];
         $loginStaffId      = 0;
+        $quickFilterCounts = [];
         $error             = null;
 
         try {
             $tenantPdo  = $this->tenantConnectionFactory->createForAuthenticatedUser($auth);
             $repository = new SalesCaseRepository($tenantPdo);
+
+            // ログインユーザーに対応する m_staff を先に特定（searchPage / countByQuickFilters に渡す）
+            // user_id リンクが優先、未設定なら staff_name と auth.display_name で突合
+            $staffUsersPre  = (new StaffRepository($tenantPdo))->findActive();
+            $loginUserId    = (int) ($auth['user_id'] ?? 0);
+            $loginUserName  = trim((string) ($auth['display_name'] ?? ''));
+            $fallbackByName = 0;
+            foreach ($staffUsersPre as $u) {
+                $uid   = (int) ($u['user_id'] ?? 0);
+                $sid   = (int) ($u['id'] ?? 0);
+                $sname = trim((string) ($u['staff_name'] ?? ''));
+                if ($loginUserId > 0 && $uid === $loginUserId) {
+                    $loginStaffId = $sid;
+                    break;
+                }
+                if ($fallbackByName === 0 && $loginUserName !== '' && $sname === $loginUserName) {
+                    $fallbackByName = $sid;
+                }
+            }
+            if ($loginStaffId === 0) {
+                $loginStaffId = $fallbackByName;
+            }
+
+            $searchCriteria = $criteria + ['_login_staff_id' => (string) $loginStaffId];
+
             $result     = $repository->searchPage(
-                $criteria,
+                $searchCriteria,
                 (int) $listState['page'],
                 (int) $listState['per_page'],
                 (string) $listState['sort'],
@@ -57,7 +83,7 @@ final class SalesCaseController
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
             $listUrl = $this->listUrl($criteria, $listState);
 
-            $staffUsers   = (new StaffRepository($tenantPdo))->findActive();
+            $staffUsers   = $staffUsersPre;
             $staffNameMap = $this->buildUserNameMap($staffUsers);
             foreach ($rows as $i => $row) {
                 $rows[$i]['staff_name'] = $staffNameMap[(int) ($row['staff_id'] ?? 0)] ?? '';
@@ -66,14 +92,7 @@ final class SalesCaseController
             $productCategories = (new ProductCategoryRepository($tenantPdo))->findActiveNames();
             $salesCaseStatuses = (new SalesCaseStatusRepository($tenantPdo))->findActive();
 
-            // ログインユーザーに対応するm_staffレコードを特定
-            $loginUserId = (int) ($auth['user_id'] ?? 0);
-            foreach ($staffUsers as $u) {
-                if ($loginUserId > 0 && (int) ($u['user_id'] ?? 0) === $loginUserId) {
-                    $loginStaffId = (int) ($u['id'] ?? 0);
-                    break;
-                }
-            }
+            $quickFilterCounts = $repository->countByQuickFilters($searchCriteria, $loginStaffId);
         } catch (Throwable) {
             $error = '見込案件一覧の取得に失敗しました。';
         }
@@ -90,7 +109,7 @@ final class SalesCaseController
             $customers,
             $productCategories,
             $loginStaffId,
-            $listUrl,
+            $this->config->routeUrl('sales-case/list'),
             $this->config->routeUrl('sales-case/store'),
             $this->guard->session()->issueCsrfToken('sales_case_store'),
             $this->config->routeUrl('sales-case/detail'),
@@ -101,7 +120,8 @@ final class SalesCaseController
             $flashSuccess,
             $error,
             ControllerLayoutHelper::build($this->guard, $this->config, 'sales_case'),
-            $salesCaseStatuses
+            $salesCaseStatuses,
+            $quickFilterCounts
         ));
     }
 
@@ -326,12 +346,18 @@ final class SalesCaseController
      */
     private function extractCriteria(array $source): array
     {
+        $quickFilter = trim((string) ($source['quick_filter'] ?? ''));
+        if (!in_array($quickFilter, ['high_open', 'open', 'mine', 'completed'], true)) {
+            $quickFilter = '';
+        }
+
         return [
             'case_name'     => trim((string) ($source['case_name'] ?? '')),
             'customer_name' => trim((string) ($source['customer_name'] ?? '')),
             'staff_id'      => trim((string) ($source['staff_id'] ?? '')),
             'status'        => trim((string) ($source['status'] ?? '')),
             'prospect_rank' => trim((string) ($source['prospect_rank'] ?? '')),
+            'quick_filter'  => $quickFilter,
         ];
     }
 

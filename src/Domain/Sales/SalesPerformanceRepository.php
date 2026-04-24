@@ -189,7 +189,59 @@ final class SalesPerformanceRepository
             $params['settlement_month'] = $settlementMonth;
         }
 
+        // クイックフィルター
+        $quickFilter  = trim((string) ($criteria['quick_filter'] ?? ''));
+        $loginStaffId = (int) ($criteria['_login_staff_id'] ?? 0);
+        $today        = (string) ($criteria['_today'] ?? date('Y-m-d'));
+        if ($quickFilter === 'this_month') {
+            $monthStart = date('Y-m-01', strtotime($today));
+            $monthEnd   = date('Y-m-d', strtotime($monthStart . ' +1 month'));
+            $sql .= ' AND sp.performance_date >= :qf_m_start AND sp.performance_date < :qf_m_end';
+            $params['qf_m_start'] = $monthStart;
+            $params['qf_m_end']   = $monthEnd;
+        } elseif ($quickFilter === 'this_fy') {
+            $y  = (int) date('Y', strtotime($today));
+            $m  = (int) date('n', strtotime($today));
+            $fy = $m >= 4 ? $y : $y - 1;
+            $sql .= ' AND sp.performance_date >= :qf_fy_start AND sp.performance_date < :qf_fy_end';
+            $params['qf_fy_start'] = $fy . '-04-01';
+            $params['qf_fy_end']   = ($fy + 1) . '-04-01';
+        } elseif ($quickFilter === 'mine' && $loginStaffId > 0) {
+            $sql .= ' AND sp.staff_id = :qf_login_staff_id';
+            $params['qf_login_staff_id'] = $loginStaffId;
+        } elseif ($quickFilter === 'non_life') {
+            $sql .= ' AND sp.source_type = :qf_src_nl';
+            $params['qf_src_nl'] = 'non_life';
+        } elseif ($quickFilter === 'life') {
+            $sql .= ' AND sp.source_type = :qf_src_l';
+            $params['qf_src_l'] = 'life';
+        }
+
         return $sql;
+    }
+
+    /**
+     * クイックフィルタ別の件数を取得する。
+     *
+     * @param array<string, string> $criteria quick_filter は除外した検索条件
+     * @return array<string, int>
+     */
+    public function countByQuickFilters(array $criteria, int $loginStaffId, string $today): array
+    {
+        $criteria['quick_filter'] = '';
+        $out = [];
+        foreach (['all', 'this_month', 'this_fy', 'mine', 'non_life', 'life'] as $key) {
+            $c = $criteria;
+            if ($key !== 'all') {
+                $c['quick_filter'] = $key;
+            }
+            $c['_login_staff_id'] = (string) $loginStaffId;
+            $c['_today'] = $today;
+            $params = [];
+            $where  = $this->buildWhereClause($c, $params);
+            $out[$key] = $this->countSearch($where, $params);
+        }
+        return $out;
     }
 
     /**

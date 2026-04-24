@@ -260,7 +260,78 @@ final class ActivityRepository
             $params['staff_id'] = (int) $staffUserId;
         }
 
+        // クイックフィルタタブ (today / week / mine / overdue / all)
+        $quickFilter  = trim((string) ($criteria['quick_filter'] ?? ''));
+        $loginStaffId = (int) ($criteria['_login_staff_id'] ?? 0);
+        $today        = (string) ($criteria['_today'] ?? date('Y-m-d'));
+        if ($quickFilter === 'today') {
+            $sql .= ' AND a.activity_date = :qf_today';
+            $params['qf_today'] = $today;
+        } elseif ($quickFilter === 'week') {
+            $weekStart = date('Y-m-d', strtotime('monday this week', strtotime($today)));
+            $weekEnd   = date('Y-m-d', strtotime('sunday this week', strtotime($today)));
+            $sql .= ' AND a.activity_date BETWEEN :qf_week_start AND :qf_week_end';
+            $params['qf_week_start'] = $weekStart;
+            $params['qf_week_end']   = $weekEnd;
+        } elseif ($quickFilter === 'mine' && $loginStaffId > 0) {
+            $sql .= ' AND a.staff_id = :qf_login_staff_id';
+            $params['qf_login_staff_id'] = $loginStaffId;
+        } elseif ($quickFilter === 'overdue') {
+            $sql .= ' AND a.next_action_date IS NOT NULL AND a.next_action_date < :qf_today_overdue';
+            $params['qf_today_overdue'] = $today;
+        }
+
         return $sql;
+    }
+
+    /**
+     * クイックフィルタタブの件数を一括取得。
+     *
+     * @param array<string, string> $criteria
+     * @return array{all:int,today:int,week:int,mine:int,overdue:int}
+     */
+    public function countByQuickFilters(array $criteria, int $loginStaffId, string $today): array
+    {
+        $base = $criteria;
+        unset($base['quick_filter'], $base['_login_staff_id'], $base['_today']);
+
+        $params = [];
+        $whereSql = $this->buildWhereClause($base, $params);
+
+        $weekStart = date('Y-m-d', strtotime('monday this week', strtotime($today)));
+        $weekEnd   = date('Y-m-d', strtotime('sunday this week', strtotime($today)));
+
+        $sql = 'SELECT
+            COUNT(*) AS all_cnt,
+            SUM(CASE WHEN a.activity_date = :qf_today THEN 1 ELSE 0 END) AS today_cnt,
+            SUM(CASE WHEN a.activity_date BETWEEN :qf_week_start AND :qf_week_end THEN 1 ELSE 0 END) AS week_cnt,
+            SUM(CASE WHEN a.staff_id = :qf_login_staff_id THEN 1 ELSE 0 END) AS mine_cnt,
+            SUM(CASE WHEN a.next_action_date IS NOT NULL AND a.next_action_date < :qf_today THEN 1 ELSE 0 END) AS overdue_cnt
+         FROM t_activity a
+         LEFT JOIN m_customer mc
+                 ON mc.id = a.customer_id
+                AND mc.is_deleted = 0'
+            . $whereSql;
+
+        $stmt = $this->pdo->prepare($sql);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue(':' . $key, $value);
+        }
+        $stmt->bindValue(':qf_today', $today);
+        $stmt->bindValue(':qf_week_start', $weekStart);
+        $stmt->bindValue(':qf_week_end', $weekEnd);
+        $stmt->bindValue(':qf_login_staff_id', $loginStaffId, PDO::PARAM_INT);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $row = is_array($row) ? $row : [];
+
+        return [
+            'all'     => (int) ($row['all_cnt'] ?? 0),
+            'today'   => (int) ($row['today_cnt'] ?? 0),
+            'week'    => (int) ($row['week_cnt'] ?? 0),
+            'mine'    => (int) ($row['mine_cnt'] ?? 0),
+            'overdue' => (int) ($row['overdue_cnt'] ?? 0),
+        ];
     }
 
     /**

@@ -44,6 +44,7 @@ final class CustomerController
 
         $rows = [];
         $total = 0;
+        $quickFilterCounts = [];
         $listError = null;
 
         try {
@@ -59,6 +60,7 @@ final class CustomerController
             $rows = $result['rows'];
             $total = (int) ($result['total'] ?? 0);
             $listState['page'] = (string) ($result['page'] ?? $listState['page']);
+            $quickFilterCounts = $repository->countByQuickFilters($criteria);
         } catch (Throwable) {
             $listError = '顧客一覧の取得に失敗しました。時間をおいて再度お試しください。解消しない場合は管理者へご連絡ください。';
         }
@@ -78,7 +80,8 @@ final class CustomerController
             $flashSuccess,
             $openModal,
             $createDraft,
-            ControllerLayoutHelper::build($this->guard, $this->config, 'customer')
+            ControllerLayoutHelper::build($this->guard, $this->config, 'customer'),
+            $quickFilterCounts
         ));
     }
 
@@ -262,9 +265,15 @@ final class CustomerController
      */
     private function extractCriteria(array $source): array
     {
+        $quickFilter = trim((string) ($source['quick_filter'] ?? ''));
+        if (!in_array($quickFilter, ['individual', 'corporate'], true)) {
+            $quickFilter = '';
+        }
+
         return [
             'customer_name' => trim((string) ($source['customer_name'] ?? '')),
             'customer_type' => trim((string) ($source['customer_type'] ?? '')),
+            'quick_filter'  => $quickFilter,
         ];
     }
 

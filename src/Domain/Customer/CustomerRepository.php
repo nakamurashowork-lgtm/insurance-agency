@@ -122,7 +122,34 @@ final class CustomerRepository
             $params['customer_type'] = $customerType;
         }
 
+        // クイックフィルタ
+        $quickFilter = trim((string) ($criteria['quick_filter'] ?? ''));
+        if ($quickFilter === 'individual') {
+            $sql .= ' AND mc.customer_type = :qf_type_ind';
+            $params['qf_type_ind'] = 'individual';
+        } elseif ($quickFilter === 'corporate') {
+            $sql .= ' AND mc.customer_type = :qf_type_corp';
+            $params['qf_type_corp'] = 'corporate';
+        }
+
         return ['sql' => $sql, 'params' => $params];
+    }
+
+    /**
+     * クイックフィルタ別の件数を返す。
+     *
+     * @param array<string, string> $criteria quick_filter 以外の現行検索条件
+     * @return array<string, int>
+     */
+    public function countByQuickFilters(array $criteria): array
+    {
+        $out = [];
+        foreach (['all', 'individual', 'corporate'] as $key) {
+            $c = $criteria;
+            $c['quick_filter'] = $key === 'all' ? '' : $key;
+            $out[$key] = $this->countSearch($c);
+        }
+        return $out;
     }
 
     /**
