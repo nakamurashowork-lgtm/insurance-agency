@@ -9,3 +9,4 @@
 .DS_Store
 index.php.staging
 .claude/settings.local.json
+.claude/worktrees/

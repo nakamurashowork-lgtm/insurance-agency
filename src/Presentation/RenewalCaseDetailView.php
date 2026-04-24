@@ -652,11 +652,11 @@ final class RenewalCaseDetailView
                     ? 'font-weight:700;color:var(--text-info);'
                     : ($isStaff ? 'font-weight:600;color:var(--text-info);' : 'font-weight:600;');
 
-                $diffHtml .= '<div style="display:flex;align-items:baseline;gap:6px;margin:3px 0;font-size:13px;">'
+                $diffHtml .= '<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin:3px 0;font-size:13px;min-width:0;">'
                     . '<span style="min-width:90px;color:var(--text-hint);">' . $label . '</span>'
-                    . '<span style="color:var(--text-muted-cool);text-decoration:line-through;">' . $before . '</span>'
+                    . '<span style="color:var(--text-muted-cool);text-decoration:line-through;overflow-wrap:anywhere;word-break:break-word;min-width:0;">' . $before . '</span>'
                     . '<span style="color:var(--text-muted-cool);">→</span>'
-                    . '<span style="' . $afterStyle . '">' . $after . '</span>'
+                    . '<span style="' . $afterStyle . 'overflow-wrap:anywhere;word-break:break-word;min-width:0;">' . $after . '</span>'
                     . '</div>';
             }
 

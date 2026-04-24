@@ -289,9 +289,10 @@ final class DashboardView
             // 成績タイル（全体 / 損保 / 生保）-----------------------------------
             . '.perf-tile-grid{display:flex;gap:12px;flex-wrap:wrap;}'
             . '.perf-tile{flex:1 1 200px;min-width:200px;padding:14px 16px;border:1px solid var(--border-light);border-radius:var(--radius-md);background:var(--bg-subtle);display:flex;flex-direction:column;gap:7px;}'
-            . '.perf-tile-head{display:flex;align-items:center;min-height:22px;margin-bottom:1px;}'
+            . '.perf-tile-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:22px;margin-bottom:1px;}'
             . '.perf-tile-title{font-size:12px;font-weight:700;color:var(--text-label);}'
-            . '.perf-tile-amount{display:flex;align-items:baseline;gap:5px;}'
+            . '.perf-tile-amount{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;}'
+            . '.perf-tile-amount-main{display:flex;align-items:baseline;gap:5px;min-width:0;}'
             . '.perf-tile-num{font-size:26px;font-weight:700;color:var(--text-heading);line-height:1.1;font-variant-numeric:tabular-nums;letter-spacing:-0.5px;}'
             . '.perf-tile-unit{font-size:12px;color:var(--text-secondary);font-weight:500;}'
             . '.perf-tile-count{font-size:12px;color:var(--text-secondary);font-variant-numeric:tabular-nums;font-weight:500;}'
@@ -458,10 +459,23 @@ final class DashboardView
         $iconTarget = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>';
         $iconChev = '<span class="alert-chev" aria-hidden="true">›</span>';
 
+        // カード→一覧遷移時に渡すフィルタ条件を組み立てる。
+        // - 要確認エリア: quick_filter のみ（満期=w7 / 事故=high_open）
+        // - 業務入口エリア: カードで選択中の担当者で絞り込み（all/空 は付与しない）
+        $resolvedRenewalStaff   = self::resolveStaffIdFromUserParam($renewalUserParam,   $loginUserId);
+        $resolvedAccidentStaff  = self::resolveStaffIdFromUserParam($accidentUserParam,  $loginUserId);
+        $resolvedSalesCaseStaff = self::resolveStaffIdFromUserParam($salesCaseUserParam, $loginUserId);
+
+        $alertRenewalHref   = self::appendQuery($renewalListUrl,   ['quick_filter' => 'w7']);
+        $alertAccidentHref  = self::appendQuery($accidentListUrl,  ['quick_filter' => 'high_open']);
+        $entryRenewalHref   = self::appendQuery($renewalListUrl,   $resolvedRenewalStaff   !== '' ? ['assigned_staff_id' => $resolvedRenewalStaff]   : []);
+        $entryAccidentHref  = self::appendQuery($accidentListUrl,  $resolvedAccidentStaff  !== '' ? ['assigned_staff_id' => $resolvedAccidentStaff]  : []);
+        $entrySalesCaseHref = self::appendQuery($salesCaseListUrl, $resolvedSalesCaseStaff !== '' ? ['staff_id'          => $resolvedSalesCaseStaff] : []);
+
         $alertGrid = '<div class="section-label">要確認</div>'
             . '<div class="alert-grid">'
             // 満期（対応遅れ＋7日以内）を1枚にまとめる
-            . '<a href="' . Layout::escape($renewalListUrl) . '" class="alert-card alert-card-danger" aria-label="満期一覧へ">'
+            . '<a href="' . Layout::escape($alertRenewalHref) . '" class="alert-card alert-card-danger" aria-label="満期一覧へ">'
             . '<div class="alert-icon">' . $iconCalendar . '</div>'
             . '<div class="alert-body">'
             . '<div class="alert-label">満期</div>'
@@ -473,7 +487,7 @@ final class DashboardView
             . $iconChev
             . '</a>'
             // 事故 — 高優先度未完了
-            . '<a href="' . Layout::escape($accidentListUrl) . '" class="alert-card alert-card-warning" aria-label="事故案件一覧へ">'
+            . '<a href="' . Layout::escape($alertAccidentHref) . '" class="alert-card alert-card-warning" aria-label="事故案件一覧へ">'
             . '<div class="alert-icon">' . $iconAlertTriangle . '</div>'
             . '<div class="alert-body">'
             . '<div class="alert-label">事故 — 高優先度未完了</div>'
@@ -519,7 +533,7 @@ final class DashboardView
         $bizGrid = '<div class="section-label">業務入口</div>'
             . '<div class="entry-grid">'
             // 満期業務
-            . '<div class="entry-card" id="card-renewal" data-href="' . Layout::escape($renewalListUrl) . '" role="link" tabindex="0" aria-label="満期業務を開く">'
+            . '<div class="entry-card" id="card-renewal" data-href="' . Layout::escape($entryRenewalHref) . '" data-href-base="' . Layout::escape($renewalListUrl) . '" data-staff-param="assigned_staff_id" role="link" tabindex="0" aria-label="満期業務を開く">'
             . '<div class="entry-head">'
             . '<div class="entry-name">'
             . '<div class="entry-icon entry-icon-info">' . $iconRenewal . '</div>'
@@ -534,7 +548,7 @@ final class DashboardView
             . '</div>'
             . '</div>'
             // 事故案件
-            . '<div class="entry-card" id="card-accident" data-href="' . Layout::escape($accidentListUrl) . '" role="link" tabindex="0" aria-label="事故案件を開く">'
+            . '<div class="entry-card" id="card-accident" data-href="' . Layout::escape($entryAccidentHref) . '" data-href-base="' . Layout::escape($accidentListUrl) . '" data-staff-param="assigned_staff_id" role="link" tabindex="0" aria-label="事故案件を開く">'
             . '<div class="entry-head">'
             . '<div class="entry-name">'
             . '<div class="entry-icon entry-icon-warning">' . $iconAccident . '</div>'
@@ -549,7 +563,7 @@ final class DashboardView
             . '</div>'
             . '</div>'
             // 見込管理
-            . '<div class="entry-card" id="card-sales-case" data-href="' . Layout::escape($salesCaseListUrl) . '" role="link" tabindex="0" aria-label="見込管理を開く">'
+            . '<div class="entry-card" id="card-sales-case" data-href="' . Layout::escape($entrySalesCaseHref) . '" data-href-base="' . Layout::escape($salesCaseListUrl) . '" data-staff-param="staff_id" role="link" tabindex="0" aria-label="見込管理を開く">'
             . '<div class="entry-head">'
             . '<div class="entry-name">'
             . '<div class="entry-icon entry-icon-success">' . $iconProspect . '</div>'
@@ -735,22 +749,22 @@ final class DashboardView
                     ? $badgeHtml
                     : '<span class="perf-tile-title">' . Layout::escape($tile['label']) . '</span>';
 
-                // 達成率プログレスバー（目標未設定時は空トラック + キャプション「目標未設定」）
+                // 達成率プログレスバー（バー本体のみ。値はヘッダ右に表示）
                 $barBlock = '<div class="perf-tile-bar">'
                     . '<div class="perf-tile-bar-track">'
                     . '<div class="perf-tile-bar-fill" style="width:' . $barWidth . '%"></div>'
                     . '</div>'
-                    . '<div class="perf-tile-bar-caption">'
-                    . '<span class="perf-tile-bar-label">達成率</span>'
-                    . '<span class="perf-tile-bar-value' . $achCls . '">' . Layout::escape($achStr) . '</span>'
-                    . '</div>'
                     . '</div>';
 
+                $achInlineHtml = '<span class="perf-tile-bar-value' . $achCls . '" title="達成率">' . Layout::escape($achStr) . '</span>';
+
                 $tilesHtml .= '<div class="perf-tile perf-tile-' . Layout::escape($tile['key']) . '">'
-                    . '<div class="perf-tile-head">' . $labelHtml . '</div>'
-                    . '<div class="perf-tile-amount"><span class="perf-tile-num">' . Layout::escape(number_format((int) floor($premium / 1000))) . '</span><span class="perf-tile-unit">千円</span></div>'
+                    . '<div class="perf-tile-head">' . $labelHtml . $achInlineHtml . '</div>'
+                    . '<div class="perf-tile-amount">'
+                    . '<span class="perf-tile-amount-main"><span class="perf-tile-num">' . Layout::escape(number_format((int) floor($premium / 1000))) . '</span><span class="perf-tile-unit">千円</span></span>'
+                    . '<span class="perf-tile-count">' . Layout::escape(number_format($count)) . ' 件</span>'
+                    . '</div>'
                     . $barBlock
-                    . '<div class="perf-tile-count">' . Layout::escape(number_format($count)) . ' 件</div>'
                     . '<div class="perf-tile-metrics">'
                     . '<div class="perf-tile-metric"><span class="perf-tile-metric-label">前年比</span><span class="perf-tile-metric-value' . $yoyCls . '">' . Layout::escape($yoyStr) . '</span></div>'
                     . '<div class="perf-tile-metric"><span class="perf-tile-metric-label">年度目標</span><span class="perf-tile-metric-value">' . Layout::escape($targetStr) . '</span></div>'
@@ -1229,6 +1243,40 @@ final class DashboardView
 
         $html .= '</select>';
         return $html;
+    }
+
+    /**
+     * 担当者ドロップダウンの値（'self' / 'all' / 数値）を
+     * 一覧画面で使う staff_id 文字列に解決する。
+     * 'all' / '' は空文字（＝フィルタを付けない意）を返す。
+     */
+    private static function resolveStaffIdFromUserParam(string $userParam, int $loginUserId): string
+    {
+        if ($userParam === 'self') {
+            return (string) $loginUserId;
+        }
+        if ($userParam === 'all' || $userParam === '') {
+            return '';
+        }
+        return $userParam;
+    }
+
+    /**
+     * URL にクエリパラメータを追記する。AppConfig::routeUrl() は "?route=..." を返す前提。
+     *
+     * @param array<string, string> $params
+     */
+    private static function appendQuery(string $url, array $params): string
+    {
+        if ($params === []) {
+            return $url;
+        }
+        $sep = str_contains($url, '?') ? '&' : '?';
+        $parts = [];
+        foreach ($params as $k => $v) {
+            $parts[] = rawurlencode($k) . '=' . rawurlencode($v);
+        }
+        return $url . $sep . implode('&', $parts);
     }
 
     /**

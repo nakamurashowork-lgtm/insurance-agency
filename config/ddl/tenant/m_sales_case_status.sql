@@ -18,4 +18,4 @@ CREATE TABLE IF NOT EXISTS m_sales_case_status (
   COLLATE=utf8mb4_unicode_ci
   COMMENT='見込案件ステータスマスタ（表示名=DB格納値。プルダウンの中身を自由に管理）';
 
--- シードデータは config/dml/master/tenant/ に分離（DDL はスキーマ定義のみ）
+-- シードデータは config/dml/master/ に分離（DDL はスキーマ定義のみ）

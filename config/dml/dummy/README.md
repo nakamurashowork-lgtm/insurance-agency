@@ -13,7 +13,7 @@
 
 ## 重要: 値の形式について
 
-本 dummy データは、現行マスタ（`config/dml/master/tenant/`）のシード値 = **日本語ラベル**を直接使用している。したがって、master 投入後に dummy を投入すればそのまま整合する。
+本 dummy データは、現行マスタ（`config/dml/master/`）のシード値 = **日本語ラベル**を直接使用している。したがって、master 投入後に dummy を投入すればそのまま整合する。
 
 - `t_renewal_case.case_status` → `m_case_status(case_type='renewal')` の name（未対応 / SJ依頼中 / 書類作成済 / 返送待ち / 見積送付済 / 入金待ち / 完了 / 取り下げ / 失注 / 解約）
 - `t_accident_case.status` → `m_case_status(case_type='accident')` の name（受付 / 保険会社連絡済み / 対応中 / 書類待ち / 解決済み / 完了）
@@ -33,7 +33,7 @@
 - `t_sales_case.case_type` → `new / renewal / cross_sell / up_sell / other`
 - `t_sales_case.prospect_rank` → `A / B / C`
 
-**旧 dummy が使っていた英字コード値（`not_started`, `accepted`, `open`, `visit` 等）は本版では使用しない。** `config/dml/migration/` の rename スクリプトは、旧値が残っている既存 DB 向けの一回限りの補正手段であり、本 dummy の投入前後に走らせる必要はない。
+**旧 dummy が使っていた英字コード値（`not_started`, `accepted`, `open`, `visit` 等）は本版では使用しない。**
 
 ---
 

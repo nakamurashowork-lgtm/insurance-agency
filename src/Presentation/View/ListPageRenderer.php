@@ -526,9 +526,9 @@ final class ListPageRenderer
             . self::hiddenInputs(self::queryParams([], $listState, false, true))
             . $preserveHtml
             . '<div class="filter-form-grid">' . $fieldsHtml . '</div>'
-            . '<div class="dialog-actions" style="margin-top:16px;">'
-            . '<a class="btn btn-secondary" href="' . Layout::escape($clearUrl) . '">' . Layout::escape($clearLabel) . '</a>'
-            . '<button class="btn btn-primary" type="submit">' . Layout::escape($applyLabel) . '</button>'
+            . '<div class="dialog-actions" style="margin-top:16px;justify-content:stretch;">'
+            . '<a class="btn btn-secondary" style="flex:1 1 0;text-align:center;" href="' . Layout::escape($clearUrl) . '">' . Layout::escape($clearLabel) . '</a>'
+            . '<button class="btn btn-primary" style="flex:1 1 0;" type="submit">' . Layout::escape($applyLabel) . '</button>'
             . '</div>'
             . '</form>'
             . '</dialog>';

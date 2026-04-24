@@ -47,12 +47,40 @@
         .then(function (data) {
           renderFn(data);
           updateUrlQuery(paramName, userValue);
+          updateCardHref(dropdownId, userValue);
         })
         .catch(function (err) {
           console.error('Dashboard update failed [' + dropdownId + ']:', err);
           showCardError(dropdownId);
         });
     });
+  }
+
+  /**
+   * 業務入口カードの data-href をドロップダウン選択値に合わせて書き換える。
+   * - カードは data-href-base（フィルタなしベース URL）と
+   *   data-staff-param（assigned_staff_id / staff_id など）を持つ
+   * - 'all' / '' の場合はフィルタを付けない
+   */
+  function updateCardHref(dropdownId, userValue) {
+    var cardId = {
+      'renewal-user':    'card-renewal',
+      'accident-user':   'card-accident',
+      'sales-case-user': 'card-sales-case'
+    }[dropdownId];
+    if (!cardId) return;
+    var card = document.getElementById(cardId);
+    if (!card) return;
+    var base = card.getAttribute('data-href-base');
+    var param = card.getAttribute('data-staff-param');
+    if (!base || !param) return;
+    if (userValue === 'all' || userValue === '' || userValue === null) {
+      card.setAttribute('data-href', base);
+      return;
+    }
+    var sep = base.indexOf('?') >= 0 ? '&' : '?';
+    card.setAttribute('data-href',
+      base + sep + encodeURIComponent(param) + '=' + encodeURIComponent(userValue));
   }
 
   /**
