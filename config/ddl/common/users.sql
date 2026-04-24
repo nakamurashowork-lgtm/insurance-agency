@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS users (
   id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'ユーザーID',
-  google_sub       VARCHAR(64)     NOT NULL COMMENT 'GoogleログインID(sub)',
+  google_sub       VARCHAR(64)     NULL     COMMENT 'GoogleログインID(sub)',
   email            VARCHAR(255)    NOT NULL COMMENT 'メールアドレス',
   name             VARCHAR(100)    NOT NULL COMMENT 'ユーザー名（Googleアカウント名）',
   display_name     VARCHAR(100)    NULL     COMMENT '業務上の表示名。NULLの場合はnameにフォールバック',

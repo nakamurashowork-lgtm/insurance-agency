@@ -21,9 +21,25 @@ final class LoginController
         }
 
         $error = $this->session->consumeFlash('error');
-        $devLoginUrl = $this->config->appEnv === 'local'
-            ? $this->config->routeUrl('dev/login')
-            : null;
-        Responses::html(LoginView::render($error, $this->config->routeUrl('auth/google/start'), $devLoginUrl));
+        $devLoginBaseUrl = $this->config->routeUrl('dev/login');
+        $devLoginButtons = null;
+        if ($this->config->appEnv === 'local') {
+            $devLoginButtons = [
+                'label'   => 'ローカル開発専用 (APP_ENV=local)',
+                'buttons' => [
+                    ['url' => $devLoginBaseUrl, 'label' => '開発用ログイン (dev@local.test)'],
+                ],
+            ];
+        } elseif ($this->config->appEnv === 'staging') {
+            $sep = str_contains($devLoginBaseUrl, '?') ? '&' : '?';
+            $devLoginButtons = [
+                'label'   => 'ステージング確認用 (APP_ENV=staging)',
+                'buttons' => [
+                    ['url' => $devLoginBaseUrl . $sep . 'email=' . rawurlencode('staff1@te002.test'), 'label' => 'staff1@te002.test'],
+                    ['url' => $devLoginBaseUrl . $sep . 'email=' . rawurlencode('staff2@te002.test'), 'label' => 'staff2@te002.test'],
+                ],
+            ];
+        }
+        Responses::html(LoginView::render($error, $this->config->routeUrl('auth/google/start'), $devLoginButtons));
     }
 }
