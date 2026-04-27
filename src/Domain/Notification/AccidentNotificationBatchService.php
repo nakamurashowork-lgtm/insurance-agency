@@ -176,7 +176,8 @@ final class AccidentNotificationBatchService
                     }
                 }
 
-                if ($deliverableTargets !== []) {
+                // route 有効時は対象 0 件でも「本日の対象案件はありません。」通知を送る。
+                if ($routeEnabled) {
                     try {
                         $this->sendAccidentNotification($sender, $endpoint, $deliverableTargets);
 
@@ -197,6 +198,8 @@ final class AccidentNotificationBatchService
                             }
                         }
                     } catch (Throwable $deliveryException) {
+                        // 0件通知（deliverableTargets===[]）の送信失敗時は delivery 行が無いため
+                        // run の error_message にだけ記録する。
                         foreach ($deliverableTargets as $target) {
                             $inserted = $this->repository->insertDeliveryFailed(
                                 $runId,
@@ -219,7 +222,11 @@ final class AccidentNotificationBatchService
             } elseif ($failCount > 0) {
                 $result = 'failed';
             }
-            if ($failCount > 0 && $messageErrors !== []) {
+            // 0件通知の送信失敗（failCount=0 だが messageErrors あり）も failed として扱う
+            if ($result === 'success' && $messageErrors !== []) {
+                $result = 'failed';
+            }
+            if ($messageErrors !== []) {
                 $errorMessage = implode(' | ', array_slice($messageErrors, 0, 3));
             }
         } catch (Throwable $exception) {
@@ -265,7 +272,7 @@ final class AccidentNotificationBatchService
             return false;
         }
 
-        $todayWeekday = (int) $date->format('N');
+        $todayWeekday = (int) $date->format('w');
         $weekdaysCsv = (string) ($rule['weekdays_csv'] ?? '');
         if ($weekdaysCsv === '') {
             return false;
@@ -305,11 +312,6 @@ final class AccidentNotificationBatchService
         $todayMonday = $date->modify('-' . ((int) $date->format('N') - 1) . ' days');
         $weeksSinceBase = (int) ($baseMonday->diff($todayMonday)->format('%r%a')) / 7;
         if ($weeksSinceBase % $intervalWeeks !== 0) {
-            return false;
-        }
-
-        $lastNotifiedOn = (string) ($rule['last_notified_on'] ?? '');
-        if ($lastNotifiedOn !== '' && $lastNotifiedOn >= $runDate) {
             return false;
         }
 

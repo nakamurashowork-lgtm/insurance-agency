@@ -134,6 +134,7 @@ final class SalesPerformanceListView
             'searchUrl' => $listUrl,
             'criteria'  => $criteria,
             'listState' => $listState,
+            'mobileVisibleCount' => 4,
         ]);
 
         $filterDialogHtml = self::renderFilterDialog($criteria, $listState, $staffUsers, $performanceMonths, $listUrl, $currentQuickFilter);

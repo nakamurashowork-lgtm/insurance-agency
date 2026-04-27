@@ -185,6 +185,7 @@ final class RenewalCaseListView
             'searchUrl' => $searchUrl,
             'criteria'  => $criteria,
             'listState' => $listState,
+            'mobileVisibleCount' => 3,
         ]);
 
         // 絞り込みボタンのバッジ件数（顧客名以外で適用中の数）
@@ -562,27 +563,48 @@ final class RenewalCaseListView
             elseif ($ms === 'inactive')   { $inactiveCount++; }
         }
 
+        // 既存顧客への自動紐付け件数: total から customer_insert/unlinked/error/skip を差し引いて算出
+        $autoLinkCount = max(0, $totalRows - $customerInsert - $unlinkedCount - $errorCount - $skipCount);
+
+        $sectionHeadStyle = 'font-size:13px;font-weight:600;margin-bottom:4px;';
+        $sectionBodyStyle = 'display:flex;flex-direction:column;gap:3px;font-size:13px;margin-bottom:10px;padding-left:14px;';
+        $rowStyle         = 'display:flex;justify-content:space-between;';
+
         $summary = '<div class="modal-result" style="margin-bottom:14px;">'
             . '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
             . '<span style="font-weight:600;">取込結果</span>'
             . '<span class="badge ' . $statusClass . '">' . Layout::escape($statusLabel) . '</span>'
             . '</div>'
-            . '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;font-size:13px;">'
-            . '<div><span class="muted">処理行数</span><span style="margin-left:8px;font-weight:500;">' . $totalRows . '行</span></div>'
-            . '<div><span class="muted">契約 新規登録</span><span style="margin-left:8px;font-weight:500;">' . $insertCount . '件</span></div>'
-            . '<div><span class="muted">契約 更新</span><span style="margin-left:8px;font-weight:500;">' . $updateCount . '件</span></div>'
-            . '<div><span class="muted">顧客 自動登録</span><span style="margin-left:8px;font-weight:500;">' . $customerInsert . '件</span></div>'
-            . '<div><span class="muted">未紐づけ契約</span><span style="margin-left:8px;' . ($unlinkedCount > 0 ? 'color:var(--text-warning);font-weight:500;' : '') . '">' . $unlinkedCount . '件</span></div>'
-            . '<div><span class="muted">スキップ</span><span style="margin-left:8px;">' . $skipCount . '行</span></div>'
-            . '<div><span class="muted">エラー</span><span style="margin-left:8px;' . ($errorCount > 0 ? 'color:var(--text-danger);font-weight:500;' : '') . '">' . $errorCount . '行</span></div>'
+            . '<div style="font-size:13px;margin-bottom:10px;">'
+            . '<span class="muted">総行数</span><span style="margin-left:8px;font-weight:500;">' . $totalRows . '行</span>'
             . '</div>'
-            . '<hr style="margin:10px 0;border:none;border-top:1px solid var(--border-light);">'
-            . '<div style="font-size:13px;font-weight:600;margin-bottom:4px;">担当者マッピング</div>'
-            . '<div style="display:flex;flex-direction:column;gap:3px;font-size:13px;">'
-            . '<div style="display:flex;justify-content:space-between;"><span class="muted">解決済み</span><span style="font-weight:500;">' . $resolvedCount . '件</span></div>'
-            . '<div style="display:flex;justify-content:space-between;"><span class="muted">コード未登録</span><span style="' . ($unresolvedCount > 0 ? 'color:var(--text-warning);font-weight:500;' : '') . '">' . $unresolvedCount . '件</span></div>'
-            . '<div style="display:flex;justify-content:space-between;"><span class="muted">無効コード</span><span>' . $inactiveCount . '件</span></div>'
+
+            . '<div style="' . $sectionHeadStyle . '">■ 満期案件</div>'
+            . '<div style="' . $sectionBodyStyle . '">'
+            . '<div style="' . $rowStyle . '"><span class="muted">新規取込</span><span style="font-weight:500;">' . $insertCount . '件</span></div>'
+            . '<div style="' . $rowStyle . '"><span class="muted">既存更新</span><span>' . $updateCount . '件</span></div>'
             . '</div>'
+
+            . '<div style="' . $sectionHeadStyle . '">■ 顧客</div>'
+            . '<div style="' . $sectionBodyStyle . '">'
+            . '<div style="' . $rowStyle . '"><span class="muted">既存顧客に紐付け</span><span style="font-weight:500;">' . $autoLinkCount . '件</span></div>'
+            . '<div style="' . $rowStyle . '"><span class="muted">新規顧客として登録</span><span style="font-weight:500;">' . $customerInsert . '件</span></div>'
+            . '<div style="' . $rowStyle . '"><span class="muted">紐付け不可（候補複数）</span><span style="' . ($unlinkedCount > 0 ? 'color:var(--text-warning);font-weight:500;' : '') . '">' . $unlinkedCount . '件</span></div>'
+            . '</div>'
+
+            . '<div style="' . $sectionHeadStyle . '">■ 担当者</div>'
+            . '<div style="' . $sectionBodyStyle . '">'
+            . '<div style="' . $rowStyle . '"><span class="muted">自動マッピング成功</span><span style="font-weight:500;">' . $resolvedCount . '件</span></div>'
+            . '<div style="' . $rowStyle . '"><span class="muted">コード未登録</span><span style="' . ($unresolvedCount > 0 ? 'color:var(--text-warning);font-weight:500;' : '') . '">' . $unresolvedCount . '件</span></div>'
+            . '<div style="' . $rowStyle . '"><span class="muted">無効コード</span><span>' . $inactiveCount . '件</span></div>'
+            . '</div>'
+
+            . '<div style="' . $sectionHeadStyle . '">■ その他</div>'
+            . '<div style="display:flex;flex-direction:column;gap:3px;font-size:13px;padding-left:14px;">'
+            . '<div style="' . $rowStyle . '"><span class="muted">スキップ</span><span>' . $skipCount . '行</span></div>'
+            . '<div style="' . $rowStyle . '"><span class="muted">エラー</span><span style="' . ($errorCount > 0 ? 'color:var(--text-danger);font-weight:500;' : '') . '">' . $errorCount . '行</span></div>'
+            . '</div>'
+
             . '</div>';
 
         $warnings = '';

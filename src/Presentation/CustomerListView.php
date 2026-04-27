@@ -130,6 +130,7 @@ final class CustomerListView
             'searchUrl' => $searchUrl,
             'criteria'  => $criteria,
             'listState' => $listState,
+            'mobileVisibleCount' => 3,
         ]);
 
         $filterDialogHtml = LP::filterDialog([

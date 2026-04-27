@@ -96,6 +96,7 @@ final class SalesCaseListView
             'searchUrl' => $listUrl,
             'criteria'  => $criteria,
             'listState' => $listState,
+            'mobileVisibleCount' => 4,
         ]);
 
         $filterDialogHtml = self::renderFilterDialog($criteria, $listUrl, $staffUsers, $listState, $salesCaseStatuses);

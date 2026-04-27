@@ -175,6 +175,7 @@
     <li><a href="#ch9">設定</a></li>
     <li><a href="#ch10">よくあるトラブルと対処法</a></li>
   </ol>
+  <p style="margin:10px 0 0;font-size:13px;color:var(--fg-muted);">付録: <a href="#appendix-lineworks">LINE WORKS Webhook URL の取得手順</a></p>
 </nav>
 
 <!-- ========================================================= -->
@@ -564,6 +565,85 @@
     <td>システムの初期設定が完了していない可能性があります。管理者にお問い合わせください。</td>
   </tr>
 </table>
+
+<a class="back-to-top" href="#top">▲ 目次に戻る</a>
+
+<hr>
+
+<!-- ========================================================= -->
+<h2 id="appendix-lineworks">付録: LINE WORKS Webhook URL の取得手順</h2>
+
+<h3>事前に必要なもの</h3>
+<ul>
+  <li>PC で作業してください。</li>
+  <li>LINE WORKS の管理者権限が必要です。</li>
+  <li>通知を受け取りたいトークルームを先に作っておくと楽です。</li>
+</ul>
+
+<h3>手順</h3>
+
+<h4>1. LINE WORKS Admin にログインする</h4>
+<p>管理者画面を開きます。</p>
+<p>▶ <a href="https://admin.worksmobile.com/" target="_blank" rel="noopener">https://admin.worksmobile.com/</a></p>
+<p>左メニューから「<b>アプリ</b>」を開きます。</p>
+
+<h4>2. Incoming Webhook アプリを追加する</h4>
+<ol class="step">
+  <li>アプリ一覧から「<b>Incoming Webhook</b>」を探します。</li>
+  <li>「<b>追加する</b>」をクリックします。</li>
+  <li>利用規約に同意して進みます。</li>
+  <li>利用対象は、迷ったら「<b>すべてのメンバー</b>」で OK です。</li>
+  <li>最後に「<b>保存</b>」します。</li>
+</ol>
+<p>これで、LINE WORKS 上で Incoming Webhook Bot を使える状態になります。</p>
+
+<h4>3. 通知先のトークルームを開く</h4>
+<p>次に、LINE WORKS のトーク画面を開きます。</p>
+<p>▶ <a href="https://talk.worksmobile.com/" target="_blank" rel="noopener">https://talk.worksmobile.com/</a></p>
+<p>通知を送りたいトークルームを開きます。</p>
+<p>例: 満期通知用、事故通知用、テスト通知用 など。</p>
+
+<h4>4. トークルームに Bot を招待する</h4>
+<ol class="step">
+  <li>トークルーム右上の「<b>…</b>」メニューを開きます。</li>
+  <li>「<b>Bot を招待</b>」または「<b>招待</b>」をクリックします。</li>
+  <li>一覧から「<b>Incoming Webhook</b>」を選びます。</li>
+  <li>「<b>OK</b>」を押します。</li>
+</ol>
+<p>これで、そのトークルームに Webhook 通知を送れる準備ができます。</p>
+
+<h4>5. チャンネル ID をコピーする</h4>
+<ol class="step">
+  <li>同じトークルームで、右上の「<b>…</b>」メニューを開きます。</li>
+  <li>「<b>チャンネル ID</b>」をクリックします。</li>
+  <li>「<b>チャンネル ID をコピー</b>」を押します。</li>
+</ol>
+<p>このチャンネル ID は、Webhook URL を作るときに使います。公式手順でも、Webhook URL 追加にはチャンネル ID が必要です。</p>
+
+<h4>6. Webhook リストを開く</h4>
+<p>Bot を招待すると、トークルーム内に Incoming Webhook から案内メッセージが届きます。</p>
+<p>その中にある「<b>Webhook リスト</b>」をクリックします。</p>
+<p class="note"><b>補足</b> 見つからない場合は、トーク入力欄付近のメニューから「Webhook リスト」を探してください。<b>ここが一番つまずきやすい</b>です。</p>
+
+<h4>7. Webhook URL を追加する</h4>
+<p>Webhook リスト画面を開いたら、右上の「<b>追加</b>」または「<b>＋追加</b>」をクリックします。</p>
+<p>入力するのは 2 つです。</p>
+<ul>
+  <li><b>Webhook 名</b>: 任意の名前（例: 「リマインド通知」）</li>
+  <li><b>チャンネル ID</b>: さっきコピーしたチャンネル ID</li>
+</ul>
+<p>Webhook 名は何でもいいですが、後で分かる名前にしてください。</p>
+<p>入力したら「<b>OK</b>」または「<b>保存</b>」をクリックします。</p>
+
+<h4>8. Webhook URL をコピーする</h4>
+<p>追加が成功すると、Webhook URL が表示されます。</p>
+<p><code>https://webhook.worksmobile.com/...</code> のような URL です。</p>
+<p>これをコピーすればゴールです。このURL にシステムから POST すると、そのトークルームに通知が飛びます。公式にも、Webhook リスト画面の「追加」から Webhook URL を追加し、追加後に URL が発行されると説明されています。</p>
+
+<p>詳しくは LINE WORKS 公式ドキュメントを参照してください。</p>
+<p>▶ <a href="https://developers.worksmobile.com/jp/docs/webhook" target="_blank" rel="noopener">https://developers.worksmobile.com/jp/docs/webhook</a></p>
+
+<p class="warn"><b>注意</b> Webhook URL はパスワードみたいなものです。他人に見せないでください。</p>
 
 <a class="back-to-top" href="#top">▲ 目次に戻る</a>
 

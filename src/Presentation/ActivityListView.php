@@ -147,6 +147,7 @@ final class ActivityListView
             'searchUrl' => $listUrl,
             'criteria'  => $criteria,
             'listState' => $listState,
+            'mobileVisibleCount' => 4,
         ]);
 
         // フィルタダイアログ

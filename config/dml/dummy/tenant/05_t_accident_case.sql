@@ -58,7 +58,7 @@ INSERT INTO t_accident_case (
   insurer_claim_no, assigned_staff_id, office_staff_id, remark,
   is_deleted, created_by, updated_by
 ) VALUES (
-  4003, NULL, '井上 健二（顧客未登録）', NULL, 'ACC-2026-0003', '2026-04-15', '2026-04-14',
+  4003, NULL, '井上 健二', NULL, 'ACC-2026-0003', '2026-04-15', '2026-04-14',
   '自動車', NULL, '対人事故', '他社契約者からの相談受付。怪我人あり。当社契約ではないが紹介対応。',
   '東京都新宿区西新宿1-2', 1, '保険会社連絡済み', 'high',
   'SJ-CL-202604-001', 1, 3, '顧客未登録。他社契約。紹介先として対応。',

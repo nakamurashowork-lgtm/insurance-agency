@@ -415,6 +415,7 @@ final class ListPageRenderer
      *   searchUrl: string,
      *   criteria: array<string, string>,
      *   listState: array<string, string>,
+     *   mobileVisibleCount?: int,
      * } $config
      */
     public static function quickFilterTabs(array $config): string
@@ -426,12 +427,20 @@ final class ListPageRenderer
         $searchUrl  = (string) ($config['searchUrl'] ?? '');
         $criteria   = is_array($config['criteria'] ?? null) ? $config['criteria'] : [];
         $listState  = is_array($config['listState'] ?? null) ? $config['listState'] : [];
+        // mobileVisibleCount は受け取るが折り畳みはしない（全件常時表示）
+        $mobileVisibleCount = max(0, (int) ($config['mobileVisibleCount'] ?? 0));
 
         if ($tabs === []) {
             return '';
         }
 
+        $isCollapsible = false;
+        $index = 0;
+
         $html = '<nav class="quick-filter-tabs" role="tablist" aria-label="クイックフィルタ">';
+        if ($isCollapsible) {
+            $html = str_replace('class="quick-filter-tabs"', 'class="quick-filter-tabs is-collapsible"', $html);
+        }
         foreach ($tabs as $key => $def) {
             $keyStr   = (string) $key;
             $label    = (string) ($def['label'] ?? $keyStr);
@@ -452,14 +461,20 @@ final class ListPageRenderer
 
             $count = (int) ($counts[$countKey] ?? 0);
 
-            $html .= '<a class="quick-filter-tab' . ($isActive ? ' is-active' : '')
+            $html .= '<a class="quick-filter-tab'
+                . ($isActive ? ' is-active' : '')
+                . ($isCollapsible && $index >= $mobileVisibleCount ? ' is-mobile-extra' : '')
                 . '" href="' . Layout::escape($tabUrl) . '"'
                 . ' role="tab" aria-selected="' . ($isActive ? 'true' : 'false') . '">'
                 . '<span class="quick-filter-tab-label">' . Layout::escape($label) . '</span>'
                 . '<span class="quick-filter-tab-count">' . $count . '</span>'
                 . '</a>';
+            $index++;
         }
         $html .= '</nav>';
+        if ($isCollapsible) {
+            $html .= '<button type="button" class="quick-filter-tabs-more" aria-expanded="false">フィルタをもっと見る</button>';
+        }
         return $html;
     }
 
@@ -562,10 +577,13 @@ final class ListPageRenderer
 
         return '<script>'
             // 共通ダイアログハンドラ
-            . '(function(){function bind(dlg){if(!dlg||typeof dlg.showModal!=="function")return;var id=dlg.id;'
+            // dlg.dataset.locked === "1" の間はクローズ操作（×・キャンセルボタン・ESC・背景クリック）を全てブロックする。
+            // CSV 取込実行中の誤操作防止に使用（CSV form 側で setLock("1") する）。
+            . '(function(){function isLocked(dlg){return dlg&&dlg.dataset&&dlg.dataset.locked==="1";}function bind(dlg){if(!dlg||typeof dlg.showModal!=="function")return;var id=dlg.id;'
             . 'document.querySelectorAll("[data-open-dialog=\""+id+"\"]").forEach(function(b){b.addEventListener("click",function(){if(!dlg.open)dlg.showModal();});});'
-            . 'dlg.querySelectorAll("[data-close-dialog=\""+id+"\"]").forEach(function(b){b.addEventListener("click",function(){if(dlg.open)dlg.close();});});'
-            . 'dlg.addEventListener("click",function(e){var r=dlg.getBoundingClientRect();var inside=r.left<=e.clientX&&e.clientX<=r.right&&r.top<=e.clientY&&e.clientY<=r.bottom;if(!inside&&dlg.open)dlg.close();});}'
+            . 'dlg.querySelectorAll("[data-close-dialog=\""+id+"\"]").forEach(function(b){b.addEventListener("click",function(){if(isLocked(dlg))return;if(dlg.open)dlg.close();});});'
+            . 'dlg.addEventListener("click",function(e){if(isLocked(dlg))return;var r=dlg.getBoundingClientRect();var inside=r.left<=e.clientX&&e.clientX<=r.right&&r.top<=e.clientY&&e.clientY<=r.bottom;if(!inside&&dlg.open)dlg.close();});'
+            . 'dlg.addEventListener("cancel",function(e){if(isLocked(dlg))e.preventDefault();});}'
             . $bindCalls
             . $autoOpenJs
             . '})();'
@@ -591,7 +609,16 @@ final class ListPageRenderer
             . 'var f=dt.files[0];var nm=(f.name||"").toLowerCase();if(!nm.endsWith(".csv")){alert("CSVファイルを選択してください");return;}'
             . 'input.files=dt.files;updateSelected();});'
             . 'updateSelected();'
+            // 取込開始 → 完了まで全画面オーバーレイで覆う。
+            // <dialog> 開状態のときは dialog 直下に append してブラウザの top-layer に乗せる必要がある
+            // （document.body 直下に append すると dialog の backdrop に隠れるため）。
+            . 'function showOverlay(){if(document.querySelector(".csv-overlay"))return;var ov=document.createElement("div");ov.className="csv-overlay";ov.setAttribute("role","status");ov.setAttribute("aria-live","polite");ov.setAttribute("aria-label","取込中");var sp=document.createElement("div");sp.className="csv-overlay-spinner";var tx=document.createElement("div");tx.className="csv-overlay-text";tx.textContent="取込中...";ov.appendChild(sp);ov.appendChild(tx);var dlg=form.closest("dialog");if(dlg&&dlg.open){dlg.appendChild(ov);}else{document.body.appendChild(ov);}}'
+            . 'function hideOverlay(){var ov=document.querySelector(".csv-overlay");if(ov)ov.remove();}'
+            . 'form.addEventListener("submit",function(){var dlg=form.closest("dialog");if(dlg)dlg.dataset.locked="1";if(submitBtn)submitBtn.disabled=true;showOverlay();});'
+            // BFCache / 再表示 / リロード復帰時に stale なオーバーレイ・ロックを除去
+            . 'window.addEventListener("pageshow",function(){hideOverlay();var dlg=form.closest("dialog");if(dlg&&dlg.dataset.locked==="1"){delete dlg.dataset.locked;}updateSelected();});'
             . '})();'
+            . '(function(){document.querySelectorAll(".quick-filter-tabs-more").forEach(function(btn){btn.addEventListener("click",function(){var nav=btn.previousElementSibling;if(!(nav instanceof HTMLElement))return;var expanded=nav.classList.toggle("is-expanded");btn.setAttribute("aria-expanded",expanded?"true":"false");btn.textContent=expanded?"表示を減らす":"フィルタをもっと見る";});});})();'
             . '</script>';
     }
 

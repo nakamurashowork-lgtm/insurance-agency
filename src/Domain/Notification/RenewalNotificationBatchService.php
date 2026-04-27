@@ -258,7 +258,9 @@ final class RenewalNotificationBatchService
                     }
                 }
 
-                if ($deliverableTargets === []) {
+                // route 無効時は通知を送信しない（targets 0 件でも 0件通知は出さない）。
+                // route 有効時は対象 0 件でも「本日の対象案件はありません。」通知を送る仕様。
+                if (!$routeEnabled) {
                     continue;
                 }
 
@@ -284,6 +286,8 @@ final class RenewalNotificationBatchService
                         }
                     }
                 } catch (Throwable $e) {
+                    // 0件通知（deliverableTargets===[]）の送信失敗時は delivery 行が無いため
+                    // run の error_message にだけ記録する。
                     foreach ($deliverableTargets as $target) {
                         $this->repository->insertDeliveryFailed(
                             $runId,
@@ -299,7 +303,11 @@ final class RenewalNotificationBatchService
             }
 
             $result = $this->resolveResult($processedCount, $successCount, $skipCount, $failCount);
-            $errorMessage = $failCount > 0 ? implode(' | ', array_slice($messages, 0, 3)) : null;
+            // failCount=0 でも 0件通知の送信失敗が messages に積まれていれば failed とする
+            if ($result === 'success' && !empty($messages)) {
+                $result = 'failed';
+            }
+            $errorMessage = !empty($messages) ? implode(' | ', array_slice($messages, 0, 3)) : null;
             $this->repository->finalizeRun(
                 $runId,
                 $result,

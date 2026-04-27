@@ -6,7 +6,7 @@ namespace App\Domain\Notification;
 use InvalidArgumentException;
 use RuntimeException;
 
-const LINEWORKS_MAX_DISPLAY_COUNT = PHP_INT_MAX;
+const LINEWORKS_MAX_DISPLAY_COUNT = 30;
 
 function build_lineworks_absolute_url(string $appPublicUrl, string $route): string
 {
@@ -41,7 +41,7 @@ function format_lineworks_short_date(string $date): string
         return $normalized;
     }
 
-    return $dateTime->format('Y/m/d');
+    return $dateTime->format('n/j');
 }
 
 /**
@@ -49,32 +49,34 @@ function format_lineworks_short_date(string $date): string
  */
 function build_lineworks_renewal_alert_body_text(string $phaseName, array $targets, int $maxDisplayCount = LINEWORKS_MAX_DISPLAY_COUNT): string
 {
+    if (!in_array($phaseName, ['early', 'direct'], true)) {
+        throw new InvalidArgumentException('unsupported renewal phase name: ' . $phaseName);
+    }
+
+    if (count($targets) === 0) {
+        return '本日の対象案件はありません。';
+    }
+
     $displayTargets = array_slice($targets, 0, $maxDisplayCount);
     $lines = [
-        '本日、確認が必要な満期案件があります。ご確認ください。',
+        '要確認の満期案件があります。',
         '',
         sprintf('対象件数：%d件', count($targets)),
         '',
-        '対象満期案件',
     ];
 
     foreach ($displayTargets as $target) {
-        $customerName = trim((string) ($target['customer_name'] ?? ''));
+        $customerName = trim(str_replace('（顧客未登録）', '', (string) ($target['customer_name'] ?? '')));
         $lines[] = sprintf(
-            '・%s %s様',
+            '%s %s様',
             format_lineworks_short_date((string) ($target['maturity_date'] ?? '')),
             $customerName
         );
-
     }
 
     $remaining = count($targets) - count($displayTargets);
     if ($remaining > 0) {
-        $lines[] = sprintf('ほか%d件', $remaining);
-    }
-
-    if (!in_array($phaseName, ['early', 'direct'], true)) {
-        throw new InvalidArgumentException('unsupported renewal phase name: ' . $phaseName);
+        $lines[] = sprintf('他%d件', $remaining);
     }
 
     return implode("\n", $lines);
@@ -85,19 +87,22 @@ function build_lineworks_renewal_alert_body_text(string $phaseName, array $targe
  */
 function build_lineworks_accident_reminder_body_text(array $targets, int $maxDisplayCount = LINEWORKS_MAX_DISPLAY_COUNT): string
 {
+    if (count($targets) === 0) {
+        return '本日の対象案件はありません。';
+    }
+
     $displayTargets = array_slice($targets, 0, $maxDisplayCount);
     $lines = [
-        '本日、状況確認が必要な事故案件があります。ご確認ください。',
+        '要確認の事故案件があります。',
         '',
         sprintf('対象件数：%d件', count($targets)),
         '',
-        '対象事故案件',
     ];
 
     foreach ($displayTargets as $target) {
-        $customerName = trim((string) ($target['customer_name'] ?? ''));
+        $customerName = trim(str_replace('（顧客未登録）', '', (string) ($target['customer_name'] ?? '')));
         $lines[] = sprintf(
-            '・%s %s様',
+            '%s %s様',
             format_lineworks_short_date((string) ($target['accident_date'] ?? '')),
             $customerName
         );
@@ -105,7 +110,7 @@ function build_lineworks_accident_reminder_body_text(array $targets, int $maxDis
 
     $remaining = count($targets) - count($displayTargets);
     if ($remaining > 0) {
-        $lines[] = sprintf('ほか%d件', $remaining);
+        $lines[] = sprintf('他%d件', $remaining);
     }
 
     return implode("\n", $lines);
